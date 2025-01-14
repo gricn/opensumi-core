@@ -3,6 +3,7 @@ export enum MenuId {
   AccountsContext = 'accounts/context',
   ActivityBarContext = 'activityBar/context',
   ActivityBarExtra = 'activityBar/extra',
+  ActivityBarTopExtra = 'activityBar/top/extra',
   CommandPalette = 'commandPalette',
   DebugBreakpointsContext = 'debug/breakpoints/context',
   DebugCallStackContext = 'debug/callstack/context',
@@ -12,9 +13,13 @@ export enum MenuId {
   DebugToolBar = 'debug/toolbar',
   EditorContext = 'editor/context',
   EditorTitle = 'editor/title',
+  EditorTitleRun = 'editor/title/run',
   EditorTitleContext = 'editor/title/context',
+  BreadcrumbsTitleContext = 'breadcrumbs/title/context',
   EmptyEditorGroupContext = 'empty/editor/group/context',
   ExplorerContext = 'explorer/context',
+  // top icon menubar
+  IconMenubarContext = 'iconMenubar/context',
   MenubarAppearanceMenu = 'menubar/appearance',
   MenubarAppMenu = 'menubar/app',
   MenubarDebugMenu = 'menubar/debug',
@@ -31,10 +36,13 @@ export enum MenuId {
   MenubarSwitchGroupMenu = 'menubar/switch/group',
   MenubarTerminalMenu = 'menubar/terminal',
   MenubarViewMenu = 'menubar/view',
+  MenubarCompactMenu = 'menubar/compact/mode',
+  DesignMenuBarTopExtra = 'design/menubar/top/extra',
   TerminalInstanceContext = 'terminal/instance/context',
   TerminalNewDropdownContext = 'terminal/newDropdown/context',
   TerminalTabContext = 'terminal/tab/context',
   TerminalPanelContext = 'terminal/panel/context',
+  TerminalDefaultTypeMenu = 'terminal/menu/context',
   OpenEditorsContext = 'open/editors/context',
   ProblemsPanelContext = 'problems/panel/context',
   SCMChangeTitle = 'scm/change/title',
@@ -52,7 +60,7 @@ export enum MenuId {
   ViewTitle = 'view/title',
   GlobalActivity = 'global/activity',
   ExtensionContext = 'extension/context', // 插件市场 item
-  SettingsIconMenu = 'settings/icon/menu', // 右下角 setting menu
+  SettingsIconMenu = 'settings/icon/menu', // 左下角 setting menu
   // The contributed comment thread context menu, rendered as buttons below the comment editor
   CommentsCommentThreadContext = 'comments/commentThread/context',
   // The contributed comment thread title menu
@@ -61,6 +69,8 @@ export enum MenuId {
   CommentsCommentTitle = 'comments/comment/title',
   // The contributed comment context menu, rendered as buttons below the comment editor
   CommentsCommentContext = 'comments/comment/context',
+  CommentReactionSwitcherMenu = 'comment/reaction/switcher/menu',
+  CommentReactionSwitcherSubmenu = 'comment/reaction/switcher/submenu',
   // ToolbarLocation
   KTToolbarLocationContext = 'kt/toolbar/context',
   // 插件市场未搜索到结果
@@ -68,6 +78,15 @@ export enum MenuId {
   // Testing glyph margin
   TestingGlyphMarginContext = 'testing/glyphMargin/context',
   TestPeekTitleContext = 'testing/outputPeek/title/context',
+  // OpenType
+  OpenTypeSubmenuContext = 'editor/openType/submenu',
+  // accordion
+  AccordionContext = 'accordion',
+  // setting.json
+  SettingJSONGlyphMarginContext = 'settingJson/glyphMargin/context',
+  SubSettingJSONGlyphMarginContext = 'sub/settingJson/glyphMargin/context',
+  // merge editor context
+  MergeEditorResultTitleContext = 'mergeEditor/result/title/context',
 }
 
 export function getTabbarCommonMenuId(location: string) {

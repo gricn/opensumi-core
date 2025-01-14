@@ -1,15 +1,15 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  ProblemMatcherContribution,
-  IProblemMatcherRegistry,
   IJSONSchema,
+  IProblemMatcherRegistry,
+  LifeCyclePhase,
+  ProblemMatcherContribution,
   localize,
   objects,
 } from '@opensumi/ide-core-common';
 
-import { VSCodeContributePoint } from '../../../common';
+import { Contributes, LifeCycle, VSCodeContributePoint } from '../../../common';
 
-import { Contributes } from './common';
 import { PatternSchemas } from './problemPatterns';
 
 const { deepClone } = objects;
@@ -241,13 +241,17 @@ export const problemMatchersSchema = {
 
 @Injectable()
 @Contributes('problemMatchers')
+@LifeCycle(LifeCyclePhase.Ready)
 export class ProblemMatchersContributionPoint extends VSCodeContributePoint<ProblemMatchersContributions> {
   @Autowired(IProblemMatcherRegistry)
   problemMatcher: IProblemMatcherRegistry;
 
   contribute() {
-    for (const matcher of this.json) {
-      this.addDispose(this.problemMatcher.register(matcher));
+    for (const contrib of this.contributesMap) {
+      const { contributes } = contrib;
+      for (const matcher of contributes) {
+        this.addDispose(this.problemMatcher.register(matcher));
+      }
     }
   }
 }

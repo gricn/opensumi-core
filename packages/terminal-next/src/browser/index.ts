@@ -1,40 +1,39 @@
-import { Provider, Injectable } from '@opensumi/di';
+import { Injectable, Provider } from '@opensumi/di';
 import { BrowserModule } from '@opensumi/ide-core-browser';
 
 import {
-  ITerminalController,
-  ITerminalService,
-  ITerminalRestore,
-  ITerminalTheme,
-  ITerminalServicePath,
-  ITerminalProcessPath,
-  ITerminalClientFactory,
   ITerminalApiService,
-  ITerminalSearchService,
-  ITerminalGroupViewService,
-  ITerminalErrorService,
-  ITerminalInternalService,
-  ITerminalRenderProvider,
-  ITerminalNetwork,
-  ITerminalHoverManagerService,
-  ITerminalProfileService,
   ITerminalClientFactory2,
+  ITerminalController,
+  ITerminalErrorService,
+  ITerminalGroupViewService,
+  ITerminalHoverManagerService,
+  ITerminalInternalService,
+  ITerminalNetwork,
+  ITerminalProcessPath,
   ITerminalProfileInternalService,
+  ITerminalProfileService,
+  ITerminalRenderProvider,
+  ITerminalRestore,
+  ITerminalSearchService,
+  ITerminalService,
+  ITerminalServicePath,
+  ITerminalTheme,
 } from '../common';
 import { EnvironmentVariableServiceToken } from '../common/environmentVariable';
 import { ITerminalPreference } from '../common/preference';
 
 import {
   TerminalCommandContribution,
-  TerminalMenuContribution,
+  TerminalKeybindingContribution,
   TerminalLifeCycleContribution,
-  TerminalRenderContribution,
-  TerminalKeybindinngContribution,
+  TerminalMenuContribution,
   TerminalNetworkContribution,
   TerminalPreferenceContribution,
+  TerminalRenderContribution,
 } from './contribution';
 import { TerminalApiService } from './terminal.api';
-import { createTerminalClientFactory, createTerminalClientFactory2 } from './terminal.client';
+import { createTerminalClientFactory2 } from './terminal.client';
 import { TerminalController } from './terminal.controller';
 import { TerminalEnvironmentService } from './terminal.environment.service';
 import { TerminalErrorService } from './terminal.error';
@@ -58,7 +57,7 @@ export class TerminalNextModule extends BrowserModule {
     TerminalRenderContribution,
     TerminalCommandContribution,
     TerminalMenuContribution,
-    TerminalKeybindinngContribution,
+    TerminalKeybindingContribution,
     TerminalNetworkContribution,
     TerminalPreferenceContribution,
     {
@@ -108,10 +107,6 @@ export class TerminalNextModule extends BrowserModule {
     {
       token: ITerminalRenderProvider,
       useClass: TerminalRenderProvider,
-    },
-    {
-      token: ITerminalClientFactory,
-      useFactory: createTerminalClientFactory,
     },
     {
       token: ITerminalClientFactory2,

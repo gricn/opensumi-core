@@ -1,21 +1,24 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import merge from 'lodash/merge';
+
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  DisposableCollection,
-  ILogger,
-  Emitter,
-  URI,
   AppConfig,
-  Uri,
-  FileType,
+  DisposableCollection,
+  Emitter,
   FileChangeEvent,
+  FileType,
+  ILogger,
+  URI,
+  Uri,
 } from '@opensumi/ide-core-browser';
 import { Event, FileSystemProviderCapabilities, Schemes } from '@opensumi/ide-core-common';
-import { FileSetContentOptions } from '@opensumi/ide-file-service/lib/common';
-import { IFileServiceClient } from '@opensumi/ide-file-service/lib/common';
+import { FileSetContentOptions, IFileServiceClient } from '@opensumi/ide-file-service/lib/common';
 
 import { IUserStorageService } from '../../common';
 
 export const DEFAULT_USER_STORAGE_FOLDER = '.sumi';
+
+const DEFAULT_WATCH_OPTIONS = { recursive: false, excludes: ['**/logs/**'] };
 
 @Injectable()
 export class UserStorageServiceImpl implements IUserStorageService {
@@ -103,13 +106,11 @@ export class UserStorageServiceImpl implements IUserStorageService {
     throw new Error('Method not implemented.');
   }
 
-  async watch(
-    uri: Uri,
-    options: { recursive: boolean; excludes: string[] } = { recursive: false, excludes: ['**/logs/**'] },
-  ) {
+  async watch(uri: Uri, options: { recursive: boolean; excludes: string[] }) {
     await this.whenReady;
     const target = UserStorageServiceImpl.toFilesystemURI(this.userStorageFolder, URI.from(uri));
-    const watcher = await this.fileServiceClient.watchFileChanges(target.parent, options.excludes);
+    const watchOptions = merge(DEFAULT_WATCH_OPTIONS, options);
+    const watcher = await this.fileServiceClient.watchFileChanges(target.parent, watchOptions.excludes);
     this.toDispose.push(watcher);
     this.toDispose.push(
       watcher.onFilesChanged((changes) => {

@@ -4,23 +4,22 @@ import { Autowired, Injectable } from '@opensumi/di';
 import {
   CommandService,
   EDITOR_COMMANDS,
-  Event,
   Emitter,
-  getSymbolIcon,
+  Event,
   IPosition,
   IRange,
+  LRUMap,
   MaybeNull,
   OnEvent,
   URI,
   WithEventBus,
-  LRUMap,
+  getSymbolIcon,
   path,
-  Schemes,
 } from '@opensumi/ide-core-browser';
 import { LabelService } from '@opensumi/ide-core-browser/lib/services';
 import { FileStat } from '@opensumi/ide-file-service/lib/common';
 import { IFileServiceClient } from '@opensumi/ide-file-service/lib/common/file-service-client';
-import { IWorkspaceService } from '@opensumi/ide-workspace';
+import { IWorkspaceService } from '@opensumi/ide-workspace/lib/common/workspace.interface';
 
 import { IEditor } from '../../common';
 import { EditorSelectionChangeEvent, IBreadCrumbPart, IBreadCrumbProvider } from '../types';
@@ -53,7 +52,7 @@ export class DefaultBreadCrumbProvider extends WithEventBus implements IBreadCru
   private cachedBreadCrumb = new LRUMap<string, IBreadCrumbPart>(200, 100);
 
   handlesUri(uri: URI): boolean {
-    return uri.scheme === Schemes.file || uri.scheme === Schemes.userStorage;
+    return this.fileServiceClient.handlesScheme(uri.scheme);
   }
 
   provideBreadCrumbForUri(uri: URI, editor: MaybeNull<IEditor>): IBreadCrumbPart[] {
@@ -98,6 +97,7 @@ export class DefaultBreadCrumbProvider extends WithEventBus implements IBreadCru
 
     const res: IBreadCrumbPart = {
       name: uri.path.base,
+      uri,
       icon: this.labelService.getIcon(uri, { isDirectory }),
       getSiblings: async () => {
         const parentDir = URI.from({
@@ -173,6 +173,7 @@ export class DefaultBreadCrumbProvider extends WithEventBus implements IBreadCru
     const res: IBreadCrumbPart = {
       name: symbol.name,
       icon: getSymbolIcon(symbol.kind),
+      isSymbol: true,
       onClick: () => {
         editor.setSelection({
           startColumn: symbol.range.startColumn,

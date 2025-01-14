@@ -1,54 +1,52 @@
-import { observable } from 'mobx';
-
-import { Injectable, Autowired, Injector, INJECTOR_TOKEN } from '@opensumi/di';
-import { CorePreferences, QuickPickService, IEventBus, TerminalClientAttachEvent } from '@opensumi/ide-core-browser';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
+import { IEventBus, QuickPickService, TerminalClientAttachEvent, localize } from '@opensumi/ide-core-browser';
+import { PreferenceService } from '@opensumi/ide-core-browser/lib/preferences/types';
 import {
-  Disposable,
   Deferred,
+  Disposable,
   Emitter,
   Event,
-  debounce,
-  ILogger,
-  IDisposable,
-  URI,
   IApplicationService,
+  IDisposable,
+  ILogger,
   IReporter,
-  REPORT_NAME,
-  Uri,
   OperatingSystem,
+  REPORT_NAME,
+  URI,
+  debounce,
 } from '@opensumi/ide-core-common';
 import { WorkbenchEditorService } from '@opensumi/ide-editor/lib/common';
 import { IFileServiceClient } from '@opensumi/ide-file-service/lib/common';
+import { transaction } from '@opensumi/ide-monaco/lib/common/observable';
 import { IMessageService } from '@opensumi/ide-overlay';
 import { IVariableResolverService } from '@opensumi/ide-variable/lib/common';
 import { IWorkspaceService } from '@opensumi/ide-workspace/lib/common';
 
 import {
-  TerminalOptions,
-  ITerminalController,
+  ICreateTerminalOptions,
+  IShellLaunchConfig,
   ITerminalClient,
-  ITerminalTheme,
-  ITerminalGroupViewService,
-  ITerminalInternalService,
-  IWidget,
+  ITerminalConnection,
+  ITerminalController,
   ITerminalDataEvent,
   ITerminalExitEvent,
-  ITerminalTitleChangeEvent,
-  ITerminalConnection,
   ITerminalExternalLinkProvider,
-  ICreateTerminalOptions,
-  ITerminalProfile,
-  IShellLaunchConfig,
+  ITerminalGroupViewService,
+  ITerminalInternalService,
   ITerminalProfileInternalService,
-  convertTerminalOptionsToLaunchConfig,
+  ITerminalTheme,
+  ITerminalTitleChangeEvent,
+  IWidget,
+  TerminalOptions,
 } from '../common';
 import { EnvironmentVariableServiceToken, IEnvironmentVariableService } from '../common/environmentVariable';
-import { SupportedOptions, ITerminalPreference } from '../common/preference';
+import { CodeTerminalSettingId, ITerminalPreference, SupportedOptions } from '../common/preference';
 
 import { TerminalLinkManager } from './links/link-manager';
 import { AttachAddon, DEFAULT_COL, DEFAULT_ROW } from './terminal.addon';
 import { TerminalProcessExtHostProxy } from './terminal.ext.host.proxy';
 import { TerminalKeyBoardInputService } from './terminal.input';
+import { DEFAULT_LOCAL_ECHO_EXCLUDE, TypeAheadAddon } from './terminal.typeAhead.addon';
 import { XTerm } from './xterm';
 
 @Injectable()
@@ -98,17 +96,17 @@ export class TerminalClient extends Disposable implements ITerminalClient {
   @Autowired(ITerminalTheme)
   protected readonly theme: ITerminalTheme;
 
-  @Autowired(CorePreferences)
-  protected readonly corePreferences: CorePreferences;
-
   @Autowired(ITerminalController)
   protected readonly controller: ITerminalController;
+
+  @Autowired(PreferenceService)
+  private readonly preferenceService: PreferenceService;
 
   @Autowired(ITerminalGroupViewService)
   protected readonly view: ITerminalGroupViewService;
 
   @Autowired(ITerminalPreference)
-  protected readonly preference: ITerminalPreference;
+  protected readonly terminalPreference: ITerminalPreference;
 
   @Autowired(TerminalKeyBoardInputService)
   protected readonly keyboard: TerminalKeyBoardInputService;
@@ -129,10 +127,10 @@ export class TerminalClient extends Disposable implements ITerminalClient {
   protected readonly applicationService: IApplicationService;
 
   @Autowired(ITerminalProfileInternalService)
-  terminalProfileInternalService: ITerminalProfileInternalService;
+  public readonly terminalProfileInternalService: ITerminalProfileInternalService;
 
   @Autowired(IVariableResolverService)
-  variableResolver: IVariableResolverService;
+  public readonly variableResolver: IVariableResolverService;
 
   @Autowired(IEventBus)
   private readonly eventBus: IEventBus;
@@ -161,13 +159,16 @@ export class TerminalClient extends Disposable implements ITerminalClient {
 
   constructor() {
     super();
+    this.init();
+  }
 
+  private async init() {
     this.xterm = this.injector.get(XTerm, [
       {
         xtermOptions: {
           theme: this.theme.terminalTheme,
           ...this.internalService.getOptions(),
-          ...this.preference.toJSON(),
+          ...this.terminalPreference.toJSON(),
         },
       },
     ]);
@@ -178,11 +179,11 @@ export class TerminalClient extends Disposable implements ITerminalClient {
       this.internalService.onError((error) => {
         this.messageService.error(error.message);
         if (error.launchConfig?.executable) {
-          this.updateOptions({
+          this.updateTerminalName({
             name: 'error: ' + error.launchConfig.executable,
           });
         } else {
-          this.updateOptions({
+          this.updateTerminalName({
             name: 'error',
           });
         }
@@ -191,7 +192,9 @@ export class TerminalClient extends Disposable implements ITerminalClient {
     this.addDispose(
       this.internalService.onProcessChange((e) => {
         if (e.sessionId === this.id) {
-          this.widget.processName = e.processName;
+          transaction((tx) => {
+            this.widget.processName.set(e.processName, tx);
+          });
         }
       }),
     );
@@ -216,7 +219,7 @@ export class TerminalClient extends Disposable implements ITerminalClient {
     );
 
     this.addDispose(
-      this.preference.onChange(async ({ name, value }) => {
+      this.terminalPreference.onChange(async ({ name, value }) => {
         if (!widget.show && !this._show) {
           this._show = new Deferred();
         }
@@ -266,73 +269,39 @@ export class TerminalClient extends Disposable implements ITerminalClient {
     );
   }
 
-  convertTerminalOptionsToLaunchConfig() {
-    const options = this._terminalOptions;
-    const shellLaunchConfig: IShellLaunchConfig = convertTerminalOptionsToLaunchConfig(options);
-
-    if (options.isExtensionTerminal) {
-      shellLaunchConfig.customPtyImplementation = (sessionId, cols, rows) =>
-        new TerminalProcessExtHostProxy(sessionId, cols, rows, this.controller);
-    }
-    return shellLaunchConfig;
-  }
-
-  /**
-   * @deprecated Please use `init2` instead.
-   */
-  async init(widget: IWidget, options: TerminalOptions = {}) {
-    this._terminalOptions = options;
-    await this.init2(widget, {
-      config: this.convertTerminalOptionsToLaunchConfig(),
-    });
-  }
-
-  convertProfileToLaunchConfig(
-    shellLaunchConfigOrProfile: IShellLaunchConfig | ITerminalProfile | undefined,
-    cwd?: Uri | string,
-  ): IShellLaunchConfig {
-    if (!shellLaunchConfigOrProfile) {
-      return {};
-    }
-    // Profile was provided
-    if (shellLaunchConfigOrProfile && 'profileName' in shellLaunchConfigOrProfile) {
-      const profile = shellLaunchConfigOrProfile;
-      if (!profile.path) {
-        return shellLaunchConfigOrProfile;
-      }
-      return {
-        executable: profile.path,
-        args: profile.args,
-        env: profile.env,
-        // icon: profile.icon,
-        color: profile.color,
-        name: profile.overrideName ? profile.profileName : undefined,
-        cwd,
-      };
-    }
-
-    if (cwd) {
-      shellLaunchConfigOrProfile.cwd = cwd;
-    }
-    return shellLaunchConfigOrProfile;
-  }
-
   async init2(widget: IWidget, options?: ICreateTerminalOptions) {
     this._uid = options?.id || widget.id;
     this.setupWidget(widget);
 
     if (!options || Object.keys(options).length === 0) {
-      // 应该是必定能 resolve 到 profile 的
+      // Must be able to resolve a profile
       const defaultProfile = await this.terminalProfileInternalService.resolveDefaultProfile();
       options = {
+        id: this._uid,
         config: defaultProfile,
       };
     }
+    if (!options.cwd) {
+      // resolve cwd from the group first widget
+      const group = widget.group;
+      const widgets = group.widgets.get();
+      if (widgets.length > 1 && widgets[0]) {
+        const cwd = await this.internalService.getCwd(widgets[0].id);
+        if (cwd) {
+          options.cwd = cwd;
+        }
+      }
+    }
+
     await this._checkWorkspace();
 
     const cwd = options.cwd ?? (options?.config as IShellLaunchConfig)?.cwd ?? this._workspacePath;
-    const launchConfig = this.convertProfileToLaunchConfig(options.config, cwd);
+    const launchConfig = this.controller.convertProfileToLaunchConfig(options.config, cwd);
     this._launchConfig = launchConfig;
+    if (this._launchConfig.__fromTerminalOptions) {
+      this._terminalOptions = this._launchConfig.__fromTerminalOptions;
+    }
+
     this.name = launchConfig.name || '';
 
     if (launchConfig.initialText) {
@@ -361,8 +330,20 @@ export class TerminalClient extends Disposable implements ITerminalClient {
     this._attachAfterRender();
   }
 
-  @observable
-  name = '';
+  protected _onNameChangeEmitter = new Emitter<string>();
+  onNameChange = this._onNameChangeEmitter.event;
+
+  protected _name = '';
+  get name() {
+    return this._name;
+  }
+
+  set name(name: string) {
+    if (this._name !== name) {
+      this._name = name;
+      this._onNameChangeEmitter.fire(name);
+    }
+  }
 
   get term() {
     return this.xterm.raw;
@@ -372,8 +353,8 @@ export class TerminalClient extends Disposable implements ITerminalClient {
     return this.internalService.getProcessId(this.id);
   }
 
-  get options() {
-    return this._terminalOptions;
+  get launchConfig(): IShellLaunchConfig {
+    return this._launchConfig;
   }
 
   get createOptions() {
@@ -418,6 +399,29 @@ export class TerminalClient extends Disposable implements ITerminalClient {
 
   private _prepareAddons() {
     this._attachAddon = new AttachAddon();
+    const onBeforeProcessEvent = this._attachAddon.onBeforeProcessData;
+
+    if (this.preferenceService.get(CodeTerminalSettingId.LocalEchoEnabled)) {
+      // 某些奇怪的情况下，用户会把这个字段设置成字符串，导致终端crash
+      const exclueProgramConfig = this.preferenceService.get(
+        CodeTerminalSettingId.LocalEchoExcludePrograms,
+        DEFAULT_LOCAL_ECHO_EXCLUDE,
+      );
+      const typeAheadAddon = new TypeAheadAddon(
+        onBeforeProcessEvent,
+        {
+          localEchoExcludePrograms: Array.isArray(exclueProgramConfig)
+            ? exclueProgramConfig
+            : DEFAULT_LOCAL_ECHO_EXCLUDE,
+          localEchoLatencyThreshold: this.preferenceService.get(CodeTerminalSettingId.LocalEchoLatencyThreshold, 30),
+          localEchoStyle: this.preferenceService.get(CodeTerminalSettingId.LocalEchoStyle, 'dim'),
+        },
+        this.preferenceService.onPreferenceChanged,
+      );
+      this.addDispose(typeAheadAddon);
+      this.xterm.raw.loadAddon(typeAheadAddon);
+    }
+
     this.addDispose([
       this._attachAddon,
       this._attachAddon.onData((data) => {
@@ -470,10 +474,10 @@ export class TerminalClient extends Disposable implements ITerminalClient {
   }
 
   _prepare() {
-    this._attached?.reject();
-    this._firstStdout?.reject();
-    this._error?.reject();
-    this._show?.reject();
+    this._attached?.reject('TerminalClient is Re-initialization');
+    this._firstStdout?.reject('TerminalClient is Re-initialization');
+    this._error?.reject('TerminalClient is Re-initialization');
+    this._show?.reject('TerminalClient is Re-initialization');
     this._ready = false;
     this._hasOutput = false;
     this._attached = new Deferred<void>();
@@ -507,10 +511,13 @@ export class TerminalClient extends Disposable implements ITerminalClient {
   }
 
   private async _pickWorkspace() {
-    if (this.workspace.isMultiRootWorkspaceOpened) {
+    if (this.workspace.isMultiRootWorkspaceOpened && !this._widget.recovery) {
       // 工作区模式下每次新建终端都需要用户手动进行一次路径选择
       const roots = this.workspace.tryGetRoots();
-      const choose = await this.quickPick.show(roots.map((file) => new URI(file.uri).codeUri.fsPath));
+      const choose = await this.quickPick.show(
+        roots.map((file) => new URI(file.uri).codeUri.fsPath),
+        { placeholder: localize('terminal.selectCWDForNewTerminal') },
+      );
       return choose;
     } else if (this.workspace.workspace) {
       return new URI(this.workspace.workspace?.uri).codeUri.fsPath;
@@ -539,6 +546,45 @@ export class TerminalClient extends Disposable implements ITerminalClient {
     }
   }
 
+  // 检查 Terminal Client 对应的后端 Shell 进程是否存活
+  public async checkHealthy() {
+    return await this.internalService.check([this.id]);
+  }
+
+  // 输出终端已经被 Kill 的提醒
+  public displayUnHealthyMessage() {
+    const xtermRaw = this.term;
+
+    // 基于 Xterm Theme 的颜色来输出用户提示
+    const currentTheme = xtermRaw.options.theme;
+
+    // 根据当前主题设置输出样式的函数
+    const printStyledMessage = (message: string, foreground: string, background: string): void => {
+      const padding = '    '; // 四个空格作为左右边距
+      const paddedMessage = message
+        .split('\n')
+        .map((line) => padding + line + padding)
+        .join('\n');
+      const styledMessage = `\x1b[48;2;${hexToRgb(foreground)};38;2;${hexToRgb(background)}m${paddedMessage}\x1b[0m`;
+      xtermRaw.writeln('\n');
+      xtermRaw.writeln('\n' + styledMessage + '\n'); // 在输出前后添加空行
+    };
+
+    // 辅助函数：将十六进制颜色转换为 RGB 字符串
+    const hexToRgb = (hex: string): string => {
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      return `${r};${g};${b}`;
+    };
+
+    printStyledMessage(
+      localize('terminal.process.unHealthy'),
+      currentTheme?.foreground || '#d7dbdeff',
+      currentTheme?.background || '#151b21ff',
+    );
+  }
+
   reset() {
     this._prepare();
     this._attachAfterRender();
@@ -546,11 +592,11 @@ export class TerminalClient extends Disposable implements ITerminalClient {
 
   private async attach() {
     if (!this._ready) {
-      return this._doAttach2();
+      return this._doAttach();
     }
   }
 
-  private async _doAttach2() {
+  private async _doAttach() {
     const sessionId = this.id;
     const { rows = DEFAULT_ROW, cols = DEFAULT_COL } = this.xterm.raw;
 
@@ -560,6 +606,11 @@ export class TerminalClient extends Disposable implements ITerminalClient {
       ...this._launchConfig,
       cwd: this._launchConfig?.cwd || this._workspacePath,
     };
+
+    if (finalLaunchConfig.isExtensionOwnedTerminal) {
+      finalLaunchConfig.customPtyImplementation = (sessionId, cols, rows) =>
+        new TerminalProcessExtHostProxy(sessionId, cols, rows, this.controller);
+    }
 
     this._launchConfig = finalLaunchConfig;
     this.logger.log('attach terminal by launchConfig: ', this._launchConfig);
@@ -581,7 +632,7 @@ export class TerminalClient extends Disposable implements ITerminalClient {
 
   resolveConnection(connection: ITerminalConnection | undefined) {
     if (!connection) {
-      this._attached.resolve();
+      this._attached.reject('no connection while attaching terminal client');
       return;
     }
 
@@ -593,7 +644,7 @@ export class TerminalClient extends Disposable implements ITerminalClient {
     }
     this._ready = true;
     this._attached.resolve();
-    this._widget.name = this.name;
+    this._widget.rename(this.name);
 
     this.eventBus.fire(new TerminalClientAttachEvent({ clientId: this.id }));
 
@@ -602,15 +653,15 @@ export class TerminalClient extends Disposable implements ITerminalClient {
     });
   }
 
-  private _setOption(name: string, value: string | number | boolean) {
+  private _setOption(name: string, value: string | number | boolean | Array<string | number | boolean>) {
     /**
      * 有可能 preference 引起的修改并不是对应终端的 option，
      * 这种情况可能会报错
      */
     try {
-      this.xterm.raw.setOption(name, value);
+      this.xterm.raw.options[name] = value;
       this._layout();
-    } catch {
+    } catch (_e) {
       /** nothing */
     }
   }
@@ -623,13 +674,13 @@ export class TerminalClient extends Disposable implements ITerminalClient {
 
   private _layout() {
     // 如果 xterm 视图还没初始化，则先尝试初始化
-    this._renderOnDemand();
-    if (this.xterm.raw.element) {
-      try {
+    try {
+      this._renderOnDemand();
+      if (this.xterm.raw.element) {
         this.xterm.fit();
-      } catch {
-        // noop
       }
+    } catch (e) {
+      // noop
     }
   }
 
@@ -700,13 +751,16 @@ export class TerminalClient extends Disposable implements ITerminalClient {
   updateTheme() {
     return this.xterm.updateTheme(this.theme.terminalTheme);
   }
+  updateLaunchConfig(launchConfig: IShellLaunchConfig) {
+    this._launchConfig = {
+      ...this._launchConfig,
+      ...launchConfig,
+    };
+  }
 
-  updateOptions(options: TerminalOptions) {
-    this._terminalOptions = { ...this._terminalOptions, ...options };
-    this._launchConfig = this.convertTerminalOptionsToLaunchConfig();
-
-    if (!this.name && !this._widget.name) {
-      this._widget.name = options.name || this.name;
+  updateTerminalName(options: { name: string }) {
+    if (!this.name && !this._widget.name.get()) {
+      this._widget.rename(options.name || this.name);
     }
   }
 
@@ -736,25 +790,6 @@ export class TerminalClientFactory {
   /**
    * 创建 terminal 实例最终都会调用该方法
    */
-  static async createClient(injector: Injector, widget: IWidget, options?: TerminalOptions) {
-    // 每一个 widget.id 对应一个 TerminalClient
-    // 但是 TerminalClient 内部又依赖了一堆的其他要注入的，所以这里新创建一个 child injector
-    // 让 TerminalClient 依赖的所有类都重新初始化一遍
-
-    const child = injector.createChild([
-      {
-        token: TerminalClient,
-        useClass: TerminalClient,
-      },
-    ]);
-
-    const client = child.get(TerminalClient);
-    await client.init(widget, options);
-    return client;
-  }
-  /**
-   * 创建 terminal 实例最终都会调用该方法
-   */
   static async createClient2(injector: Injector, widget: IWidget, options?: ICreateTerminalOptions) {
     const child = injector.createChild([
       {
@@ -768,9 +803,6 @@ export class TerminalClientFactory {
     return client;
   }
 }
-
-export const createTerminalClientFactory = (injector: Injector) => (widget: IWidget, options?: TerminalOptions) =>
-  TerminalClientFactory.createClient(injector, widget, options);
 
 export const createTerminalClientFactory2 =
   (injector: Injector) => (widget: IWidget, options?: ICreateTerminalOptions) =>

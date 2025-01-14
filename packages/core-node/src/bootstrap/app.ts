@@ -1,4 +1,3 @@
-import cp from 'child_process';
 import http from 'http';
 import https from 'https';
 import net from 'net';
@@ -7,154 +6,36 @@ import path from 'path';
 
 import Koa from 'koa';
 
-import { Injector, ConstructorOf } from '@opensumi/di';
+import { Injector } from '@opensumi/di';
+import { injectConnectionProviders } from '@opensumi/ide-connection/lib/common/server-handler';
 import { WebSocketHandler } from '@opensumi/ide-connection/lib/node';
-import { MaybePromise, ContributionProvider, createContributionProvider, isWindows } from '@opensumi/ide-core-common';
 import {
-  LogLevel,
-  ILogServiceManager,
+  ContributionProvider,
   ILogService,
-  SupportLogNamespace,
+  ILogServiceManager,
   StoragePaths,
+  SupportLogNamespace,
+  createContributionProvider,
+  getDebugLogger,
+  getModuleDependencies,
+  injectGDataStores,
+  isWindows,
 } from '@opensumi/ide-core-common';
 import { DEFAULT_OPENVSX_REGISTRY } from '@opensumi/ide-core-common/lib/const';
+import { suppressNodeJSEpipeError } from '@opensumi/ide-core-common/lib/node';
 
-import { createServerConnection2, createNetServerConnection, RPCServiceCenter } from '../connection';
+import { RPCServiceCenter, createNetServerConnection, createServerConnection2 } from '../connection';
 import { NodeModule } from '../node-module';
+import { AppConfig, IServerApp, IServerAppOpts, ModuleConstructor, ServerAppContribution } from '../types';
 
 import { injectInnerProviders } from './inner-providers';
 
-export type ModuleConstructor = ConstructorOf<NodeModule>;
-export type ContributionConstructor = ConstructorOf<ServerAppContribution>;
-
-export const AppConfig = Symbol('AppConfig');
-
-export interface MarketplaceRequest {
-  path?: string;
-  headers?: {
-    [header: string]: string | string[] | undefined;
-  };
-}
-
-export interface MarketplaceConfig {
-  endpoint: string;
-  // 插件市场下载到本地的位置，默认 ~/.sumi/extensions
-  extensionDir: string;
-  // 是否显示内置插件，默认隐藏
-  showBuiltinExtensions: boolean;
-  // 插件市场中申请到的客户端的 accountId
-  accountId: string;
-  // 插件市场中申请到的客户端的 masterKey
-  masterKey: string;
-  // 插件市场参数转换函数
-  transformRequest?: (request: MarketplaceRequest) => MarketplaceRequest;
-  // 在热门插件、搜索插件时忽略的插件 id
-  ignoreId: string[];
-}
-
-interface Config {
-  /**
-   * 初始化的 DI 实例，一般可在外部进行 DI 初始化之后传入，便于提前进行一些依赖的初始化
-   */
-  injector: Injector;
-  /**
-   * 设置落盘日志级别，默认为 Info 级别的log落盘
-   */
-  logLevel?: LogLevel;
-  /**
-   * 设置日志的目录，默认：~/.sumi/logs
-   */
-  logDir?: string;
-  /**
-   * @deprecated 可通过在传入的 `injector` 初始化 `ILogService` 进行实现替换
-   * 外部设置的 ILogService，替换默认的 logService
-   */
-  LogServiceClass?: ConstructorOf<ILogService>;
-  /**
-   * 启用插件进程的最大个数
-   */
-  maxExtProcessCount?: number;
-  /**
-   * 插件日志自定义实现路径
-   */
-  extLogServiceClassPath?: string;
-  /**
-   * 插件进程关闭时间
-   */
-  processCloseExitThreshold?: number;
-  /**
-   * 终端 pty 进程退出时间
-   */
-  terminalPtyCloseThreshold?: number;
-  /**
-   * 访问静态资源允许的 origin
-   */
-  staticAllowOrigin?: string;
-  /**
-   * 访问静态资源允许的路径，用于配置静态资源的白名单规则
-   */
-  staticAllowPath?: string[];
-  /**
-   * 文件服务禁止访问的路径，使用 glob 匹配
-   */
-  blockPatterns?: string[];
-  /**
-   * 获取插件进程句柄方法
-   * @deprecated 自测 1.30.0 后，不在提供给 IDE 后端发送插件进程的方法
-   */
-  onDidCreateExtensionHostProcess?: (cp: cp.ChildProcess) => void;
-  /**
-   * 插件 Node 进程入口文件
-   */
-  extHost?: string;
-  /**
-   * 插件进程存放用于通信的 sock 地址
-   * 默认为 /tmp
-   */
-  extHostIPCSockPath?: string;
-  /**
-   * 插件进程 fork 配置
-   */
-  extHostForkOptions?: Partial<cp.ForkOptions>;
-  /**
-   * 配置关闭 keytar 校验能力，默认开启
-   */
-  disableKeytar?: boolean;
-}
-
-export interface AppConfig extends Partial<Config> {
-  marketplace: MarketplaceConfig;
-}
-
-export interface IServerAppOpts extends Partial<Config> {
-  modules?: ModuleConstructor[];
-  contributions?: ContributionConstructor[];
-  modulesInstances?: NodeModule[];
-  webSocketHandler?: WebSocketHandler[];
-  marketplace?: Partial<MarketplaceConfig>;
-  use?(middleware: Koa.Middleware<Koa.ParameterizedContext<any, any>>): void;
-}
-
-export const ServerAppContribution = Symbol('ServerAppContribution');
-
-export interface ServerAppContribution {
-  initialize?(app: IServerApp): MaybePromise<void>;
-  onStart?(app: IServerApp): MaybePromise<void>;
-  onStop?(app: IServerApp): MaybePromise<void>;
-  onWillUseElectronMain?(): void;
-}
-
-export interface IServerApp {
-  use(middleware: Koa.Middleware<Koa.ParameterizedContext<any, any>>): void;
-  start(server: http.Server | https.Server): Promise<void>;
-}
-
 export class ServerApp implements IServerApp {
-  private injector: Injector;
+  private _injector: Injector;
 
-  private config: AppConfig;
+  private config: IServerAppOpts;
 
-  private logger: ILogService;
+  private logger: Pick<ILogService, 'log' | 'error'> = getDebugLogger();
 
   private webSocketHandler: WebSocketHandler[];
 
@@ -172,16 +53,14 @@ export class ServerApp implements IServerApp {
    * 4. 设置默认的实例
    * @param opts
    */
-  constructor(opts: IServerAppOpts) {
-    this.injector = opts.injector || new Injector();
+  constructor(private opts: IServerAppOpts) {
+    this._injector = opts.injector || new Injector();
     this.webSocketHandler = opts.webSocketHandler || [];
     // 使用外部传入的中间件
-    this.use = opts.use || ((middleware) => null);
+    this.use = opts.use || (() => null);
     this.config = {
+      ...opts,
       injector: this.injector,
-      logDir: opts.logDir,
-      logLevel: opts.logLevel,
-      LogServiceClass: opts.LogServiceClass,
       marketplace: Object.assign(
         {
           endpoint: DEFAULT_OPENVSX_REGISTRY,
@@ -192,36 +71,29 @@ export class ServerApp implements IServerApp {
             StoragePaths.MARKETPLACE_DIR,
           ),
           showBuiltinExtensions: false,
-          accountId: '',
-          masterKey: '',
           ignoreId: [],
         },
         opts.marketplace,
       ),
-      processCloseExitThreshold: opts.processCloseExitThreshold,
-      terminalPtyCloseThreshold: opts.terminalPtyCloseThreshold,
-      staticAllowOrigin: opts.staticAllowOrigin,
-      staticAllowPath: opts.staticAllowPath,
-      extLogServiceClassPath: opts.extLogServiceClassPath,
-      maxExtProcessCount: opts.maxExtProcessCount,
-      onDidCreateExtensionHostProcess: opts.onDidCreateExtensionHostProcess,
       extHost: process.env.EXTENSION_HOST_ENTRY || opts.extHost,
-      blockPatterns: opts.blockPatterns,
-      extHostIPCSockPath: opts.extHostIPCSockPath,
-      extHostForkOptions: opts.extHostForkOptions,
+      rpcMessageTimeout: opts.rpcMessageTimeout || -1,
     };
     this.bindProcessHandler();
-    this.initBaseProvider(opts);
+    this.initBaseProvider();
     this.createNodeModules(opts.modules, opts.modulesInstances);
     this.logger = this.injector.get(ILogServiceManager).getLogger(SupportLogNamespace.App);
     this.contributionsProvider = this.injector.get(ServerAppContribution);
+  }
+
+  get injector() {
+    return this._injector;
   }
 
   /**
    * 将被依赖但未被加入modules的模块加入到待加载模块最后
    */
   public resolveModuleDeps(moduleConstructor: ModuleConstructor, modules: any[]) {
-    const dependencies = Reflect.getMetadata('dependencies', moduleConstructor) as [];
+    const dependencies = getModuleDependencies(moduleConstructor);
     if (dependencies) {
       dependencies.forEach((dep) => {
         if (modules.indexOf(dep) === -1) {
@@ -235,7 +107,7 @@ export class ServerApp implements IServerApp {
     return this.contributionsProvider.getContributions();
   }
 
-  private initBaseProvider(opts: IServerAppOpts) {
+  private initBaseProvider() {
     // 创建 contributionsProvider
     createContributionProvider(this.injector, ServerAppContribution);
 
@@ -244,6 +116,7 @@ export class ServerApp implements IServerApp {
       useValue: this.config,
     });
     injectInnerProviders(this.injector);
+    injectConnectionProviders(this.injector);
   }
 
   private async initializeContribution() {
@@ -276,22 +149,16 @@ export class ServerApp implements IServerApp {
   ) {
     await this.initializeContribution();
 
-    let serviceCenter;
-
     if (serviceHandler) {
-      serviceCenter = new RPCServiceCenter();
-      serviceHandler(serviceCenter);
+      serviceHandler(new RPCServiceCenter());
     } else {
       if (server instanceof http.Server || server instanceof https.Server) {
         // 创建 websocket 通道
-        serviceCenter = createServerConnection2(server, this.injector, this.modulesInstances, this.webSocketHandler);
+        createServerConnection2(server, this.injector, this.modulesInstances, this.webSocketHandler, this.opts);
       } else if (server instanceof net.Server) {
-        serviceCenter = createNetServerConnection(server, this.injector, this.modulesInstances);
+        createNetServerConnection(server, this.injector, this.modulesInstances);
       }
     }
-
-    // TODO: 每次链接来的时候绑定一次，或者是服务获取的时候多实例化出来
-    // bindModuleBackService(this.injector, this.modulesInstances, serviceCenter);
 
     await this.startContribution();
   }
@@ -312,6 +179,10 @@ export class ServerApp implements IServerApp {
    * 绑定 process 退出逻辑
    */
   private bindProcessHandler() {
+    suppressNodeJSEpipeError(process, (msg) => {
+      this.logger.error(msg);
+    });
+
     process.on('uncaughtException', (error) => {
       if (error) {
         this.logger.error('Uncaught Exception: ', error.toString());
@@ -346,6 +217,8 @@ export class ServerApp implements IServerApp {
    * @param modules
    */
   private createNodeModules(Constructors: ModuleConstructor[] = [], modules: NodeModule[] = []) {
+    injectGDataStores(this.injector);
+
     const allModules = [...modules];
     Constructors.forEach((c) => {
       this.resolveModuleDeps(c, Constructors);

@@ -1,6 +1,6 @@
 import { Autowired, Injectable } from '@opensumi/di';
-import { getPreferenceLanguageId } from '@opensumi/ide-core-browser';
-import { ILogger, WithEventBus } from '@opensumi/ide-core-common';
+import { ILogger, URI, WithEventBus, getLanguageId } from '@opensumi/ide-core-common';
+import { IFileServiceClient } from '@opensumi/ide-file-service';
 
 import {
   AbstractExtensionManagementService,
@@ -12,7 +12,9 @@ import {
 } from '../common';
 
 import { Extension } from './extension';
+import { SumiContributionsService, SumiContributionsServiceToken } from './sumi/contributes';
 import { AbstractExtInstanceManagementService, ExtensionDidEnabledEvent, ExtensionDidUninstalledEvent } from './types';
+import { VSCodeContributesService, VSCodeContributesServiceToken } from './vscode/contributes';
 
 /**
  * 为插件市场面板提供数据/交互
@@ -24,6 +26,15 @@ export class ExtensionManagementService extends WithEventBus implements Abstract
 
   @Autowired(ExtensionNodeServiceServerPath)
   private readonly extensionNodeClient: IExtensionNodeClientService;
+
+  @Autowired(VSCodeContributesServiceToken)
+  private readonly contributesService: VSCodeContributesService;
+
+  @Autowired(SumiContributionsServiceToken)
+  private readonly sumiContributesService: SumiContributionsService;
+
+  @Autowired(IFileServiceClient)
+  private fileService: IFileServiceClient;
 
   @Autowired(ILogger)
   private readonly logger: ILogger;
@@ -37,7 +48,7 @@ export class ExtensionManagementService extends WithEventBus implements Abstract
   ): Promise<IExtensionProps | undefined> {
     const extensionMetaData = await this.extensionNodeClient.getExtension(
       extensionPath,
-      getPreferenceLanguageId(),
+      getLanguageId(),
       extraMetaData,
     );
     if (extensionMetaData) {
@@ -156,8 +167,26 @@ export class ExtensionManagementService extends WithEventBus implements Abstract
   private async enableExtension(extension: Extension): Promise<void> {
     this.extInstanceManagementService.addExtensionInstance(extension);
     extension.enable();
-    await extension.contributeIfEnabled();
+    await extension.initialize();
     this.eventBus.fire(new ExtensionDidEnabledEvent(extension.toJSON()));
+
+    this.sumiContributesService.register(extension.id, extension.packageJSON.sumiContributes || {});
+    this.contributesService.register(extension.id, extension.contributes);
+    this.sumiContributesService.initialize();
+    this.contributesService.initialize();
+  }
+
+  /**
+   * 删除插件文件
+   */
+  private async removeExtension(extensionPath: string) {
+    try {
+      await this.fileService.delete(URI.file(extensionPath).toString());
+      return true;
+    } catch (err) {
+      this.logger.error(err);
+      return false;
+    }
   }
 
   /**
@@ -169,7 +198,7 @@ export class ExtensionManagementService extends WithEventBus implements Abstract
       oldExtension.dispose();
       this.extInstanceManagementService.deleteExtensionInstanceByPath(extensionPath);
     }
-
+    await this.removeExtension(extensionPath);
     this.eventBus.fire(new ExtensionDidUninstalledEvent());
   }
 }

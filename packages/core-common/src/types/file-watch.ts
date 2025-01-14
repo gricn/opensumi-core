@@ -1,12 +1,12 @@
 import { URI } from '@opensumi/ide-utils';
-export interface FileSystemWatcherServer {
+export interface IFileSystemWatcherServer {
   /**
    * 根据给定参数启动文件监听
    * 返回对应watcher的id
    * @param {string} uri
    * @param {WatchOptions} [options]
    * @returns {Promise<number>}
-   * @memberof FileSystemWatcherServer
+   * @memberof IFileSystemWatcherServer
    */
   watchFileChanges(uri: string, options?: WatchOptions): Promise<number>;
 
@@ -17,6 +17,12 @@ export interface FileSystemWatcherServer {
    * @memberof FileSystemWatcherServer
    */
   unwatchFileChanges(watcher: number): Promise<void>;
+
+  /**
+   * Update watcher file excludes
+   * @param excludes
+   */
+  updateWatcherFileExcludes?: (excludes: string[]) => Promise<void>;
 }
 
 export interface FileSystemWatcherClient {
@@ -38,6 +44,7 @@ export interface FileChange {
   uri: string;
   type: FileChangeType;
 }
+
 export namespace FileChange {
   export function isUpdated(change: FileChange, uri: URI): boolean {
     return change.type === FileChangeType.UPDATED && uri.toString() === change.uri;

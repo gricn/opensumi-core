@@ -1,52 +1,63 @@
-import { OnigScanner, loadWASM, OnigString } from 'vscode-oniguruma';
+import { OnigScanner, OnigString, loadWASM } from 'vscode-oniguruma';
 import {
-  Registry,
-  IRawGrammar,
-  IOnigLib,
-  parseRawGrammar,
   IEmbeddedLanguagesMap,
-  ITokenTypeMap,
   INITIAL,
+  IOnigLib,
+  IRawGrammar,
+  ITokenTypeMap,
+  Registry,
+  parseRawGrammar,
 } from 'vscode-textmate';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  WithEventBus,
-  parseWithComments,
-  PreferenceService,
-  ILogger,
   ExtensionActivateEvent,
+  ILogger,
+  PreferenceService,
+  WithEventBus,
   getDebugLogger,
-  MonacoService,
-  electronEnv,
-  AppConfig,
+  parseWithComments,
 } from '@opensumi/ide-core-browser';
-import { URI, Disposable } from '@opensumi/ide-core-common';
+import { EKnownResources, RendererRuntime } from '@opensumi/ide-core-browser/lib/application/runtime/types';
+import { Disposable, URI, isObject } from '@opensumi/ide-core-common';
 import { IFileServiceClient } from '@opensumi/ide-file-service/lib/common';
 import {
-  CommentRule,
   GrammarsContribution,
   ITextmateTokenizerService,
-  LanguagesContribution,
   ScopeMap,
 } from '@opensumi/ide-monaco/lib/browser/contrib/tokenizer';
 import { monaco } from '@opensumi/ide-monaco/lib/browser/monaco-api';
 import {
+  EnterAction,
   FoldingRules,
   IAutoClosingPair,
   IAutoClosingPairConditional,
   IndentationRule,
   LanguageConfiguration,
+  OnEnterRule,
 } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
+import {
+  CommentRule,
+  IIndentationRule,
+  IRegExp,
+  IndentAction,
+  IndentationRuleDto,
+  LanguageConfigurationDto,
+  LanguagesContribution,
+} from '@opensumi/ide-monaco/lib/common';
 import { IThemeData } from '@opensumi/ide-theme';
 import { ThemeChangedEvent } from '@opensumi/ide-theme/lib/common/event';
-import { ModesRegistry } from '@opensumi/monaco-editor-core/esm/vs/editor/common/modes/modesRegistry';
-import type { ILanguageExtensionPoint } from '@opensumi/monaco-editor-core/esm/vs/editor/common/services/modeService';
+import { asStringArray } from '@opensumi/ide-utils/lib/arrays';
+import {
+  ILanguageExtensionPoint,
+  ILanguageService,
+} from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages/language';
+import { StandaloneServices } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneServices';
 
 import { IEditorDocumentModelService } from '../../doc-model/types';
 
 import { TextmateRegistry } from './textmate-registry';
-import { createTextmateTokenizer, TokenizerOption } from './textmate-tokenizer';
+import { TextMateTokenizer, TokenizerOption } from './textmate-tokenizer';
 
 let wasmLoaded = false;
 
@@ -97,14 +108,11 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
   @Autowired(ILogger)
   private logger: ILogger;
 
-  @Autowired()
-  private readonly monacoService: MonacoService;
-
   @Autowired(IEditorDocumentModelService)
   editorDocumentModelService: IEditorDocumentModelService;
 
-  @Autowired(AppConfig)
-  private readonly appConfig: AppConfig;
+  @Autowired(RendererRuntime)
+  private rendererRuntime: RendererRuntime;
 
   public grammarRegistry: Registry;
 
@@ -114,9 +122,14 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
 
   private activatedLanguage = new Set<string>();
 
+  private languageConfigLocation: Map<string, URI> = new Map();
+  private languageConfiguration: Map<string, LanguagesContribution> = new Map();
+
   public initialized = false;
 
   private dynamicLanguages: ILanguageExtensionPoint[] = [];
+
+  private editorTheme?: IThemeData;
 
   /**
    * start contribution 做初始化
@@ -131,7 +144,10 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
   listenThemeChange() {
     this.eventBus.on(ThemeChangedEvent, (e) => {
       const themeData = e.payload.theme.themeData;
-      this.setTheme(themeData);
+      if (themeData !== this.editorTheme) {
+        this.editorTheme = themeData;
+        this.setTheme(themeData);
+      }
     });
   }
 
@@ -139,73 +155,74 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
     return this.registerLanguages([language], extPath);
   }
 
-  async registerLanguages(languages: LanguagesContribution[], extPath: URI) {
-    this.dynamicLanguages.push(
-      ...languages.map((language) => ({
-        id: language.id,
-        aliases: language.aliases,
-        extensions: language.extensions,
-        filenamePatterns: language.filenamePatterns,
-        filenames: language.filenames,
-        firstLine: language.firstLine,
-        mimetypes: language.mimetypes,
-      })),
+  private reviveLanguageConfiguration(id: string, configuration: LanguageConfigurationDto): LanguageConfiguration {
+    return {
+      wordPattern: this.createRegex(configuration.wordPattern),
+      autoClosingPairs: this.extractValidAutoClosingPairs(id, configuration),
+      brackets: this.extractValidBrackets(id, configuration),
+      comments: this.extractValidCommentRule(id, configuration),
+      folding: this.convertFolding(configuration.folding),
+      surroundingPairs: this.extractValidSurroundingPairs(id, configuration),
+      indentationRules: this.convertIndentationRules(configuration.indentationRules),
+      autoCloseBefore: configuration.autoCloseBefore,
+      colorizedBracketPairs: this.extractValidColorizedBracketPairs(id, configuration),
+      onEnterRules: this.extractValidOnEnterRules(id, configuration),
+    };
+  }
+
+  get monacoLanguageService() {
+    return StandaloneServices.get(ILanguageService);
+  }
+
+  private isEmbeddedLanguageOnly(language: LanguagesContribution): boolean {
+    return (
+      !language.filenames &&
+      !language.extensions &&
+      !language.filenamePatterns &&
+      !language.firstLine &&
+      !language.mimetypes &&
+      (!language.aliases || language.aliases.length === 0)
     );
+  }
 
-    ModesRegistry.setDynamicLanguages(this.dynamicLanguages);
+  async registerLanguages(languages: LanguagesContribution[], baseUri: URI) {
+    const newLanguages = languages.map((language) => ({
+      id: language.id,
+      aliases: language.aliases,
+      extensions: language.extensions,
+      filenamePatterns: language.filenamePatterns,
+      filenames: language.filenames,
+      firstLine: language.firstLine,
+      mimetypes: language.mimetypes,
+    }));
 
-    const languageIds: string[] = [];
+    this.dynamicLanguages.push(...newLanguages.filter((lang) => !this.isEmbeddedLanguageOnly(lang)));
 
-    await Promise.all(
-      languages.map(async (language) => {
-        this.addDispose(
-          monaco.languages.onLanguage(language.id, () => {
-            this.activateLanguage(language.id);
-          }),
-        );
+    /**
+     * ModesRegistry.registerLanguage 性能很差
+     */
+    this.monacoLanguageService['_registry']['_registerLanguages'](newLanguages);
+    languages.forEach(async (language) => {
+      this.languageConfigLocation.set(language.id, baseUri);
+      this.addDispose(
+        monaco.languages.onLanguage(language.id, async () => {
+          await this.loadLanguageConfiguration(language, baseUri);
+          this.activateLanguage(language.id);
+        }),
+      );
 
-        let configuration: LanguageConfiguration | undefined;
-        if (typeof language.resolvedConfiguration === 'object') {
-          configuration = await language.resolvedConfiguration;
-        } else if (language.configuration) {
-          // remove `./` prefix
-          const langPath = language.configuration.replace(/^\.\//, '');
-          // http 的不作支持
-          const configurationPath = extPath.resolve(langPath);
-          const ret = await this.fileServiceClient.resolveContent(configurationPath.toString());
-          const content = ret.content;
-          if (content) {
-            const jsonContent = this.safeParseJSON<LanguageConfiguration>(content);
-            if (jsonContent) {
-              configuration = jsonContent;
-            }
-          }
-        }
-
-        if (configuration) {
-          // FIXME: type for wordPattern/indentationRules
-          monaco.languages.setLanguageConfiguration(language.id, {
-            wordPattern: this.createRegex(configuration.wordPattern),
-            autoClosingPairs: this.extractValidAutoClosingPairs(language.id, configuration),
-            brackets: this.extractValidBrackets(language.id, configuration),
-            comments: this.extractValidCommentRule(language.id, configuration),
-            folding: this.convertFolding(configuration.folding),
-            surroundingPairs: this.extractValidSurroundingPairs(language.id, configuration),
-            indentationRules: this.convertIndentationRules(configuration.indentationRules as any),
-          });
-        }
-
-        languageIds.push(language.id);
-      }),
-    );
+      this.languageConfiguration.set(language.id, language);
+    });
 
     if (this.initialized) {
       const uris = this.editorDocumentModelService.getAllModels().map((m) => m.uri);
       for (const uri of uris) {
         const model = this.editorDocumentModelService.getModelReference(URI.parse(uri.codeUri.toString()));
         if (model && model.instance) {
-          const langId = model.instance.getMonacoModel().getModeId();
-          if (languageIds.includes(langId)) {
+          const langId = model.instance.getMonacoModel().getLanguageId();
+          if (this.languageConfiguration.has(langId)) {
+            const location = this.languageConfigLocation.get(langId)!;
+            await this.loadLanguageConfiguration(this.languageConfiguration.get(langId)!, location);
             this.activateLanguage(langId);
           }
         }
@@ -280,18 +297,44 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
       toDispose.addDispose(
         Disposable.create(this.textmateRegistry.mapLanguageIdToTextmateGrammar(grammar.language, grammar.scopeName)),
       );
-
       toDispose.addDispose(
         Disposable.create(
           this.textmateRegistry.registerGrammarConfiguration(grammar.language, () => ({
             embeddedLanguages: this.convertEmbeddedLanguages(grammar.embeddedLanguages),
             tokenTypes: this.convertTokenTypes(grammar.tokenTypes),
+            balancedBracketSelectors: asStringArray(grammar.balancedBracketScopes, ['*']),
+            unbalancedBracketSelectors: asStringArray(grammar.unbalancedBracketScopes, []),
           })),
         ),
       );
     }
 
     this.registeredGrammarDisposableCollection.set(grammar.scopeName, toDispose);
+  }
+
+  private async loadLanguageConfiguration(language: LanguagesContribution, baseUri: URI) {
+    let configuration: LanguageConfiguration | undefined;
+    if (typeof language.resolvedConfiguration === 'object') {
+      const config = await language.resolvedConfiguration;
+      configuration = this.reviveLanguageConfiguration(language.id, config);
+    } else if (language.configuration) {
+      // remove `./` prefix
+      const langPath = language.configuration.replace(/^\.\//, '');
+      // http 的不作支持
+      const configurationPath = baseUri.resolve(langPath);
+      const ret = await this.fileServiceClient.resolveContent(configurationPath.toString());
+      const content = ret.content;
+      if (content) {
+        const jsonContent = this.safeParseJSON<LanguageConfigurationDto>(content);
+        if (jsonContent) {
+          configuration = this.reviveLanguageConfiguration(language.id, jsonContent);
+        }
+      }
+    }
+
+    if (configuration) {
+      monaco.languages.setLanguageConfiguration(language.id, configuration);
+    }
   }
 
   async activateLanguage(languageId: string) {
@@ -314,7 +357,7 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
       return;
     }
     const tokenizerOption: TokenizerOption = {
-      lineLimit: this.preferenceService.get('editor.maxTokenizationLineLength') || 10000,
+      lineLimit: this.preferenceService.getValid('editor.maxTokenizationLineLength', 20000),
     };
     const configuration = this.textmateRegistry.getGrammarConfiguration(languageId)();
     const initialLanguage = getEncodedLanguageId(languageId);
@@ -326,9 +369,24 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
         configuration,
       );
       const options = configuration.tokenizerOption ? configuration.tokenizerOption : tokenizerOption;
+      const containsEmbeddedLanguages =
+        configuration.embeddedLanguages && Object.keys(configuration.embeddedLanguages).length > 0;
+
       // 要保证grammar把所有的languageID关联的语法都注册好了
       if (grammar) {
-        monaco.languages.setTokensProvider(languageId, createTextmateTokenizer(grammar, options));
+        const tokenizer = new TextMateTokenizer(grammar, options, containsEmbeddedLanguages);
+        this.addDispose(
+          tokenizer.onDidEncounterLanguage(async (language) => {
+            // https://github.com/microsoft/vscode/blob/301f450d9260d6e1c900e7e93b85aae5151bf11c/src/vs/editor/common/services/languagesRegistry.ts#L140
+            const languageId = this.monacoLanguageService['_registry']['languageIdCodec']['decodeLanguageId'](language);
+            const location = this.languageConfigLocation.get(languageId);
+            if (location && this.languageConfiguration.has(languageId)) {
+              await this.loadLanguageConfiguration(this.languageConfiguration.get(languageId)!, location);
+              this.activateLanguage(languageId);
+            }
+          }),
+        );
+        monaco.languages.setTokensProvider(languageId, tokenizer);
       }
     } catch (error) {
       this.logger.warn('No grammar for this language id', languageId, error);
@@ -350,9 +408,25 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
   }
 
   // 字符串转正则
-  private createRegex(value: string | RegExp | undefined): RegExp | undefined {
+  private createRegex(value?: IRegExp): RegExp | undefined {
     if (typeof value === 'string') {
       return new RegExp(value, '');
+    }
+
+    if (isObject(value)) {
+      if (typeof value.pattern !== 'string') {
+        return undefined;
+      }
+
+      if (typeof value.flags !== 'undefined' && typeof value.flags !== 'string') {
+        return undefined;
+      }
+
+      try {
+        return new RegExp(value.pattern, value.flags);
+      } catch (err) {
+        return undefined;
+      }
     }
     return undefined;
   }
@@ -363,13 +437,13 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
       json = parseWithComments(content);
       return json;
     } catch (error) {
-      this.logger.error('语言配置文件解析出错！', content);
+      this.logger.error(`Language configuration file parsing error, ${error.stack}`);
       return;
     }
   }
 
   // 将foldingRule里的字符串转为正则
-  private convertFolding(folding?: FoldingRules): FoldingRules | undefined {
+  private convertFolding(folding?: IndentationRuleDto): FoldingRules | undefined {
     if (!folding) {
       return undefined;
     }
@@ -379,8 +453,8 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
 
     if (folding.markers) {
       result.markers = {
-        end: this.createRegex(folding.markers.end)!,
-        start: this.createRegex(folding.markers.start)!,
+        end: folding.markers.end!,
+        start: folding.markers.start!,
       };
     }
 
@@ -388,7 +462,7 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
   }
 
   // 字符串定义转正则
-  private convertIndentationRules(rules?: IndentationRule): IndentationRule | undefined {
+  private convertIndentationRules(rules?: IIndentationRule): IndentationRule | undefined {
     if (!rules) {
       return undefined;
     }
@@ -417,10 +491,6 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
       const scope = scopes[i];
       const langId = languages[scope];
       result[scope] = getEncodedLanguageId(langId);
-      // TODO 后置到 tokenize 使用到对应的 scope 时激活（vscode逻辑），现在先激活一个 language 时激活所有 embed language
-      if (!this.activatedLanguage.has(langId)) {
-        this.activateLanguage(langId);
-      }
     }
     return result;
   }
@@ -452,7 +522,7 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
 
   private extractValidSurroundingPairs(
     languageId: string,
-    configuration: LanguageConfiguration,
+    configuration: LanguageConfigurationDto,
   ): IAutoClosingPair[] | undefined {
     if (!configuration) {
       return;
@@ -504,7 +574,121 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
     return result;
   }
 
-  private extractValidBrackets(languageId: string, configuration: LanguageConfiguration): CharacterPair[] | undefined {
+  private extractValidColorizedBracketPairs(
+    languageId: string,
+    configuration: LanguageConfigurationDto,
+  ): CharacterPair[] | undefined {
+    const source = configuration.colorizedBracketPairs;
+    if (typeof source === 'undefined') {
+      return undefined;
+    }
+    if (!Array.isArray(source)) {
+      this.logger.warn(`[${languageId}]: language configuration: expected \`colorizedBracketPairs\` to be an array.`);
+      return undefined;
+    }
+
+    const result: CharacterPair[] = [];
+    for (let i = 0, len = source.length; i < len; i++) {
+      const pair = source[i];
+      if (!isCharacterPair(pair)) {
+        this.logger.warn(
+          `[${languageId}]: language configuration: expected \`colorizedBracketPairs[${i}]\` to be an array of two strings.`,
+        );
+        continue;
+      }
+      result.push([pair[0], pair[1]]);
+    }
+    return result;
+  }
+
+  private extractValidOnEnterRules(
+    languageId: string,
+    configuration: LanguageConfigurationDto,
+  ): OnEnterRule[] | undefined {
+    const source = configuration.onEnterRules;
+    if (typeof source === 'undefined') {
+      return undefined;
+    }
+    if (!Array.isArray(source)) {
+      this.logger.warn(`[${languageId}]: language configuration: expected \`onEnterRules\` to be an array.`);
+      return undefined;
+    }
+
+    let result: OnEnterRule[] | undefined;
+    for (let i = 0, len = source.length; i < len; i++) {
+      const onEnterRule = source[i];
+      if (!isObject(onEnterRule)) {
+        this.logger.warn(`[${languageId}]: language configuration: expected \`onEnterRules[${i}]\` to be an object.`);
+        continue;
+      }
+      if (!isObject(onEnterRule.action)) {
+        this.logger.warn(
+          `[${languageId}]: language configuration: expected \`onEnterRules[${i}].action\` to be an object.`,
+        );
+        continue;
+      }
+      let indentAction: IndentAction;
+      if (onEnterRule.action.indent === 'none') {
+        indentAction = IndentAction.None;
+      } else if (onEnterRule.action.indent === 'indent') {
+        indentAction = IndentAction.Indent;
+      } else if (onEnterRule.action.indent === 'indentOutdent') {
+        indentAction = IndentAction.IndentOutdent;
+      } else if (onEnterRule.action.indent === 'outdent') {
+        indentAction = IndentAction.Outdent;
+      } else {
+        this.logger.warn(
+          `[${languageId}]: language configuration: expected \`onEnterRules[${i}].action.indent\` to be 'none', 'indent', 'indentOutdent' or 'outdent'.`,
+        );
+        continue;
+      }
+      const action: EnterAction = { indentAction };
+      if (onEnterRule.action.appendText) {
+        if (typeof onEnterRule.action.appendText === 'string') {
+          action.appendText = onEnterRule.action.appendText;
+        } else {
+          this.logger.warn(
+            `[${languageId}]: language configuration: expected \`onEnterRules[${i}].action.appendText\` to be undefined or a string.`,
+          );
+        }
+      }
+      if (onEnterRule.action.removeText) {
+        if (typeof onEnterRule.action.removeText === 'number') {
+          action.removeText = onEnterRule.action.removeText;
+        } else {
+          this.logger.warn(
+            `[${languageId}]: language configuration: expected \`onEnterRules[${i}].action.removeText\` to be undefined or a number.`,
+          );
+        }
+      }
+      const beforeText = this.createRegex(onEnterRule.beforeText);
+      if (!beforeText) {
+        continue;
+      }
+      const resultingOnEnterRule: OnEnterRule = { beforeText, action };
+      if (onEnterRule.afterText) {
+        const afterText = this.createRegex(onEnterRule.afterText);
+        if (afterText) {
+          resultingOnEnterRule.afterText = afterText;
+        }
+      }
+      if (onEnterRule.previousLineText) {
+        const previousLineText = this.createRegex(onEnterRule.previousLineText);
+        if (previousLineText) {
+          resultingOnEnterRule.previousLineText = previousLineText;
+        }
+      }
+      result = result || [];
+      result.push(resultingOnEnterRule);
+    }
+
+    return result;
+  }
+
+  private extractValidBrackets(
+    languageId: string,
+    configuration: LanguageConfigurationDto,
+  ): CharacterPair[] | undefined {
     const source = configuration.brackets;
     if (typeof source === 'undefined') {
       return undefined;
@@ -532,7 +716,7 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
 
   private extractValidAutoClosingPairs(
     languageId: string,
-    configuration: LanguageConfiguration,
+    configuration: LanguageConfigurationDto,
   ): IAutoClosingPairConditional[] | undefined {
     const source = configuration.autoClosingPairs;
     if (typeof source === 'undefined') {
@@ -589,7 +773,10 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
     return result;
   }
 
-  private extractValidCommentRule(languageId: string, configuration: LanguageConfiguration): CommentRule | undefined {
+  private extractValidCommentRule(
+    languageId: string,
+    configuration: LanguageConfigurationDto,
+  ): CommentRule | undefined {
     const source = configuration.comments;
     if (typeof source === 'undefined') {
       return undefined;
@@ -659,8 +846,12 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
     this.activateLanguages();
   }
 
+  getLanguages(): ILanguageExtensionPoint[] {
+    return [...monaco.languages.getLanguages(), ...this.dynamicLanguages];
+  }
+
   private activateLanguages() {
-    for (const { id: languageId } of monaco.languages.getLanguages()) {
+    for (const { id: languageId } of this.getLanguages()) {
       if (this.editorDocumentModelService.hasLanguage(languageId)) {
         this.activateLanguage(languageId);
       }
@@ -673,17 +864,7 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
       return new OnigasmLib();
     }
 
-    let wasmUri: string;
-    if (this.appConfig.isElectronRenderer && electronEnv.onigWasmPath) {
-      wasmUri = URI.file(electronEnv.onigWasmPath).codeUri.toString();
-    } else if (this.appConfig.isElectronRenderer && electronEnv.onigWasmUri) {
-      wasmUri = electronEnv.onigWasmUri;
-    } else {
-      wasmUri =
-        this.appConfig.onigWasmUri ||
-        this.appConfig.onigWasmPath ||
-        'https://g.alicdn.com/kaitian/vscode-oniguruma-wasm/1.5.1/onig.wasm';
-    }
+    const wasmUri: string = await this.rendererRuntime.provideResourceUri(EKnownResources.OnigWasm);
 
     const response = await fetch(wasmUri);
     const bytes = await response.arrayBuffer();
@@ -728,5 +909,20 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
       );
     }
     ruleStack = lineTokens.ruleStack;
+  }
+
+  dispose() {
+    super.dispose();
+    if (this.monacoLanguageService['_requestedRichLanguages']) {
+      this.monacoLanguageService['_requestedRichLanguages'].clear();
+    } else {
+      this.logger.warn('monaco language service not found _requestedRichLanguages');
+    }
+
+    if (this.monacoLanguageService['_requestedBasicLanguages']) {
+      this.monacoLanguageService['_requestedBasicLanguages'].clear();
+    } else {
+      this.logger.warn('monaco language service not found _requestedBasicLanguages');
+    }
   }
 }

@@ -1,44 +1,36 @@
-import { marked } from 'marked';
-import type vscode from 'vscode';
-import { SymbolInformation, Range as R, Position as P, SymbolKind as S } from 'vscode-languageserver-types';
+import { Position as P, Range as R, SymbolKind as S, SymbolInformation } from 'vscode-languageserver-types';
 
+import { IChatFollowup, IChatReplyFollowup, IChatResponseCommandFollowup } from '@opensumi/ide-ai-native/lib/common';
+import { createMarkedRenderer, toMarkdownHtml } from '@opensumi/ide-components/lib/utils';
 import {
+  IMarkdownString,
+  IMarkerData,
+  IRelatedInformation,
+  IRelativePattern,
+  ISelection,
+  IThemeColor,
+  ProgressLocation as MainProgressLocation,
+  MarkerSeverity,
+  MarkerTag,
   URI,
   Uri,
   UriComponents,
-  ISelection,
-  IMarkerData,
-  IRelatedInformation,
-  MarkerTag,
-  MarkerSeverity,
-  ProgressLocation as MainProgressLocation,
-  path,
-  objects,
-  IThemeColor,
-  isDefined,
   arrays,
-  IMarkdownString,
-  IRelativePattern,
+  isDefined,
+  isNumber,
+  objects,
+  once,
+  path,
+  randomString,
 } from '@opensumi/ide-core-common';
+import { ChatMessageRole as ChatMessageRoleEnum, IChatMessage } from '@opensumi/ide-core-common/lib/types/ai-native';
 import * as debugModel from '@opensumi/ide-debug';
 import { IEvaluatableExpression } from '@opensumi/ide-debug/lib/common/evaluatable-expression';
-import {
-  IDecorationRenderOptions,
-  IThemeDecorationRenderOptions,
-  IContentDecorationRenderOptions,
-  TrackedRangeStickiness,
-  EditorGroupColumn,
-  LanguageSelector,
-  LanguageFilter,
-} from '@opensumi/ide-editor/lib/common';
+import { TrackedRangeStickiness } from '@opensumi/ide-editor/lib/common/editor';
+import { CellKind } from '@opensumi/ide-editor/lib/common/notebook';
 import { FileStat, FileType } from '@opensumi/ide-file-service';
-import { EndOfLineSequence, CodeActionTriggerType } from '@opensumi/ide-monaco/lib/common/types';
 import { TestId } from '@opensumi/ide-testing/lib/common';
 import {
-  CoverageDetails,
-  DetailType,
-  ICoveredCount,
-  IFileCoverage,
   ISerializedTestResults,
   ITestErrorMessage,
   ITestItem,
@@ -48,18 +40,39 @@ import {
   SerializedTestResultItem,
   TestMessageType,
 } from '@opensumi/ide-testing/lib/common/testCollection';
-import { RenderLineNumbersType } from '@opensumi/monaco-editor-core/esm/vs/editor/common/config/editorOptions';
-import * as modes from '@opensumi/monaco-editor-core/esm/vs/editor/common/modes';
+
 
 import { CommandsConverter } from '../../hosted/api/vscode/ext.host.command';
 
+import { IDataTransferItem, VSDataTransfer } from './data-transfer';
 import { ExtensionDocumentDataManager } from './doc';
 import { ViewColumn as ViewColumnEnums } from './enums';
 import * as types from './ext-types';
 import { IInlineValueContextDto } from './languages';
 import * as model from './model.api';
-import { isMarkdownString, parseHrefAndDimensions } from './models';
-import { getPrivateApiFor, TestItemImpl } from './testing/testApi';
+import {
+  CodeActionTriggerType,
+  Command,
+  EndOfLineSequence,
+  RenderLineNumbersType,
+  isMarkdownString,
+  parseHrefAndDimensions,
+} from './models';
+import { TestItemImpl, getPrivateApiFor } from './testing/testApi';
+import { DataTransferDTO } from './treeview';
+
+import type {
+  EditorGroupColumn,
+  ICellRange,
+  IContentDecorationRenderOptions,
+  IDecorationRenderOptions,
+  IThemeDecorationRenderOptions,
+  LanguageFilter,
+  LanguageSelector,
+  NotebookCellInternalMetadata,
+} from '@opensumi/ide-editor/lib/common';
+import type * as languages from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
+import type vscode from 'vscode';
 
 const { parse } = path;
 const { cloneAndChange } = objects;
@@ -130,16 +143,7 @@ export namespace Range {
 export function fromRange(range: undefined): undefined;
 export function fromRange(range: vscode.Range): model.Range;
 export function fromRange(range: vscode.Range | undefined): model.Range | undefined {
-  if (!range) {
-    return undefined;
-  }
-  const { start, end } = range;
-  return {
-    startLineNumber: start.line + 1,
-    startColumn: start.character + 1,
-    endLineNumber: end.line + 1,
-    endColumn: end.character + 1,
-  };
+  return Range.from(range);
 }
 
 /**
@@ -147,8 +151,7 @@ export function fromRange(range: vscode.Range | undefined): model.Range | undefi
  * @param range
  */
 export function toRange(range: model.Range): types.Range {
-  const { startLineNumber, startColumn, endLineNumber, endColumn } = range;
-  return new types.Range(startLineNumber - 1, startColumn - 1, endLineNumber - 1, endColumn - 1);
+  return Range.to(range);
 }
 
 interface Codeblock {
@@ -208,6 +211,7 @@ export namespace MarkdownString {
         isTrusted: markup.isTrusted,
         supportHtml: markup.supportHtml,
         supportThemeIcons: markup.supportThemeIcons,
+        baseUri: markup.baseUri,
       };
     } else if (typeof markup === 'string') {
       res = { value: markup };
@@ -229,11 +233,11 @@ export namespace MarkdownString {
       }
       return '';
     };
-    const renderer = new marked.Renderer();
+    const renderer = createMarkedRenderer();
     renderer.link = collectUri;
     renderer.image = (href) => (href ? collectUri(parseHrefAndDimensions(href).href) : '');
 
-    marked(res.value, { renderer });
+    toMarkdownHtml(res.value, { renderer });
 
     return res;
   }
@@ -254,7 +258,7 @@ export namespace MarkdownString {
     let changed = false;
     data = cloneAndChange(data, (value) => {
       if (Uri.isUri(value)) {
-        const key = `__uri_${Math.random().toString(16).slice(2, 8)}`;
+        const key = `__uri_${randomString(6)}`;
         bucket[key] = value;
         changed = true;
         return key;
@@ -273,6 +277,8 @@ export namespace MarkdownString {
   export function to(value: IMarkdownString): vscode.MarkdownString {
     const result = new types.MarkdownString(value.value, value.supportThemeIcons);
     result.isTrusted = value.isTrusted;
+    result.supportHtml = value.supportHtml;
+    result.baseUri = value.baseUri ? URI.revive(value.baseUri) : undefined;
     return result;
   }
 
@@ -412,6 +418,16 @@ export namespace TextEdit {
   }
 }
 
+export namespace SnippetTextEdit {
+  export function from(edit: vscode.SnippetTextEdit): model.TextEdit & { insertAsSnippet?: boolean } {
+    return {
+      text: edit.snippet.value,
+      range: fromRange(edit.range),
+      insertAsSnippet: true,
+    };
+  }
+}
+
 export function fromTextEdit(edit: vscode.TextEdit): model.SingleEditOperation {
   return {
     text: edit.newText,
@@ -540,82 +556,91 @@ export function fromDocumentHighlightKind(
   return model.DocumentHighlightKind.Text;
 }
 
-export function convertDiagnosticToMarkerData(diagnostic: vscode.Diagnostic): IMarkerData {
-  return {
-    code: convertCode(diagnostic.code),
-    severity: convertSeverity(diagnostic.severity),
-    message: diagnostic.message,
-    source: diagnostic.source,
-    startLineNumber: diagnostic.range.start.line + 1,
-    startColumn: diagnostic.range.start.character + 1,
-    endLineNumber: diagnostic.range.end.line + 1,
-    endColumn: diagnostic.range.end.character + 1,
-    relatedInformation: convertRelatedInformation(diagnostic.relatedInformation),
-    tags: convertTags(diagnostic.tags),
-  };
-}
-
-function convertCode(code: string | number | undefined | { target: URI; value: string }): string | undefined {
-  if (typeof code === 'number') {
-    return String(code);
-  } else if (typeof code === 'object') {
-    return code.value;
-  } else {
-    return code;
-  }
-}
-
-function convertSeverity(severity: types.DiagnosticSeverity): MarkerSeverity {
-  switch (severity) {
-    case types.DiagnosticSeverity.Error:
-      return MarkerSeverity.Error;
-    case types.DiagnosticSeverity.Warning:
-      return MarkerSeverity.Warning;
-    case types.DiagnosticSeverity.Information:
-      return MarkerSeverity.Info;
-    case types.DiagnosticSeverity.Hint:
-      return MarkerSeverity.Hint;
-  }
-}
-
-function convertRelatedInformation(
-  diagnosticsRelatedInformation: vscode.DiagnosticRelatedInformation[] | undefined,
-): IRelatedInformation[] | undefined {
-  if (!diagnosticsRelatedInformation) {
-    return undefined;
-  }
-
-  const relatedInformation: IRelatedInformation[] = [];
-  for (const item of diagnosticsRelatedInformation) {
-    relatedInformation.push({
-      resource: item.location.uri.toString(),
-      message: item.message,
-      startLineNumber: item.location.range.start.line + 1,
-      startColumn: item.location.range.start.character + 1,
-      endLineNumber: item.location.range.end.line + 1,
-      endColumn: item.location.range.end.character + 1,
-    });
-  }
-  return relatedInformation;
-}
-
-function convertTags(tags: types.DiagnosticTag[] | undefined): MarkerTag[] | undefined {
-  if (!tags) {
-    return undefined;
-  }
-
-  const markerTags: MarkerTag[] = [];
-  for (const tag of tags) {
-    switch (tag) {
-      case types.DiagnosticTag.Unnecessary:
-        markerTags.push(MarkerTag.Unnecessary);
-        break;
-      case types.DiagnosticTag.Deprecated:
-        markerTags.push(MarkerTag.Deprecated);
-        break;
+export namespace Diagnostic {
+  export function convertCode(
+    code?:
+      | string
+      | number
+      | {
+          value: string | number;
+          target: Uri;
+        },
+  ): string | undefined {
+    if (typeof code === 'number') {
+      return String(code);
+    } else if (typeof code === 'object') {
+      return String(code.value);
+    } else {
+      return code;
     }
   }
-  return markerTags;
+
+  export function toMarker(diagnostic: vscode.Diagnostic): IMarkerData {
+    return {
+      code: convertCode(diagnostic.code),
+      codeHref: typeof diagnostic.code === 'object' ? Uri.from(diagnostic.code.target) : undefined,
+      severity: convertSeverity(diagnostic.severity),
+      message: diagnostic.message,
+      source: diagnostic.source,
+      startLineNumber: diagnostic.range.start.line + 1,
+      startColumn: diagnostic.range.start.character + 1,
+      endLineNumber: diagnostic.range.end.line + 1,
+      endColumn: diagnostic.range.end.character + 1,
+      relatedInformation: convertRelatedInformation(diagnostic.relatedInformation),
+      tags: convertTags(diagnostic.tags),
+    };
+  }
+  export function convertSeverity(severity: types.DiagnosticSeverity): MarkerSeverity {
+    switch (severity) {
+      case types.DiagnosticSeverity.Error:
+        return MarkerSeverity.Error;
+      case types.DiagnosticSeverity.Warning:
+        return MarkerSeverity.Warning;
+      case types.DiagnosticSeverity.Information:
+        return MarkerSeverity.Info;
+      case types.DiagnosticSeverity.Hint:
+        return MarkerSeverity.Hint;
+    }
+  }
+
+  export function convertRelatedInformation(
+    diagnosticsRelatedInformation: vscode.DiagnosticRelatedInformation[] | undefined,
+  ): IRelatedInformation[] | undefined {
+    if (!diagnosticsRelatedInformation) {
+      return undefined;
+    }
+
+    const relatedInformation: IRelatedInformation[] = [];
+    for (const item of diagnosticsRelatedInformation) {
+      relatedInformation.push({
+        resource: item.location.uri.toString(),
+        message: item.message,
+        startLineNumber: item.location.range.start.line + 1,
+        startColumn: item.location.range.start.character + 1,
+        endLineNumber: item.location.range.end.line + 1,
+        endColumn: item.location.range.end.character + 1,
+      });
+    }
+    return relatedInformation;
+  }
+  function convertTags(tags: types.DiagnosticTag[] | undefined): MarkerTag[] | undefined {
+    if (!tags) {
+      return undefined;
+    }
+
+    const markerTags: MarkerTag[] = [];
+    for (const tag of tags) {
+      switch (tag) {
+        case types.DiagnosticTag.Unnecessary:
+          markerTags.push(MarkerTag.Unnecessary);
+          break;
+        case types.DiagnosticTag.Deprecated:
+          markerTags.push(MarkerTag.Deprecated);
+          break;
+      }
+    }
+    return markerTags;
+  }
 }
 
 export function toSelection(selection: model.Selection): types.Selection {
@@ -694,6 +719,8 @@ export namespace TextEditorLineNumbersStyle {
         return RenderLineNumbersType.Off;
       case types.TextEditorLineNumbersStyle.Relative:
         return RenderLineNumbersType.Relative;
+      case types.TextEditorLineNumbersStyle.Interval:
+        return RenderLineNumbersType.Interval;
       case types.TextEditorLineNumbersStyle.On:
       default:
         return RenderLineNumbersType.On;
@@ -705,6 +732,8 @@ export namespace TextEditorLineNumbersStyle {
         return types.TextEditorLineNumbersStyle.Off;
       case RenderLineNumbersType.Relative:
         return types.TextEditorLineNumbersStyle.Relative;
+      case RenderLineNumbersType.Interval:
+        return types.TextEditorLineNumbersStyle.Interval;
       case RenderLineNumbersType.On:
       default:
         return types.TextEditorLineNumbersStyle.On;
@@ -735,6 +764,7 @@ export namespace DecorationRenderOptions {
       fontStyle: options.fontStyle,
       fontWeight: options.fontWeight,
       textDecoration: options.textDecoration,
+      textUnderlinePosition: options.textUnderlinePosition,
       cursor: options.cursor,
       color: options.color as string | IThemeColor,
       opacity: options.opacity,
@@ -767,6 +797,7 @@ export namespace ThemableDecorationRenderOptions {
       fontStyle: options.fontStyle,
       fontWeight: options.fontWeight,
       textDecoration: options.textDecoration,
+      textUnderlinePosition: options.textUnderlinePosition,
       cursor: options.cursor,
       color: options.color as string | IThemeColor,
       opacity: options.opacity,
@@ -811,8 +842,8 @@ export namespace WorkspaceEdit {
         // file operation
         result.edits.push({
           _type: types.WorkspaceEditType.File,
-          oldUri: entry.from,
-          newUri: entry.to,
+          oldResource: entry.from,
+          newResource: entry.to,
           options: entry.options,
           metadata: entry.metadata,
         } as model.ResourceFileEditDto);
@@ -822,8 +853,18 @@ export namespace WorkspaceEdit {
         result.edits.push({
           _type: types.WorkspaceEditType.Text,
           resource: entry.uri,
-          edit: TextEdit.from(entry.edit),
-          modelVersionId: doc?.version,
+          textEdit: TextEdit.from(entry.edit),
+          versionId: doc?.version,
+          metadata: entry.metadata,
+        } as model.ResourceTextEditDto);
+      } else if (entry._type === types.WorkspaceEditType.Snippet) {
+        // snippet edits
+        const doc = documents?.getDocument(entry.uri);
+        result.edits.push({
+          _type: types.WorkspaceEditType.Text,
+          resource: entry.uri,
+          textEdit: SnippetTextEdit.from(entry.edit),
+          versionId: doc?.version,
           metadata: entry.metadata,
         } as model.ResourceTextEditDto);
       }
@@ -834,16 +875,16 @@ export namespace WorkspaceEdit {
   export function to(value: model.WorkspaceEditDto) {
     const result = new types.WorkspaceEdit();
     for (const edit of value.edits) {
-      if ((edit as model.ResourceTextEditDto).edit) {
+      if ((edit as model.ResourceTextEditDto).textEdit) {
         result.replace(
           URI.revive((edit as model.ResourceTextEditDto).resource),
-          Range.to((edit as model.ResourceTextEditDto).edit.range),
-          (edit as model.ResourceTextEditDto).edit.text,
+          Range.to((edit as model.ResourceTextEditDto).textEdit.range),
+          (edit as model.ResourceTextEditDto).textEdit.text,
         );
       } else {
         result.renameFile(
-          URI.revive((edit as model.ResourceFileEditDto).oldUri!),
-          URI.revive((edit as model.ResourceFileEditDto).newUri!),
+          URI.revive((edit as model.ResourceFileEditDto).oldResource!),
+          URI.revive((edit as model.ResourceFileEditDto).newResource!),
           (edit as model.ResourceFileEditDto).options,
         );
       }
@@ -1270,10 +1311,10 @@ export function fromFileStat(stat: vscode.FileStat, uri: types.Uri) {
 
 export function toFileStat(stat: FileStat): vscode.FileStat {
   return {
-    ctime: stat.createTime || 0,
-    mtime: stat.lastModification,
-    size: stat.size || 0,
-    type: stat.type || FileType.Unknown,
+    ctime: stat?.createTime || 0,
+    mtime: stat?.lastModification,
+    size: stat?.size || 0,
+    type: stat?.type || FileType.Unknown,
   };
 }
 
@@ -1544,29 +1585,47 @@ export namespace InlineValueContext {
 }
 
 export namespace InlayHint {
-  export function from(hint: vscode.InlayHint): modes.InlayHint {
+  export function from(hint: vscode.InlayHint): languages.InlayHint {
     return {
-      text: hint.text,
+      label: hint.label as any,
       position: Position.from(hint.position),
-      kind: InlayHintKind.from(hint.kind ?? types.InlayHintKind.Other),
-      whitespaceBefore: hint.whitespaceBefore,
-      whitespaceAfter: hint.whitespaceAfter,
+      kind: hint.kind && InlayHintKind.from(hint.kind),
+      paddingLeft: hint.paddingLeft,
+      paddingRight: hint.paddingRight,
     };
   }
 
-  export function to(hint: modes.InlayHint): vscode.InlayHint {
-    const res = new types.InlayHint(hint.text, Position.to(hint.position), InlayHintKind.to(hint.kind));
-    res.whitespaceAfter = hint.whitespaceAfter;
-    res.whitespaceBefore = hint.whitespaceBefore;
+  export function to(converter: CommandsConverter, hint: languages.InlayHint): vscode.InlayHint {
+    const res = new types.InlayHint(
+      Position.to(hint.position),
+      typeof hint.label === 'string' ? hint.label : hint.label.map(InlayHintLabelPart.to.bind(undefined, converter)),
+      hint.kind && InlayHintKind.to(hint.kind),
+    );
+    res.paddingLeft = hint.paddingLeft;
+    res.paddingRight = hint.paddingRight;
     return res;
   }
 }
 
+export namespace InlayHintLabelPart {
+  export function to(converter: CommandsConverter, part: languages.InlayHintLabelPart): types.InlayHintLabelPart {
+    const result = new types.InlayHintLabelPart(part.label);
+    result.tooltip = isMarkdownString(part.tooltip) ? MarkdownString.to(part.tooltip) : (part.tooltip as string);
+    if (Command.is(part.command)) {
+      result.command = converter.fromInternal(part.command);
+    }
+    if (part.location) {
+      result.location = location.to(part.location as model.Location);
+    }
+    return result;
+  }
+}
+
 export namespace InlayHintKind {
-  export function from(kind: vscode.InlayHintKind): modes.InlayHintKind {
+  export function from(kind: vscode.InlayHintKind): languages.InlayHintKind {
     return kind;
   }
-  export function to(kind: modes.InlayHintKind): vscode.InlayHintKind {
+  export function to(kind: languages.InlayHintKind): vscode.InlayHintKind {
     return kind;
   }
 }
@@ -1592,7 +1651,9 @@ export namespace TestMessage {
       type: TestMessageType.Error,
       expected: message.expectedOutput,
       actual: message.actualOutput,
+      contextValue: message.contextValue,
       location: message.location ? (location.from(message.location) as any) : undefined,
+      stackTrace: message.stackTrace && message.stackTrace.map((frame) => TestMessageStackFrame.from(frame)),
     };
   }
 
@@ -1602,8 +1663,25 @@ export namespace TestMessage {
     );
     message.actualOutput = item.actual;
     message.expectedOutput = item.expected;
+    message.contextValue = item.contextValue;
     message.location = item.location ? location.to(item.location) : undefined;
     return message;
+  }
+}
+
+export interface TestMessageStackFrameDTO {
+  uri: Uri | undefined;
+  position: vscode.Position | undefined;
+  label: string;
+}
+
+export namespace TestMessageStackFrame {
+  export function from(stackTrace: vscode.TestMessageStackFrame): TestMessageStackFrameDTO {
+    return {
+      label: stackTrace.label,
+      position: stackTrace.position,
+      uri: stackTrace?.uri,
+    };
   }
 }
 
@@ -1623,7 +1701,7 @@ export namespace TestTag {
 export namespace TestItem {
   export type Raw = vscode.TestItem;
 
-  export function from(item: TestItemImpl): ITestItem {
+  export function from(item: vscode.TestItem): ITestItem {
     const ctrlId = getPrivateApiFor(item).controllerId;
     return {
       extId: TestId.fromExtHostTestItem(item, ctrlId).toString(),
@@ -1632,6 +1710,7 @@ export namespace TestItem {
       tags: item.tags.map((t) => TestTag.namespace(ctrlId, t.id)),
       range: Range.from(item.range) || null,
       description: item.description || null,
+      sortText: item.sortText || null,
       error: item.error ? MarkdownString.fromStrict(item.error) || null : null,
     };
   }
@@ -1652,6 +1731,7 @@ export namespace TestItem {
       canResolveChildren: false,
       busy: false,
       description: item.description || undefined,
+      sortText: item.sortText || undefined,
     };
   }
 
@@ -1733,48 +1813,6 @@ export namespace TestResults {
     };
   }
 }
-
-export namespace TestCoverage {
-  function fromCoveredCount(count: vscode.CoveredCount): ICoveredCount {
-    return { covered: count.covered, total: count.covered };
-  }
-
-  function fromLocation(location: vscode.Range | vscode.Position) {
-    return 'line' in location ? Position.from(location) : Range.from(location);
-  }
-
-  export function fromDetailed(coverage: vscode.DetailedCoverage): CoverageDetails {
-    if ('branches' in coverage) {
-      return {
-        count: coverage.executionCount,
-        location: fromLocation(coverage.location),
-        type: DetailType.Statement,
-        branches: coverage.branches.length
-          ? coverage.branches.map((b) => ({
-              count: b.executionCount,
-              location: b.location && fromLocation(b.location),
-            }))
-          : undefined,
-      };
-    } else {
-      return {
-        type: DetailType.Function,
-        count: coverage.executionCount,
-        location: fromLocation(coverage.location),
-      };
-    }
-  }
-
-  export function fromFile(coverage: vscode.FileCoverage): IFileCoverage {
-    return {
-      uri: coverage.uri,
-      statement: fromCoveredCount(coverage.statementCoverage),
-      branch: coverage.branchCoverage && fromCoveredCount(coverage.branchCoverage),
-      function: coverage.functionCoverage && fromCoveredCount(coverage.functionCoverage),
-      details: coverage.detailedCoverage?.map(fromDetailed),
-    };
-  }
-}
 // #endregion
 
 export interface IURITransformer {
@@ -1829,5 +1867,207 @@ export namespace DocumentSelector {
       return uriTransformer.transformOutgoingScheme(scheme);
     }
     return scheme;
+  }
+}
+
+export interface IDataTransferFileDTO {
+  readonly name: string;
+  readonly uri?: UriComponents;
+}
+
+export interface DataTransferItemDTO {
+  readonly id: string;
+  readonly asString: string;
+  readonly fileData: IDataTransferFileDTO | undefined;
+}
+
+export namespace DataTransferItem {
+  export function toDataTransferItem(
+    item: DataTransferItemDTO,
+    resolveFileData: () => Promise<Uint8Array>,
+  ): types.DataTransferItem {
+    const file = item.fileData;
+    if (file) {
+      return new (class extends types.DataTransferItem {
+        override asFile(): vscode.DataTransferFile {
+          return {
+            name: file.name,
+            uri: URI.revive(file.uri),
+            data: once(() => resolveFileData()),
+          };
+        }
+      })('', item.id);
+    } else {
+      return new types.DataTransferItem(item.asString);
+    }
+  }
+}
+
+export namespace DataTransfer {
+  export function toDataTransfer(
+    value: DataTransferDTO,
+    resolveFileData: (itemId: string) => Promise<Uint8Array>,
+  ): types.DataTransfer {
+    const init = value.items.map(
+      ([type, item]) => [type, DataTransferItem.toDataTransferItem(item, () => resolveFileData(item.id))] as const,
+    );
+    return new types.DataTransfer(init);
+  }
+
+  export async function toDataTransferDTO(value: vscode.DataTransfer | VSDataTransfer): Promise<DataTransferDTO> {
+    const newDTO: DataTransferDTO = { items: [] };
+
+    const promises: Promise<any>[] = [];
+
+    value.forEach((value, key) => {
+      promises.push(
+        (async () => {
+          const stringValue = await value.asString();
+          const fileValue = value.asFile();
+          newDTO.items.push([
+            key,
+            {
+              id: (value as IDataTransferItem | types.DataTransferItem).id,
+              asString: stringValue,
+              fileData: fileValue ? { name: fileValue.name, uri: fileValue.uri } : undefined,
+            },
+          ]);
+        })(),
+      );
+    });
+
+    await Promise.all(promises);
+
+    return newDTO;
+  }
+}
+
+export namespace ChatReplyFollowup {
+  export function from(
+    followup: vscode.InteractiveSessionReplyFollowup | vscode.InteractiveEditorReplyFollowup,
+  ): IChatReplyFollowup {
+    return {
+      kind: 'reply',
+      message: followup.message,
+      title: followup.title,
+      tooltip: followup.tooltip,
+    };
+  }
+}
+
+export namespace ChatFollowup {
+  export function from(followup: string | vscode.ChatAgentFollowup): IChatFollowup {
+    if (typeof followup === 'string') {
+      return { title: followup, message: followup, kind: 'reply' } as IChatReplyFollowup;
+    } else if ('commandId' in followup) {
+      return {
+        kind: 'command',
+        title: followup.title ?? '',
+        commandId: followup.commandId ?? '',
+        when: followup.when ?? '',
+        args: followup.args,
+      } as IChatResponseCommandFollowup;
+    } else {
+      return ChatReplyFollowup.from(followup);
+    }
+  }
+}
+
+export namespace ChatMessage {
+  export function to(message: IChatMessage): vscode.ChatMessage {
+    const res = new types.ChatMessage(ChatMessageRole.to(message.role), message.content);
+    res.name = message.name;
+    return res;
+  }
+
+  export function from(message: vscode.ChatMessage): IChatMessage {
+    return {
+      role: ChatMessageRole.from(message.role),
+      content: message.content,
+      name: message.name,
+    };
+  }
+}
+
+export namespace ChatMessageRole {
+  export function to(role: ChatMessageRoleEnum): vscode.ChatMessageRole {
+    switch (role) {
+      case ChatMessageRoleEnum.System:
+        return types.ChatMessageRole.System;
+      case ChatMessageRoleEnum.User:
+        return types.ChatMessageRole.User;
+      case ChatMessageRoleEnum.Assistant:
+        return types.ChatMessageRole.Assistant;
+      case ChatMessageRoleEnum.Function:
+        return types.ChatMessageRole.Function;
+    }
+  }
+
+  export function from(role: vscode.ChatMessageRole): ChatMessageRoleEnum {
+    switch (role) {
+      case types.ChatMessageRole.System:
+        return ChatMessageRoleEnum.System;
+      case types.ChatMessageRole.Assistant:
+        return ChatMessageRoleEnum.Assistant;
+      case types.ChatMessageRole.Function:
+        return ChatMessageRoleEnum.Function;
+      case types.ChatMessageRole.User:
+      default:
+        return ChatMessageRoleEnum.User;
+    }
+  }
+}
+
+export namespace NotebookRange {
+  export function from(range: vscode.NotebookRange): ICellRange {
+    return { start: range.start, end: range.end };
+  }
+
+  export function to(range: ICellRange): types.NotebookRange {
+    return new types.NotebookRange(range.start, range.end);
+  }
+}
+
+export namespace NotebookCellExecutionSummary {
+  export function to(data: NotebookCellInternalMetadata): vscode.NotebookCellExecutionSummary {
+    return {
+      timing:
+        isNumber(data.runStartTime) && isNumber(data.runEndTime)
+          ? { startTime: data.runStartTime, endTime: data.runEndTime }
+          : undefined,
+      executionOrder: data.executionOrder,
+      success: data.lastRunSuccess,
+    };
+  }
+
+  export function from(data: vscode.NotebookCellExecutionSummary): Partial<NotebookCellInternalMetadata> {
+    return {
+      lastRunSuccess: data.success,
+      runStartTime: data.timing?.startTime,
+      runEndTime: data.timing?.endTime,
+      executionOrder: data.executionOrder,
+    };
+  }
+}
+
+export namespace NotebookCellKind {
+  export function from(data: vscode.NotebookCellKind): CellKind {
+    switch (data) {
+      case types.NotebookCellKind.Markup:
+        return CellKind.Markup;
+      case types.NotebookCellKind.Code:
+      default:
+        return CellKind.Code;
+    }
+  }
+
+  export function to(data: CellKind): vscode.NotebookCellKind {
+    switch (data) {
+      case CellKind.Markup:
+        return types.NotebookCellKind.Markup;
+      case CellKind.Code:
+      default:
+        return types.NotebookCellKind.Code;
+    }
   }
 }

@@ -1,22 +1,26 @@
 {
   "name": "@opensumi/ide-static-resource",
-  "version": "2.18.0",
+  "version": "3.7.0",
   "files": [
-    "lib"
+    "lib",
+    "src"
   ],
   "license": "MIT",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "scripts": {
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "yarn run build",
     "build": "tsc --build ../../configs/ts/references/tsconfig.static-resource.json"
   },
   "repository": {
     "type": "git",
     "url": "git@github.com:opensumi/core.git"
   },
+  "dependencies": {
+    "@opensumi/ide-components": "workspace:*",
+    "@opensumi/ide-core-browser": "workspace:*"
+  },
   "devDependencies": {
-    "@opensumi/ide-core-browser": "2.18.0",
-    "@opensumi/ide-dev-tool": "^1.3.1"
+    "@opensumi/ide-dev-tool": "workspace:*"
   }
 }

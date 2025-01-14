@@ -1,5 +1,6 @@
 import { Disposable, IContextKeyService } from '@opensumi/ide-core-browser';
-import { AbstractContextMenuService, MenuId, ICtxMenuRenderer } from '@opensumi/ide-core-browser/lib/menu/next';
+import { AbstractContextMenuService, ICtxMenuRenderer, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
+import * as monaco from '@opensumi/ide-monaco';
 import { ICodeEditor } from '@opensumi/ide-monaco/lib/common/types';
 import * as dom from '@opensumi/monaco-editor-core/esm/vs/base/browser/dom';
 import { IAnchor } from '@opensumi/monaco-editor-core/esm/vs/base/browser/ui/contextview/contextview';
@@ -7,8 +8,7 @@ import { KeyCode } from '@opensumi/monaco-editor-core/esm/vs/base/common/keyCode
 import { IEditorMouseEvent, MouseTargetType } from '@opensumi/monaco-editor-core/esm/vs/editor/browser/editorBrowser';
 import { EditorOption } from '@opensumi/monaco-editor-core/esm/vs/editor/common/config/editorOptions';
 import { IEditorContribution } from '@opensumi/monaco-editor-core/esm/vs/editor/common/editorCommon';
-import { ContextMenuController } from '@opensumi/monaco-editor-core/esm/vs/editor/contrib/contextmenu/contextmenu';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import { ContextMenuController } from '@opensumi/monaco-editor-core/esm/vs/editor/contrib/contextmenu/browser/contextmenu';
 
 export class EditorContextMenuController extends Disposable implements IEditorContribution {
   public static readonly ID = 'editor.contrib.contextmenu';

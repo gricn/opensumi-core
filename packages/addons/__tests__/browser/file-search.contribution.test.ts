@@ -1,35 +1,36 @@
 import {
+  ILogger,
   KeybindingRegistry,
   KeybindingRegistryImpl,
-  RecentFilesManager,
-  ILogger,
   PreferenceService,
+  RecentFilesManager,
 } from '@opensumi/ide-core-browser';
 import {
+  CommandRegistry,
+  CommandRegistryImpl,
   CommandService,
   CommandServiceImpl,
-  CommandRegistryImpl,
-  CommandRegistry,
   DisposableCollection,
 } from '@opensumi/ide-core-common';
 import { WorkbenchEditorService } from '@opensumi/ide-editor';
 import { IEditorDocumentModelService } from '@opensumi/ide-editor/lib/browser';
 import { DocumentSymbol } from '@opensumi/ide-editor/lib/browser/breadcrumb/document-symbol';
 import { FileSearchServicePath } from '@opensumi/ide-file-search/lib/common';
+import { languageFeaturesService } from '@opensumi/ide-monaco/lib/browser/monaco-api/languages';
 import { PrefixQuickOpenService } from '@opensumi/ide-quick-open';
 import { QuickOpenHandlerRegistry } from '@opensumi/ide-quick-open/lib/browser/prefix-quick-open.service';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
-import * as modes from '@opensumi/monaco-editor-core/esm/vs/editor/common/modes';
+import * as modes from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
 
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
 import { ClientAddonModule } from '../../src/browser';
 import {
   FileSearchContribution,
-  quickFileOpen,
   FileSearchQuickCommandHandler,
-  matchLineReg,
   getValidateInput,
+  matchLineReg,
+  quickFileOpen,
 } from '../../src/browser/file-search.contribution';
 
 describe('test for browser/file-search.contribution.ts', () => {
@@ -88,8 +89,8 @@ describe('test for browser/file-search.contribution.ts', () => {
     expect(commands[0].id).toBe(quickFileOpen.id);
 
     await commandService.executeCommand(quickFileOpen.id);
-    expect(fakeOpenFn).toBeCalledTimes(1);
-    expect(fakeOpenFn).toBeCalledWith('...');
+    expect(fakeOpenFn).toHaveBeenCalledTimes(1);
+    expect(fakeOpenFn).toHaveBeenCalledWith('...');
   });
 
   it('registerKeybindings', () => {
@@ -191,7 +192,7 @@ describe('file-search-quickopen', () => {
     },
   ];
 
-  modes.DocumentSymbolProviderRegistry['all'] = () => [
+  languageFeaturesService.documentSymbolProvider['all'] = () => [
     {
       provideDocumentSymbols: () => testDS,
     },
@@ -238,16 +239,20 @@ describe('file-search-quickopen', () => {
           getMonacoModel: () => ({
             uri,
             getLanguageIdentifier: () => 'javascript',
+            getLanguageId: () => 'plaintext',
           }),
         },
         dispose: jest.fn(),
+      }),
+      getModelDescription: () => ({
+        languageId: 'javascript',
       }),
     });
     fileSearchQuickOpenHandler = injector.get(FileSearchQuickCommandHandler);
   });
 
-  afterEach(() => {
-    injector.disposeAll();
+  afterEach(async () => {
+    await injector.disposeAll();
   });
 
   it('onType', (done) => {

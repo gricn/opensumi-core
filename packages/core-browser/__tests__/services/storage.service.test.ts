@@ -1,4 +1,3 @@
-import { ILoggerManagerClient } from '@opensumi/ide-core-common';
 
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
@@ -9,12 +8,6 @@ describe('test for core-browser/src/services/storage-service.ts', () => {
   let browserStorageService: GlobalBrowserStorageService;
   beforeAll(() => {
     injector = createBrowserInjector([]);
-    injector.addProviders({
-      token: ILoggerManagerClient,
-      useValue: {
-        getLogger: jest.fn(),
-      },
-    });
     browserStorageService = injector.get<GlobalBrowserStorageService>(GlobalBrowserStorageService);
   });
 

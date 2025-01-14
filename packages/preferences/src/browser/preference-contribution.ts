@@ -1,40 +1,44 @@
-import * as jsoncparser from 'jsonc-parser';
+import * as jsoncParser from 'jsonc-parser';
 
-import { Autowired, Injectable } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
+  COMMON_COMMANDS,
   ClientAppContribution,
-  PreferenceSchemaProvider,
-  URI,
-  Domain,
+  CodeSchemaId,
+  Command,
   CommandContribution,
   CommandRegistry,
-  COMMON_COMMANDS,
-  KeybindingContribution,
-  KeybindingRegistry,
-  PreferenceScope,
-  PreferenceProvider,
-  WithEventBus,
-  MaybePromise,
-  localize,
   CommandService,
+  ContributionProvider,
+  Domain,
   EDITOR_COMMANDS,
-  JsonSchemaContribution,
+  IDisposable,
   IJSONSchemaRegistry,
   IPreferenceSettingsService,
-  ContributionProvider,
   ISettingGroup,
-  IDisposable,
+  ISettingSection,
+  JsonSchemaContribution,
+  KeybindingContribution,
+  KeybindingRegistry,
+  MaybePromise,
+  PreferenceProvider,
+  PreferenceSchemaProvider,
+  PreferenceScope,
+  URI,
+  WithEventBus,
   arrays,
-  Command,
   getIcon,
   isString,
-  ISettingSection,
+  localize,
 } from '@opensumi/ide-core-browser';
-import { MenuContribution, IMenuRegistry, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
-import { ResourceService, IResourceProvider, IResource } from '@opensumi/ide-editor';
+import { IMenuRegistry, MenuContribution, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
+import { IResource, IResourceProvider, ResourceService } from '@opensumi/ide-editor';
 import {
   BrowserEditorContribution,
   EditorComponentRegistry,
+  EditorOpenType,
+  IEditor,
+  IEditorFeatureRegistry,
   IResourceOpenResult,
   WorkbenchEditorService,
 } from '@opensumi/ide-editor/lib/browser';
@@ -43,6 +47,7 @@ import { IFileServiceClient } from '@opensumi/ide-file-service/lib/common';
 import { PREF_SCHEME, SettingContribution } from '../common';
 
 import { PreferenceSettingsService, defaultSettingGroup, defaultSettingSections } from './preference-settings.service';
+import { EditPreferenceDecorationsContribution } from './preference-widgets';
 import { PreferenceView } from './preferences.view';
 import { USER_PREFERENCE_URI } from './user-preference-provider';
 import { WorkspacePreferenceProvider } from './workspace-preference-provider';
@@ -87,19 +92,19 @@ export namespace PREFERENCE_COMMANDS {
 
   export const OPEN_USER_SETTING_FILE: Command = {
     id: 'preference.open.user',
-    label: localize('preference.editorTitle.openUserSource'),
+    label: '%preference.editorTitle.openUserSource%',
     category: CATEGORY,
   };
 
   export const OPEN_WORKSPACE_SETTING_FILE: Command = {
     id: 'preference.open.workspace',
-    label: localize('preference.editorTitle.openWorkspaceSource'),
+    label: '%preference.editorTitle.openWorkspaceSource%',
     category: CATEGORY,
   };
 
   export const OPEN_SOURCE_FILE: Command = {
     id: 'preference.open.source',
-    label: localize('preference.editorTitle.openSource'),
+    label: '%preference.editorTitle.openSource%',
     category: CATEGORY,
   };
 
@@ -126,6 +131,9 @@ export class PreferenceContribution
     MenuContribution,
     JsonSchemaContribution
 {
+  @Autowired(INJECTOR_TOKEN)
+  private readonly injector: Injector;
+
   @Autowired(PreferenceSchemaProvider)
   private readonly schemaProvider: PreferenceSchemaProvider;
 
@@ -175,21 +183,20 @@ export class PreferenceContribution
      */
     this.registerSettings();
     this.registerSettingSections();
-
-    this.preferenceService.fireDidSettingsChange();
   }
 
   registerCommands(commands: CommandRegistry) {
     commands.registerCommand(COMMON_COMMANDS.OPEN_PREFERENCES, {
       execute: async (search?: string) => {
         await this.openPreferences(search);
+        this.preferenceService.focusInput();
       },
     });
 
     commands.registerCommand(COMMON_COMMANDS.LOCATE_PREFERENCES, {
       execute: async (groupId: string) => {
         await this.openPreferences();
-        return await this.preferenceService.setCurrentGroup(groupId);
+        return await this.preferenceService.scrollToGroup(groupId);
       },
     });
 
@@ -307,12 +314,14 @@ export class PreferenceContribution
     });
   }
 
-  async openPreferences(search?: string, prefernceId?: string) {
+  async openPreferences(search?: string, preferenceId?: string) {
     await this.commandService.executeCommand(EDITOR_COMMANDS.OPEN_RESOURCE.id, new URI('/').withScheme(PREF_SCHEME), {
       preview: false,
     });
     if (isString(search)) {
       this.preferenceService.search(search);
+    } else if (isString(preferenceId)) {
+      this.preferenceService.scrollToPreference(preferenceId);
     }
   }
 
@@ -333,39 +342,46 @@ export class PreferenceContribution
         let text = editor.monacoEditor.getValue();
         let lines;
         let numReturns;
-        let preferenceLine;
+        let preferenceLine: string | undefined;
+        let preferenceLineNumber: number | undefined;
         const { index } = text.match(new RegExp(`\\"${preferenceId}\\"`)) || {};
         if (index && index >= 0) {
           numReturns = text.slice(0, index).match(new RegExp('\\n', 'g'))?.length || -1 + 1;
           if (numReturns > 0) {
             lines = text.split('\n');
             preferenceLine = lines[numReturns];
+            preferenceLineNumber = numReturns;
           }
         } else {
           // 如果不存在配置项，追加配置项内容
           const formattingOptions = { tabSize: 2, insertSpaces: true, eol: '' };
-          const edits = jsoncparser.modify(text, [preferenceId], '', { formattingOptions });
-          const content = jsoncparser.applyEdits(text, edits);
+          const edits = jsoncParser.modify(text, [preferenceId], '', { formattingOptions });
+          const content = jsoncParser.applyEdits(text, edits);
           editor.monacoEditor.setValue(content);
           text = content;
           numReturns = text.slice(0, index).match(new RegExp('\\n', 'g'))?.length || -1;
           if (numReturns > 1) {
             lines = text.split('\n');
             preferenceLine = lines[numReturns - 1];
+            preferenceLineNumber = numReturns - 1;
           }
         }
-        if (!preferenceLine) {
+
+        if (!(preferenceLine && preferenceLineNumber)) {
           return;
         }
+
         const regStr = `\\s+\\"${preferenceId}\\":\\s?["|{|t|f|[]`;
         const match = new RegExp(regStr, 'g').exec(preferenceLine);
         if (match) {
           const isStringExpr = match[0].slice(-1) === '"';
-          editor.monacoEditor.revealPositionInCenterIfOutsideViewport(
-            { lineNumber: numReturns + 1, column: match[0].length + 1 },
-            1,
-          );
-          editor.monacoEditor.setPosition({ lineNumber: numReturns + 1, column: match[0].length + 1 });
+          editor.monacoEditor.setPosition({ lineNumber: preferenceLineNumber + 1, column: match[0].length + 1 });
+          setTimeout(() => {
+            editor.monacoEditor.revealPositionInCenter(
+              { lineNumber: preferenceLineNumber! + 1, column: match[0].length + 1 },
+              1,
+            );
+          });
           if (isStringExpr) {
             // 只对 String 类型配置展示提示，包括不存在配置项时追加的情况
             await commandService.executeCommand('editor.action.triggerSuggest');
@@ -382,7 +398,7 @@ export class PreferenceContribution
   }
 
   registerSchema(registry: IJSONSchemaRegistry) {
-    registry.registerSchema('vscode://schemas/settings/user', this.schemaProvider.getCombinedSchema(), [
+    registry.registerSchema(CodeSchemaId.userSettings, this.schemaProvider.getCombinedSchema(), [
       'settings.json',
       USER_PREFERENCE_URI.toString(),
     ]);
@@ -402,10 +418,16 @@ export class PreferenceContribution
     editorComponentRegistry.registerEditorComponentResolver(PREF_SCHEME, (_, __, resolve) => {
       resolve([
         {
-          type: 'component',
+          type: EditorOpenType.component,
           componentId: PREF_PREVIEW_COMPONENT_ID,
         },
       ]);
+    });
+  }
+
+  registerEditorFeature(registry: IEditorFeatureRegistry) {
+    registry.registerEditorFeatureContribution({
+      contribute: (editor: IEditor) => this.injector.get(EditPreferenceDecorationsContribution, [editor]).contribute(),
     });
   }
 }

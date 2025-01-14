@@ -1,9 +1,12 @@
-import glob from 'glob';
 import path from 'path';
-import { run } from './fn/shell';
-import { copy } from 'fs-extra';
-import nsfw from 'nsfw';
 
+import ParcelWatcher from '@parcel/watcher';
+import { copy } from 'fs-extra';
+import glob from 'glob';
+
+import { run } from './fn/shell';
+
+let handler: ParcelWatcher.AsyncSubscription;
 (async () => {
   // await run('npm run clean');
 
@@ -18,14 +21,10 @@ import nsfw from 'nsfw';
     fileSet.add(path.join(cwd, file));
   }
 
-  const watcher = await (nsfw as any)(cwd, (e) => {
+  handler = await ParcelWatcher.subscribe(cwd, (err, e) => {
     e.forEach((e) => {
-      if (
-        e.action === nsfw.actions.CREATED ||
-        e.action === nsfw.actions.MODIFIED ||
-        e.action === nsfw.actions.RENAMED
-      ) {
-        const filePath = e.newFile ? path.join(e.directory, e.newFile!) : path.join(e.directory, e.file!);
+      if (e.type === 'create' || e.type === 'update' || e.type === 'delete') {
+        const filePath = e.path;
         if (fileSet.has(filePath)) {
           console.log('non-ts change detected:', filePath);
           copyOneFile(path.relative(cwd, filePath), cwd);
@@ -34,12 +33,11 @@ import nsfw from 'nsfw';
     });
   });
 
-  watcher.start();
-
   // build webview resources
   await run('npx tsc --build configs/ts/tsconfig.build.json -w');
 })().catch((e) => {
   console.trace(e);
+  handler.unsubscribe();
   process.exit(128);
 });
 

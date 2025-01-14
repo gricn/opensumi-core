@@ -1,4 +1,9 @@
-import { localize, Command } from '@opensumi/ide-core-common';
+/**
+ * If you want to do localization, please use the placeholder `%%` instead of use `localize` function.
+ * because the `localize` func maybe cannot get the correct languageId at the beginning of whole lifecycle.
+ */
+
+import { Command } from '@opensumi/ide-core-common';
 
 import { getIcon } from '../style/icon/icon';
 
@@ -184,6 +189,11 @@ export namespace FILE_COMMANDS {
     id: 'filetree.revealInExplorer',
     category: CATEGORY,
   };
+
+  export const TOGGLE_OR_OPEN: Command = {
+    id: 'filetree.toggleOrOpen',
+    category: CATEGORY,
+  };
 }
 
 export namespace OPEN_EDITORS_COMMANDS {
@@ -238,22 +248,27 @@ export namespace OPEN_EDITORS_COMMANDS {
     id: 'opened.editors.copyPath',
     category: CATEGORY,
   };
+
+  export const LOCATION: Command = {
+    id: 'opened.editors.location',
+    category: CATEGORY,
+  };
 }
 
 export namespace COMMON_COMMANDS {
   export const FIND: Command = {
     id: 'core.find',
-    label: localize('common.find'),
+    label: '%common.find%',
   };
 
   export const REPLACE: Command = {
     id: 'core.replace',
-    label: localize('common.replace'),
+    label: '%common.replace%',
   };
 
   export const ABOUT_COMMAND: Command = {
     id: 'core.about',
-    label: localize('common.about'),
+    label: '%common.about%',
   };
 
   export const OPEN_PREFERENCES: Command = {
@@ -272,6 +287,7 @@ export namespace COMMON_COMMANDS {
 
   export const OPEN_LAUNCH_CONFIGURATION: Command = {
     id: 'core.launchConfiguration.open',
+    label: '%debug.action.open.configuration%',
   };
 
   export const ENVIRONMENT_VARIABLE: Command = {
@@ -323,7 +339,6 @@ export namespace EDITOR_COMMANDS {
   export const SAVE_URI: Command = {
     id: 'editor.saveUri',
     category: CATEGORY,
-    label: localize('editor.saveUri'),
   };
 
   export const SAVE_CURRENT: Command = {
@@ -332,9 +347,32 @@ export namespace EDITOR_COMMANDS {
     label: '%editor.saveCurrent%',
   };
 
+  export const FOCUS_IF_NOT_ACTIVATE_ELEMENT: Command = {
+    id: 'editor.focusIfNotActivateElement',
+    category: CATEGORY,
+    label: '%editor.saveCurrent%',
+  };
+
   export const COMPARE: Command = {
     id: 'editor.compare',
     category: CATEGORY,
+  };
+
+  export const OPEN_MERGEEDITOR: Command = {
+    id: 'editor.open.mergeEditor',
+    category: CATEGORY,
+  };
+
+  export const OPEN_MERGEEDITOR_DEV: Command = {
+    id: 'editor.open.mergeEditor.dev',
+    category: 'Merge Editor (Dev)',
+    label: 'Open Merge Editor State from Json',
+  };
+
+  export const MERGEEDITOR_RESET: Command = {
+    id: 'editor.mergeEditor.reset',
+    category: CATEGORY,
+    label: '%mergeEditor.reset%',
   };
 
   export const CLOSE: Command = {
@@ -358,7 +396,7 @@ export namespace EDITOR_COMMANDS {
   export const CLOSE_ALL: Command = {
     id: 'editor.closeAll',
     category: CATEGORY,
-    label: localize('editor.close.all'),
+    label: '%editor.close.all%',
   };
 
   export const CLOSE_SAVED: Command = {
@@ -370,7 +408,7 @@ export namespace EDITOR_COMMANDS {
   export const SAVE_ALL: Command = {
     id: 'editor.saveAll',
     category: CATEGORY,
-    label: localize('editor.saveAll', '保存全部'),
+    label: '%editor.saveAll%',
   };
 
   export const CLOSE_TO_RIGHT: Command = {
@@ -399,7 +437,6 @@ export namespace EDITOR_COMMANDS {
     id: 'editor.splitToRight',
     category: CATEGORY,
     label: '%editor.splitToRight%',
-    iconClass: getIcon('embed'),
   };
 
   export const SPLIT_TO_TOP: Command = {
@@ -421,6 +458,11 @@ export namespace EDITOR_COMMANDS {
 
   export const CHANGE_ENCODING: Command = {
     id: 'editor.changeEncoding',
+    category: CATEGORY,
+  };
+
+  export const GET_ENCODING: Command = {
+    id: 'editor.getEncoding',
     category: CATEGORY,
   };
 
@@ -487,7 +529,7 @@ export namespace EDITOR_COMMANDS {
   export const CLOSE_OTHER_GROUPS: Command = {
     id: 'editor.closeOtherGroup',
     category: CATEGORY,
-    label: localize('editor.closeEditorsInOtherGroups', 'Close Other Groups'),
+    label: '%editor.closeEditorsInOtherGroups%',
   };
 
   export const OPEN_EDITOR_AT_INDEX: Command = {
@@ -498,13 +540,13 @@ export namespace EDITOR_COMMANDS {
   export const EVEN_EDITOR_GROUPS: Command = {
     id: 'editor.evenEditorGroups',
     category: CATEGORY,
-    label: localize('editor.resetEditorGroups', 'Reset Editor Group'),
+    label: '%editor.resetEditorGroups%',
   };
 
   export const REVERT_DOCUMENT: Command = {
     id: 'editor.document.revert',
     category: CATEGORY,
-    label: localize('editor.revert', 'Revert Document'),
+    label: '%editor.revert%',
   };
 
   export const REVERT_AND_CLOSE: Command = {
@@ -555,7 +597,7 @@ export namespace EDITOR_COMMANDS {
   export const TEST_TOKENIZE: Command = {
     id: 'editor.tokenize.test',
     category: CATEGORY,
-    label: localize('editor.tokenize.test'),
+    label: '%editor.tokenize.test%',
   };
 
   export const AUTO_SAVE: Command = {
@@ -585,45 +627,93 @@ export namespace EDITOR_COMMANDS {
 
   export const SEARCH_WORKSPACE_SYMBOL: Command = {
     id: 'editor.workspaceSymbol.quickopen',
-    label: localize('editor.workspaceSymbol.quickopen'),
+    label: '%editor.workspaceSymbol.quickopen%',
     category: CATEGORY,
   };
 
   export const SEARCH_WORKSPACE_SYMBOL_CLASS: Command = {
     id: 'editor.workspaceSymbolClass.quickopen',
-    label: localize('editor.workspaceClassSymbol.quickopen', '搜索工作区中的类'),
+    label: '%editor.workspaceSymbolClass.quickopen%',
     category: CATEGORY,
   };
 
   export const GO_TO_LINE: Command = {
     id: 'editor.action.gotoLine',
-    label: localize('editor.goToLine', 'Go to Line...'),
+    label: '%editor.goToLine%',
     category: CATEGORY,
   };
 
   export const QUICK_OPEN: Command = {
     id: 'workbench.action.quickOpen',
     category: CATEGORY,
+    label: '%editor.quickOpen%',
   };
 
   export const TOGGLE_WORD_WRAP: Command = {
-    id: 'editor.toggleWorldWrap',
+    id: 'editor.toggleWordWrap',
+    label: '%editor.toggleWordWrap%',
+    category: CATEGORY,
+  };
+
+  export const TOGGLE_COLUMN_SELECTION: Command = {
+    id: 'editor.action.toggleColumnSelection',
+    label: '%editor.action.toggleColumnSelection%',
+    category: CATEGORY,
+  };
+
+  export const FORMAT_DOCUMENT: Command = {
+    id: 'editor.action.formatDocument',
+    category: CATEGORY,
+  };
+
+  export const FORMAT_SELECTION: Command = {
+    id: 'editor.action.formatSelection',
     category: CATEGORY,
   };
 
   export const FORMAT_DOCUMENT_WITH: Command = {
     id: 'editor.action.formatDocument.multiple',
     category: CATEGORY,
-    label: localize('editor.formatDocument.label.multiple', 'Format Document With...'),
+    label: '%editor.formatDocument.label.multiple%',
   };
 
   export const FORMAT_SELECTION_WITH: Command = {
     id: 'editor.action.formatSelection.multiple',
     category: CATEGORY,
-    label: localize('editor.formatSelection.label.multiple', 'Format Selection With...'),
+    label: '%editor.formatSelection.label.multiple%',
+  };
+
+  export const COPY_PATH: Command = {
+    id: 'editor.action.copyPath',
+    category: CATEGORY,
+    label: '%editor.copyPath%',
+  };
+
+  export const COPY_RELATIVE_PATH: Command = {
+    id: 'editor.action.copyRelativePath',
+    category: CATEGORY,
+    label: '%editor.copyRelativePath%',
   };
 }
 
+export namespace DIFF_EDITOR_COMMANDS {
+  const CATEGORY = 'diff-editor';
+
+  export const REVERT: Command = {
+    id: 'editor.diff.revert',
+    category: CATEGORY,
+  };
+
+  export const ACCEPT: Command = {
+    id: 'editor.diff.accept',
+    category: CATEGORY,
+  };
+
+  export const TOGGLE_COLLAPSE_UNCHANGED_REGIONS: Command = {
+    id: 'editor.diff.toggleCollapseUnchangedRegions',
+    category: CATEGORY,
+  };
+}
 export namespace SEARCH_COMMANDS {
   const CATEGORY = 'search';
 
@@ -644,13 +734,6 @@ export namespace SEARCH_COMMANDS {
     id: 'file-search.clean',
     label: 'clean search',
     iconClass: getIcon('clear'),
-    category: CATEGORY,
-  };
-
-  export const FOLD: Command = {
-    id: 'file-search.fold',
-    label: 'fold search',
-    iconClass: getIcon('collapse-all'),
     category: CATEGORY,
   };
 
@@ -699,6 +782,16 @@ export namespace SEARCH_COMMANDS {
     category: CATEGORY,
     label: '%file.copy.path%',
   };
+
+  export const REPLACE: Command = {
+    id: 'search.replace',
+    category: CATEGORY,
+  };
+
+  export const CLOSE: Command = {
+    id: 'search.close',
+    category: CATEGORY,
+  };
 }
 
 export namespace OUTLINE_COMMANDS {
@@ -741,6 +834,7 @@ export namespace WORKSPACE_COMMANDS {
 
   export const REMOVE_WORKSPACE_FOLDER: Command = {
     id: 'workspace.removeFolderFromWorkspace',
+    label: '%workspace.removeFolderFromWorkspace%',
     category: CATEGORY,
   };
 
@@ -770,4 +864,249 @@ export namespace DIALOG_COMMANDS {
   };
 }
 
-export { TERMINAL_COMMANDS } from '@opensumi/ide-core-common/lib/commands/terminal';
+export namespace TERMINAL_COMMANDS {
+  export const CATEGORY = '%terminal.name%';
+
+  export const FOCUS_NEXT_TERMINAL = {
+    id: 'workbench.action.terminal.focusNextPane',
+    label: '%terminal.focusNext.inTerminalGroup%',
+    category: CATEGORY,
+  };
+
+  export const FOCUS_PREVIOUS_TERMINAL = {
+    id: 'workbench.action.terminal.focusPreviousPane',
+    label: '%terminal.focusPrevious.inTerminalGroup%',
+    category: CATEGORY,
+  };
+
+  export const SPLIT = {
+    id: 'terminal.split',
+    label: '%terminal.split%',
+    category: CATEGORY,
+  };
+
+  export const ADD = {
+    id: 'terminal.add',
+    label: '%terminal.new%',
+    category: CATEGORY,
+  };
+
+  export const REMOVE = {
+    id: 'terminal.remove',
+    label: '%terminal.remove%',
+    category: CATEGORY,
+  };
+
+  export const CLEAR = {
+    id: 'terminal.clear',
+    label: '%terminal.clear%',
+    category: CATEGORY,
+  };
+
+  export const OPEN_SEARCH = {
+    id: 'terminal.search',
+    label: '%terminal.search%',
+    category: CATEGORY,
+  };
+
+  export const SEARCH_NEXT = {
+    id: 'terminal.search.next',
+    label: '%terminal.search.next%',
+    category: CATEGORY,
+  };
+
+  export const OPEN_WITH_PATH = {
+    id: 'terminal.openWithPath',
+    category: CATEGORY,
+  };
+
+  export const CLEAR_CONTENT = {
+    id: 'terminal.clearContent',
+    label: '%terminal.menu.clearCurrentContent%',
+    category: CATEGORY,
+  };
+
+  export const CLEAR_ALL_CONTENT = {
+    id: 'terminal.clearAllContent',
+    label: '%terminal.menu.clearAllContents%',
+    category: CATEGORY,
+  };
+
+  export const TAB_RENAME = {
+    id: 'terminal.tabRename',
+    category: CATEGORY,
+  };
+
+  export const SELECT_ALL_CONTENT = {
+    id: 'terminal.selectAllContent',
+    label: '%terminal.menu.selectAllContent%',
+    category: CATEGORY,
+  };
+
+  export const MORE_SETTINGS = {
+    id: 'terminal.moreSettings',
+    label: '%terminal.menu.moreSettings%',
+    category: CATEGORY,
+  };
+
+  export const SELECT_TYPE = {
+    id: 'terminal.selectType',
+    category: CATEGORY,
+  };
+
+  export const SELECT_ZSH = {
+    id: 'terminal.selectTypeZsh',
+    label: 'zsh',
+    category: CATEGORY,
+  };
+
+  export const SELECT_BASH = {
+    id: 'terminal.selectTypeBash',
+    label: 'bash',
+    category: CATEGORY,
+  };
+
+  export const SELECT_SH = {
+    id: 'terminal.selectTypeSh',
+    label: 'sh',
+    category: CATEGORY,
+  };
+
+  export const SELECT_CMD = {
+    id: 'terminal.selectTypeCMD',
+    label: 'cmd',
+    category: CATEGORY,
+  };
+
+  export const SELECT_POWERSHELL = {
+    id: 'terminal.selectTypePowerShell',
+    label: 'powershell',
+    category: CATEGORY,
+  };
+
+  export const COPY = {
+    id: 'terminal.copy',
+    label: '%edit.copy%',
+    category: CATEGORY,
+  };
+
+  export const PASTE = {
+    id: 'terminal.paste',
+    label: '%edit.paste%',
+    category: CATEGORY,
+  };
+
+  export const SELECT_ALL = {
+    id: 'terminal.selectAll',
+    label: '%terminal.menu.selectCurrentContent%',
+    category: CATEGORY,
+  };
+
+  export const RE_LAUNCH = {
+    id: 'terminal.relaunch',
+    category: CATEGORY,
+  };
+
+  export const TOGGLE_TERMINAL = {
+    id: 'terminal.toggleTerminal',
+    label: '%terminal.toggleTerminal%',
+    category: CATEGORY,
+  };
+
+  export const KILL_PROCESS = {
+    id: 'terminal.killProcess',
+    label: '%terminal.killProcess%',
+    category: CATEGORY,
+  };
+}
+
+export namespace LAYOUT_COMMANDS {
+  const CATEGORY = 'view';
+
+  export const QUICK_OPEN_VIEW: Command = {
+    id: 'layout.action.quickOpenView',
+    category: CATEGORY,
+  };
+
+  export const OPEN_VIEW = {
+    id: 'layout.action.openView',
+    label: '%layout.action.openView%',
+    category: CATEGORY,
+  };
+
+  export const MAXIMIZE_EDITOR = {
+    id: 'layout.action.Maximizeeditor',
+    category: CATEGORY,
+  };
+  export const TOGGLE_SIDEBAR_VISIBILITY = {
+    id: 'main-layout.left-panel.toggle',
+    category: CATEGORY,
+  };
+}
+
+export namespace MARKER_COMMANDS {
+  const CATEGORY = 'marker';
+
+  export const SHOW_ERRORS_WARNINGS = {
+    id: 'marker.action.showErrorsWarnings',
+    category: CATEGORY,
+  };
+
+  export const TOGGLE_SHOW_ERRORS_WARNINGS = {
+    id: 'marker.action.toggleShowErrorsWarnings',
+    category: CATEGORY,
+  };
+}
+
+export namespace QUICK_OPEN_COMMANDS {
+  export const OPEN: Command = {
+    id: 'editor.action.quickCommand',
+  };
+  export const OPEN_OUTLINE: Command = {
+    id: 'editor.action.quickOutline',
+  };
+  export const OPEN_VIEW: Command = {
+    id: 'editor.action.quickView',
+  };
+  export const OPEN_WITH_COMMAND: Command = {
+    id: 'editor.action.quickCommand.withCommand',
+  };
+}
+
+export namespace SCM_COMMANDS {
+  const category = 'SCM';
+
+  export const GetSCMResource = {
+    id: 'scm.getResource',
+    category,
+  };
+
+  // git extension 1.71 版本之前存在下划线，这里为了做兼容处理: https://github.com/microsoft/vscode/blob/1.68.1/extensions/git/src/repository.ts#L613
+  export const _GIT_OPEN_MERGE_EDITOR: Command = {
+    id: '_git.openMergeEditor',
+  };
+  // git extension 1.71 版本之后就去掉了前面的下划线: https://github.com/microsoft/vscode/commit/c0ade8bc816386b7194d69fed878d4b9bb796d6c#diff-da56ff967ab1a9606c01af61dc926332afb862f13c8e5c74a575bc2aa1b15e43R411
+  export const GIT_OPEN_MERGE_EDITOR: Command = {
+    id: 'git.openMergeEditor',
+  };
+}
+
+export namespace MERGE_CONFLICT_COMMANDS {
+  const CATEGORY = 'MergeConflict';
+  export const AI_ACCEPT: Command = {
+    id: 'merge-conflict.ai.accept',
+    category: CATEGORY,
+  };
+  export const ALL_RESET: Command = {
+    id: 'merge-conflict.ai.all-reset',
+    category: CATEGORY,
+  };
+  export const AI_ALL_ACCEPT: Command = {
+    id: 'merge-conflict.ai.all-accept',
+    category: CATEGORY,
+  };
+  export const AI_ALL_ACCEPT_STOP: Command = {
+    id: 'merge-conflict.ai.all-accept-stop',
+    category: CATEGORY,
+  };
+}

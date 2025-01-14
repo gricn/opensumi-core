@@ -1,11 +1,10 @@
-import { Event, Emitter } from '@opensumi/ide-core-browser';
+import { Emitter, Event } from '@opensumi/ide-core-browser';
 import { DebugProtocol } from '@opensumi/vscode-debugprotocol/lib/debugProtocol';
 
-import { DEBUG_REPORT_NAME } from '../../common';
+import { DEBUG_REPORT_NAME, IDebugExceptionInfo } from '../../common';
 import { DebugSession } from '../debug-session';
 
 import { DebugStackFrame } from './debug-stack-frame';
-
 
 export type StoppedDetails = DebugProtocol.StoppedEvent['body'] & {
   framesErrorMessage?: string;
@@ -27,6 +26,10 @@ export class DebugThread extends DebugThreadData {
 
   get id(): string {
     return this.session.id + ':' + this.raw.id;
+  }
+
+  get threadId(): number {
+    return this.raw.id;
   }
 
   protected _currentFrame: DebugStackFrame | undefined;
@@ -105,6 +108,24 @@ export class DebugThread extends DebugThreadData {
     }));
   }
 
+  async fetchExceptionInfo(): Promise<IDebugExceptionInfo | undefined> {
+    try {
+      if (this.stoppedDetails?.reason === 'exception' && this.session.capabilities.supportsExceptionInfoRequest) {
+        const response = await this.session.exceptionInfo(this.toArgs());
+        if (response) {
+          return {
+            id: response.body.exceptionId,
+            description: response.body.description,
+            breakMode: response.body.breakMode,
+            details: response.body.details,
+          };
+        }
+      }
+    } catch (e) {
+      return undefined;
+    }
+  }
+
   async fetchFrames(levels = 20): Promise<DebugStackFrame[]> {
     const frames = await this.rawFetchFrames(levels);
     this.updateCurrentFrame();
@@ -137,10 +158,12 @@ export class DebugThread extends DebugThreadData {
     const result = new Map<number, DebugStackFrame>(this._frames);
     for (const raw of frames) {
       const id = raw.id;
-      const frame = this._frames.get(id) || new DebugStackFrame(this, this.session);
-      this._frames.set(id, frame);
-      frame.update({ raw });
-      result.set(id, frame);
+      if (!this._frames.has(id)) {
+        const frame = new DebugStackFrame(this, this.session);
+        this._frames.set(id, frame);
+        frame.update({ raw });
+        result.set(id, frame);
+      }
     }
     const values = [...result.values()];
     frontEndTime('doUpdateFrames');

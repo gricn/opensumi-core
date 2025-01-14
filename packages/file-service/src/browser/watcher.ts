@@ -1,10 +1,10 @@
-import { Event, Emitter, DisposableCollection, URI } from '@opensumi/ide-core-common';
+import { DisposableCollection, Emitter, Event, URI } from '@opensumi/ide-core-common';
 
-import { IFileServiceClient, IFileServiceWatcher, FileServiceWatcherOptions, FileChange } from '../common';
+import { FileChange, FileServiceWatcherOptions, IFileServiceClient, IFileServiceWatcher } from '../common';
 
 function filterChange(fileChangeList: FileChange[], watchUri: string) {
   return fileChangeList.filter((fileChange) => {
-    if (fileChange.uri.indexOf(watchUri) === 0) {
+    if (fileChange.uri.startsWith(watchUri)) {
       return true;
     }
     return false;
@@ -38,7 +38,13 @@ export class FileSystemWatcher implements IFileServiceWatcher {
   }
 
   dispose() {
-    this.toDispose.dispose();
-    return this.fileServiceClient.unwatchFileChanges(this.watchId);
+    return Promise.all<void>([
+      this.toDispose.dispose(),
+      this.fileServiceClient.unwatchFileChanges(this.watchId),
+    ]) as any;
+  }
+
+  isDisposed() {
+    return this.toDispose.disposed;
   }
 }

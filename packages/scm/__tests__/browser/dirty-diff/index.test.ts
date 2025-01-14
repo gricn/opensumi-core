@@ -1,36 +1,40 @@
-import { Autowired, Injectable, Injector, INJECTOR_TOKEN } from '@opensumi/di';
-import { PreferenceChange } from '@opensumi/ide-core-browser';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
+import { IContextKeyService, PreferenceChange } from '@opensumi/ide-core-browser';
 import {
-  DisposableCollection,
-  PreferenceScope,
-  Uri,
-  URI,
-  Emitter,
   CommandService,
+  DisposableCollection,
+  Emitter,
+  ILineChange,
+  PreferenceScope,
+  URI,
+  Uri,
   toDisposable,
 } from '@opensumi/ide-core-common';
-import { WorkbenchEditorService, IDocPersistentCacheProvider } from '@opensumi/ide-editor';
+import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
+import { MockInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
+import { IDocPersistentCacheProvider, WorkbenchEditorService } from '@opensumi/ide-editor';
+import { UntitledDocumentIdCounter } from '@opensumi/ide-editor/lib/browser/untitled-resource';
 import {
-  IEditorFeatureRegistry,
-  IEditorFeatureContribution,
   EmptyDocCacheImpl,
+  IEditorDocumentModel,
   IEditorDocumentModelService,
+  IEditorFeatureContribution,
+  IEditorFeatureRegistry,
 } from '@opensumi/ide-editor/src/browser';
-import { IEditorDocumentModel } from '@opensumi/ide-editor/src/browser/';
 import { EditorDocumentModel } from '@opensumi/ide-editor/src/browser/doc-model/main';
 import { WorkbenchEditorServiceImpl } from '@opensumi/ide-editor/src/browser/workbench-editor.service';
+import { MockContextKeyService } from '@opensumi/ide-monaco/__mocks__/monaco.context-key.service';
+import { monacoBrowser } from '@opensumi/ide-monaco/lib/browser';
 import { monaco as monacoAPI } from '@opensumi/ide-monaco/lib/browser/monaco-api';
-import type { ICodeEditor as IMonacoCodeEditor } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
 
-import { createBrowserInjector } from '../../../../../tools/dev-tool/src/injector-helper';
-import { MockInjector } from '../../../../../tools/dev-tool/src/mock-injector';
 import { IDirtyDiffWorkbenchController } from '../../../src';
-import { DirtyDiffWorkbenchController, DirtyDiffItem } from '../../../src/browser/dirty-diff';
+import { DirtyDiffItem, DirtyDiffWorkbenchController } from '../../../src/browser/dirty-diff';
 import { DirtyDiffDecorator } from '../../../src/browser/dirty-diff/dirty-diff-decorator';
 import { DirtyDiffModel } from '../../../src/browser/dirty-diff/dirty-diff-model';
 import { DirtyDiffWidget } from '../../../src/browser/dirty-diff/dirty-diff-widget';
 import { SCMPreferences } from '../../../src/browser/scm-preference';
+
+import type { ICodeEditor as IMonacoCodeEditor } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
 
 jest.useFakeTimers();
 
@@ -92,6 +96,10 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
       [],
       new Injector([
         {
+          token: IContextKeyService,
+          useClass: MockContextKeyService,
+        },
+        {
           token: IDocPersistentCacheProvider,
           useClass: EmptyDocCacheImpl,
         },
@@ -114,6 +122,15 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
             },
             runContributions: jest.fn(),
             runProvideEditorOptionsForUri: jest.fn(),
+          },
+        },
+        {
+          token: UntitledDocumentIdCounter,
+          useValue: {
+            id: 1,
+            update() {
+              return ++this.id;
+            },
           },
         },
         {
@@ -157,8 +174,8 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
 
     // execute editor contribution
     [...editorFeatureContributions][0].contribute({ monacoEditor } as any);
-    expect(mouseDownSpy).toBeCalledTimes(1);
-    expect(didChangeModelSpy).toBeCalledTimes(1);
+    expect(mouseDownSpy).toHaveBeenCalledTimes(1);
+    expect(didChangeModelSpy).toHaveBeenCalledTimes(1);
 
     const $div = document.createElement('div');
     $div.classList.add('dirty-diff-glyph');
@@ -167,7 +184,7 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
 
     monacoEditor['_onMouseDown'].fire({
       target: {
-        type: monaco.editor.MouseTargetType.GUTTER_LINE_DECORATIONS,
+        type: monacoBrowser.editor.MouseTargetType.GUTTER_LINE_DECORATIONS,
         element: $div,
         position: {
           lineNumber: 10,
@@ -180,11 +197,11 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
     });
     // _doMouseDown
     // gutterOffsetX < 5
-    expect(toggleWidgetSpy).toBeCalledTimes(1);
+    expect(toggleWidgetSpy).toHaveBeenCalledTimes(1);
 
     monacoEditor['_onMouseDown'].fire({
       target: {
-        type: monaco.editor.MouseTargetType.GUTTER_LINE_DECORATIONS,
+        type: monacoBrowser.editor.MouseTargetType.GUTTER_LINE_DECORATIONS,
         element: $div,
         position: {
           lineNumber: 10,
@@ -197,7 +214,7 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
     });
     // _doMouseDown
     // gutterOffsetX >= 5
-    expect(toggleWidgetSpy).toBeCalledTimes(1);
+    expect(toggleWidgetSpy).toHaveBeenCalledTimes(1);
     expect(dirtyDiffWorkbenchController['widgets'].get(monacoEditor.getId())).toBeUndefined();
 
     const dirtyDiffModel = injector.get(DirtyDiffModel, [editorModel]);
@@ -207,7 +224,7 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
 
     monacoEditor['_onMouseDown'].fire({
       target: {
-        type: monaco.editor.MouseTargetType.GUTTER_LINE_DECORATIONS,
+        type: monacoBrowser.editor.MouseTargetType.GUTTER_LINE_DECORATIONS,
         element: $div,
         position: {
           lineNumber: 10,
@@ -220,7 +237,7 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
     });
     // _doMouseDown
     // gutterOffsetX >= 5
-    expect(toggleWidgetSpy).toBeCalledTimes(1);
+    expect(toggleWidgetSpy).toHaveBeenCalledTimes(1);
     expect(dirtyDiffWorkbenchController['widgets'].get(monacoEditor.getId())).toBeUndefined();
 
     monacoEditor['_onDidChangeModel'].fire({
@@ -243,12 +260,12 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
       newModelUrl: Uri.file('def2.ts'),
     });
     // oldWidget.dispose
-    expect(disposeSpy).toBeCalledTimes(1);
+    expect(disposeSpy).toHaveBeenCalledTimes(1);
 
     const disposeSpy1 = jest.spyOn(DisposableCollection.prototype, 'dispose');
     monacoEditor['_onDidDispose'].fire();
     // disposeCollection.dispose();
-    expect(disposeSpy).toBeCalledTimes(1);
+    expect(disposeSpy).toHaveBeenCalledTimes(1);
 
     [mouseDownSpy, didChangeModelSpy, toggleWidgetSpy, disposeSpy, disposeSpy1].forEach((spy) => {
       spy.mockReset();
@@ -271,7 +288,7 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
       affects: () => false,
     });
 
-    expect(disposeSpy).toBeCalledTimes(0);
+    expect(disposeSpy).toHaveBeenCalledTimes(0);
 
     scmPreferences.onPreferenceChangedEmitter.fire({
       preferenceName: 'scm.diffDecorationsGutterWidth',
@@ -280,7 +297,7 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
       affects: () => false,
     });
 
-    expect(disposeSpy).toBeCalledTimes(0);
+    expect(disposeSpy).toHaveBeenCalledTimes(0);
 
     scmPreferences.onPreferenceChangedEmitter.fire({
       preferenceName: 'scm.alwaysShowDiffWidget',
@@ -289,7 +306,7 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
       affects: () => false,
     });
 
-    expect(disposeSpy).toBeCalled();
+    expect(disposeSpy).toHaveBeenCalled();
 
     disposeSpy.mockReset();
   });
@@ -308,7 +325,7 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
       affects: () => true,
     });
     // first disabled called when enabled#true
-    expect(disableSpy).toBeCalled();
+    expect(disableSpy).toHaveBeenCalled();
 
     scmPreferences['scm.diffDecorations'] = 'all';
     scmPreferences.onPreferenceChangedEmitter.fire({
@@ -318,7 +335,7 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
       affects: () => true,
     });
 
-    expect(enableSpy).toBeCalled();
+    expect(enableSpy).toHaveBeenCalled();
 
     [enableSpy, disableSpy].forEach((spy) => {
       spy.mockReset();
@@ -411,9 +428,9 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
     const disposeSpy = jest.spyOn(dirtyDiffWidget, 'dispose');
 
     dirtyDiffWorkbenchController.dispose();
-    expect(disableSpy).toBeCalledTimes(1);
+    expect(disableSpy).toHaveBeenCalledTimes(1);
     expect(dirtyDiffWorkbenchController['widgets'].size).toBe(0);
-    expect(disposeSpy).toBeCalledTimes(1);
+    expect(disposeSpy).toHaveBeenCalledTimes(1);
   });
 
   describe('toggleDirtyDiffWidget', () => {
@@ -422,18 +439,8 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
       const dirtyDiffDecorator = injector.get(DirtyDiffDecorator, [editorModel, dirtyDiffModel]);
       const dirtyDiffWidget = injector.get(DirtyDiffWidget, [monacoEditor, dirtyDiffModel, commandService]);
 
-      const change0 = {
-        originalStartLineNumber: 11,
-        originalEndLineNumber: 11,
-        modifiedStartLineNumber: 11,
-        modifiedEndLineNumber: 11,
-      };
-      const change1 = {
-        originalStartLineNumber: 12,
-        originalEndLineNumber: 12,
-        modifiedStartLineNumber: 12,
-        modifiedEndLineNumber: 12,
-      };
+      const change0: ILineChange = [11, 11, 11, 11, []];
+      const change1: ILineChange = [12, 12, 12, 12, []];
 
       dirtyDiffModel['_changes'] = [change0, change1];
       dirtyDiffWidget.updateCurrent(1);
@@ -450,7 +457,7 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
         lineNumber: 11,
         column: 5,
       });
-      expect(spy).toBeCalledTimes(1);
+      expect(spy).toHaveBeenCalledTimes(1);
       // same: currentIndex === targetIndex
       expect(dirtyDiffWorkbenchController['widgets'].get(monacoEditor.getId())).toBe(dirtyDiffWidget);
 
@@ -460,7 +467,7 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
         lineNumber: 11,
         column: 5,
       });
-      expect(spy).toBeCalledTimes(2);
+      expect(spy).toHaveBeenCalledTimes(2);
       // 创建一个新的 widget
       expect(dirtyDiffWorkbenchController['widgets'].get(monacoEditor.getId())).not.toBe(dirtyDiffWidget);
 
@@ -473,7 +480,7 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
         column: 5,
       });
 
-      expect(spy).toBeCalledTimes(2);
+      expect(spy).toHaveBeenCalledTimes(2);
       // 创建一个新的 widget
       const latestWidget = dirtyDiffWorkbenchController['widgets'].get(monacoEditor.getId());
       expect(latestWidget).not.toBe(existedWidget);
@@ -500,7 +507,7 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
         column: 5,
       });
 
-      expect(spy).not.toBeCalled();
+      expect(spy).not.toHaveBeenCalled();
       spy.mockReset();
     });
 
@@ -509,7 +516,7 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
 
       dirtyDiffWorkbenchController.toggleDirtyDiffWidget(monacoEditor, undefined as any);
 
-      expect(spy).not.toBeCalled();
+      expect(spy).not.toHaveBeenCalled();
 
       spy.mockReset();
     });
@@ -524,7 +531,7 @@ describe('scm/src/browser/dirty-diff/index.ts', () => {
         column: 5,
       });
 
-      expect(spy).not.toBeCalled();
+      expect(spy).not.toHaveBeenCalled();
 
       spy.mockReset();
     });

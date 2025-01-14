@@ -1,6 +1,6 @@
-import type vscode from 'vscode';
+import { CancellationToken, IDisposable, IThemeColor, UriComponents } from '@opensumi/ide-core-common';
 
-import { CancellationToken, IDisposable, UriComponents, IThemeColor } from '@opensumi/ide-core-common';
+import type vscode from 'vscode';
 
 export interface DecorationRequest {
   readonly id: number;
@@ -17,11 +17,8 @@ export interface DecorationReply {
 }
 
 export interface IExtHostDecorationsShape {
-  registerFileDecorationProvider(
-    provider: vscode.FileDecorationProvider | vscode.DecorationProvider,
-    extensionId: string,
-  ): vscode.Disposable;
-  $provideDecorations(requests: DecorationRequest[], token: CancellationToken): Promise<DecorationReply>;
+  registerFileDecorationProvider(provider: vscode.FileDecorationProvider, extensionId: string): vscode.Disposable;
+  $provideFileDecorations(requests: DecorationRequest[], token: CancellationToken): Promise<DecorationReply>;
 }
 
 export interface IMainThreadDecorationsShape extends IDisposable {

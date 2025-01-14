@@ -1,32 +1,33 @@
 import { Injectable } from '@opensumi/di';
 import {
-  PreferenceSchemaProvider,
+  BinaryBuffer,
   IPreferenceSettingsService,
-  ILoggerManagerClient,
+  PreferenceSchemaProvider,
   URI,
+  createContributionProvider,
 } from '@opensumi/ide-core-browser';
-import { MockLoggerManageClient } from '@opensumi/ide-core-browser/__mocks__/logger';
 import {
   MockPreferenceSchemaProvider,
   MockPreferenceSettingsService,
 } from '@opensumi/ide-core-browser/__mocks__/preference';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
 import { SemanticTokenRegistryImpl } from '@opensumi/ide-theme/lib/browser/semantic-tokens-registry';
-import { Color } from '@opensumi/ide-theme/lib/common';
+import { ThemeData } from '@opensumi/ide-theme/lib/browser/theme-data';
+import { ThemeStore } from '@opensumi/ide-theme/lib/browser/theme-store';
+import { Color, IThemeData, IThemeStore } from '@opensumi/ide-theme/lib/common';
 import { ISemanticTokenRegistry } from '@opensumi/ide-theme/lib/common/semantic-tokens-registry';
 
-import { IThemeService } from '../../';
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
+import { IThemeService, ThemeContributionProvider } from '../../src';
 import { WorkbenchThemeService } from '../../src/browser/workbench.theme.service';
-
 
 @Injectable()
 class MockFileServiceClient {
-  resolveContent(uri: string) {
+  readFile(uri: string) {
     if (uri.indexOf('json') > -1) {
       return {
-        content: `{
+        content: BinaryBuffer.fromString(`{
           "$schema": "vscode://schemas/color-theme",
           "name": "Dark Default Colors",
           "colors": {
@@ -51,11 +52,12 @@ class MockFileServiceClient {
             "comment:java": "#ff004f"
           },
           "semanticHighlighting": true
-        }`,
+        }`),
       };
     }
     return {
-      content: `<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      content:
+        BinaryBuffer.fromString(`<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
         <plist version="1.0">
         <dict>
           <key>name</key>
@@ -99,7 +101,7 @@ class MockFileServiceClient {
             </dict>
           </array>
         </dict>
-        </plist>`,
+        </plist>`),
     };
   }
 }
@@ -109,7 +111,7 @@ describe('color theme service test', () => {
   let injector: MockInjector;
   beforeEach(() => {
     injector = createBrowserInjector([]);
-
+    createContributionProvider(injector, ThemeContributionProvider);
     injector.addProviders(
       {
         token: IThemeService,
@@ -128,12 +130,16 @@ describe('color theme service test', () => {
         useClass: MockPreferenceSettingsService,
       },
       {
-        token: ILoggerManagerClient,
-        useClass: MockLoggerManageClient,
-      },
-      {
         token: IFileServiceClient,
         useClass: MockFileServiceClient,
+      },
+      {
+        token: IThemeData,
+        useClass: ThemeData,
+      },
+      {
+        token: IThemeStore,
+        useClass: ThemeStore,
       },
     );
   });
@@ -155,6 +161,7 @@ describe('color theme service test', () => {
           label: 'Dark Default Colors',
           uiTheme: 'vs',
           path: './test-relativa-path/theme.json',
+          extensionId: 'mock',
         },
       ],
       new URI('file://base-ext-path'),
@@ -171,6 +178,7 @@ describe('color theme service test', () => {
           label: 'Dracula',
           uiTheme: 'vs',
           path: './test-relativa-path/theme.plist',
+          extensionId: 'mock',
         },
       ],
       new URI('file://base-ext-path'),

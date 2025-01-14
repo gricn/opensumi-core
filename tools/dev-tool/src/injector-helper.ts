@@ -1,28 +1,27 @@
-import { Injector, Injectable } from '@opensumi/di';
-import { IContextKeyService, RecentFilesManager } from '@opensumi/ide-core-browser';
+import { Injectable, Injector } from '@opensumi/di';
+import { MockLogger, MockLoggerManageClient, MockLoggerService } from '@opensumi/ide-core-browser/__mocks__/logger';
+import { useMockStorage } from '@opensumi/ide-core-browser/__mocks__/storage';
 import { ClientApp } from '@opensumi/ide-core-browser/lib/bootstrap/app';
 import { BrowserModule } from '@opensumi/ide-core-browser/lib/browser-module';
+import { IContextKeyService } from '@opensumi/ide-core-browser/lib/context-key';
+import { RecentFilesManager } from '@opensumi/ide-core-browser/lib/quick-open';
 import {
   CommonServerPath,
   ConstructorOf,
-  getDebugLogger,
+  ILogServiceManager,
+  ILogger,
   ILoggerManagerClient,
   LogLevel,
   LogServiceForClientPath,
   OS,
+  getDebugLogger,
 } from '@opensumi/ide-core-common';
-import { NodeModule, INodeLogger } from '@opensumi/ide-core-node';
-
-import { useMockStorage } from '../../../packages/core-browser/__mocks__/storage';
-import { MockContextKeyService } from '../../../packages/monaco/__mocks__/monaco.context-key.service';
+import { MockContextKeyService } from '@opensumi/ide-monaco/__mocks__/monaco.context-key.service';
 
 import { MockInjector } from './mock-injector';
-import { MainLayout } from './mock-main';
 
 @Injectable()
-class MockMainLayout extends BrowserModule {
-  component = MainLayout;
-}
+class MockMainLayout extends BrowserModule {}
 
 export interface MockClientApp extends ClientApp {
   injector: MockInjector;
@@ -86,7 +85,7 @@ class MockLogServiceForClient {
   async log() {}
   async error() {}
   async critical() {}
-  async dispose() {}
+  async disposeLogger() {}
   async disposeAll() {
     this.hasDisposeAll = true;
   }
@@ -101,14 +100,26 @@ function getBrowserMockInjector() {
       useClass: MockContextKeyService,
     },
     {
-      token: LogServiceForClientPath,
-      useClass: MockLogServiceForClient,
-    },
-    {
       token: RecentFilesManager,
       useValue: {
         getMostRecentlyOpenedFiles: () => [],
       },
+    },
+    {
+      token: LogServiceForClientPath,
+      useClass: MockLogServiceForClient,
+    },
+    {
+      token: ILoggerManagerClient,
+      useClass: MockLoggerManageClient,
+    },
+    {
+      token: ILogServiceManager,
+      useClass: MockLoggerService,
+    },
+    {
+      token: ILogger,
+      useClass: MockLogger,
     },
   );
   return injector;
@@ -117,32 +128,6 @@ function getBrowserMockInjector() {
 export function createBrowserInjector(modules: Array<ConstructorOf<BrowserModule>>, inj?: Injector): MockInjector {
   const injector = inj || getBrowserMockInjector();
   const app = new ClientApp({ modules, injector } as any);
-  afterAll(() => {
-    app.injector.disposeAll();
-  });
 
   return app.injector as MockInjector;
-}
-
-export function createNodeInjector(constructors: Array<ConstructorOf<NodeModule>>, inj?: Injector): MockInjector {
-  const injector = inj || new MockInjector();
-
-  // Mock logger
-  injector.addProviders({
-    token: INodeLogger,
-    useValue: getDebugLogger(),
-  });
-
-  for (const item of constructors) {
-    const instance = injector.get(item);
-    if (instance.providers) {
-      injector.addProviders(...instance.providers);
-    }
-  }
-
-  afterAll(() => {
-    injector.disposeAll();
-  });
-
-  return injector as MockInjector;
 }

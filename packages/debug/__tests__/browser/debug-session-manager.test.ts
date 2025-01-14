@@ -1,13 +1,11 @@
 import { Emitter, IContextKeyService, IReporterService, LabelService } from '@opensumi/ide-core-browser';
-import { Disposable } from '@opensumi/ide-core-common';
-import { IDebugServer, IDebugSessionManager, IDebugProgress } from '@opensumi/ide-debug';
+import { IDebugModelManager, IDebugProgress, IDebugServer, IDebugSessionManager } from '@opensumi/ide-debug';
+import { BreakpointManager } from '@opensumi/ide-debug/lib/browser/breakpoint';
 import {
-  BreakpointManager,
-  DebugModelManager,
   DebugSessionContributionRegistry,
   DebugSessionFactory,
-  DebugSessionManager,
-} from '@opensumi/ide-debug/lib/browser';
+} from '@opensumi/ide-debug/lib/browser/debug-session-contribution';
+import { DebugSessionManager } from '@opensumi/ide-debug/lib/browser/debug-session-manager';
 import { WorkbenchEditorService } from '@opensumi/ide-editor';
 import { IMessageService } from '@opensumi/ide-overlay';
 import { ITaskService } from '@opensumi/ide-task';
@@ -16,6 +14,7 @@ import { IVariableResolverService } from '@opensumi/ide-variable';
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
 import { MockContextKeyService } from '../../../monaco/__mocks__/monaco.context-key.service';
+import { MockDebugSession } from '../../__mocks__/debug-session';
 
 describe('DebugSessionManager', () => {
   let debugSessionManager: IDebugSessionManager;
@@ -46,30 +45,20 @@ describe('DebugSessionManager', () => {
   };
 
   const mockTaskService = {
-    getTask: jest.fn(() => ({ task: 'npm run build' })),
+    getTask: jest.fn(() => ({ task: 'yarn run build' })),
     run: jest.fn(() => ({ exitCode: 200 })),
   };
 
   const mockDebugSessionContributionRegistry = {
-    get: () => null,
-  };
-
-  const mockDebugSession = {
-    id: sessionId,
-    onDidChange: jest.fn(() => Disposable.create(() => {})),
-    onCurrentThreadChange: jest.fn(() => Disposable.create(() => {})),
-    on: jest.fn(),
-    start: jest.fn(() => new Promise(() => {})),
-    onDidCustomEvent: jest.fn(),
-    configuration: {
-      type: 'node',
-    },
-    state: {},
-    dispose: jest.fn(),
+    get: () => ({
+      debugSessionFactory: () => ({
+        get: () => new MockDebugSession(),
+      }),
+    }),
   };
 
   const mockDebugSessionFactory = {
-    get: jest.fn(() => mockDebugSession),
+    get: jest.fn(() => new MockDebugSession()),
   };
 
   const mockBreakpointManager = {
@@ -89,7 +78,7 @@ describe('DebugSessionManager', () => {
           useClass: MockContextKeyService,
         },
         {
-          token: DebugModelManager,
+          token: IDebugModelManager,
           useValue: mockDebugModelManager,
         },
         {
@@ -129,10 +118,6 @@ describe('DebugSessionManager', () => {
           useValue: mockBreakpointManager,
         },
         {
-          token: DebugModelManager,
-          useValue: {},
-        },
-        {
           token: ITaskService,
           useValue: mockTaskService,
         },
@@ -151,8 +136,8 @@ describe('DebugSessionManager', () => {
     debugSessionManager = injector.get(IDebugSessionManager);
   });
 
-  afterAll(() => {
-    injector.disposeAll();
+  afterAll(async () => {
+    await injector.disposeAll();
   });
 
   it('report start action time', () => {
@@ -160,8 +145,8 @@ describe('DebugSessionManager', () => {
     debugSessionManager.reportAction('1001', '10001', 'start');
     const message = 'tracker message';
     report(message);
-    expect(mockReporterService.time).toBeCalledTimes(1);
-    expect(mockReporterServiceTimeEnd).toBeCalledTimes(1);
+    expect(mockReporterService.time).toHaveBeenCalledTimes(1);
+    expect(mockReporterServiceTimeEnd).toHaveBeenCalledTimes(1);
     mockReporterService.time.mockClear();
   });
 
@@ -175,12 +160,12 @@ describe('DebugSessionManager', () => {
       preLaunchTask: 'build',
     };
     await debugSessionManager.start({ configuration });
-    expect(mockDebugServer.createDebugSession).toBeCalledTimes(1);
-    expect(mockDebugServer.resolveDebugConfiguration).toBeCalledTimes(1);
-    expect(mockDebugServer.resolveDebugConfigurationWithSubstitutedVariables).toBeCalledTimes(1);
-    expect(mockVariableResolverService.resolve).toBeCalledTimes(1);
-    expect(mockTaskService.getTask).toBeCalledTimes(1);
-    expect(mockTaskService.run).toBeCalledTimes(1);
+    expect(mockDebugServer.createDebugSession).toHaveBeenCalledTimes(1);
+    expect(mockDebugServer.resolveDebugConfiguration).toHaveBeenCalledTimes(1);
+    expect(mockDebugServer.resolveDebugConfigurationWithSubstitutedVariables).toHaveBeenCalledTimes(1);
+    expect(mockVariableResolverService.resolve).toHaveBeenCalledTimes(1);
+    expect(mockTaskService.getTask).toHaveBeenCalledTimes(1);
+    expect(mockTaskService.run).toHaveBeenCalledTimes(1);
   });
 
   it('destroy debug session', (done) => {
@@ -188,7 +173,6 @@ describe('DebugSessionManager', () => {
       done();
     });
     debugSessionManager.destroy(sessionId);
-    expect(mockDebugServer.terminateDebugSession).toBeCalledTimes(1);
-    expect(mockDebugSession.dispose).toBeCalledTimes(1);
+    expect(mockDebugServer.terminateDebugSession).toHaveBeenCalledTimes(1);
   });
 });

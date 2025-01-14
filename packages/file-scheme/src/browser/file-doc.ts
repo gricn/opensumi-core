@@ -1,17 +1,19 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  URI,
+  CancellationToken,
+  CommonLanguageId,
+  Disposable,
   Emitter,
   Event,
+  IDisposable,
   IEditorDocumentChange,
   IEditorDocumentModelSaveResult,
-  ISchemaStore,
-  IDisposable,
-  Disposable,
   IJSONSchemaRegistry,
-  replaceLocalizePlaceholder,
+  ISchemaStore,
+  MaybePromise,
   PreferenceService,
   Schemes,
+  URI,
 } from '@opensumi/ide-core-browser';
 import { IHashCalculateService } from '@opensumi/ide-core-common/lib/hash-calculate/hash-calculate';
 import { IEditorDocumentModelContentProvider } from '@opensumi/ide-editor/lib/browser';
@@ -50,6 +52,12 @@ export class FileSchemeDocumentProvider
     return super.provideEncoding(uri);
   }
 
+  preferLanguageForUri(uri: URI): MaybePromise<string | undefined> {
+    if (['settings.json'].includes(uri.path.base)) {
+      return CommonLanguageId.JSONC;
+    }
+  }
+
   async saveDocumentModel(
     uri: URI,
     content: string,
@@ -58,6 +66,7 @@ export class FileSchemeDocumentProvider
     encoding: string,
     ignoreDiff = false,
     eol: EOL = EOL.LF,
+    token?: CancellationToken,
   ): Promise<IEditorDocumentModelSaveResult> {
     const baseMd5 = this.hashCalculateService.calculate(baseContent);
     if (content.length > FILE_SAVE_BY_CHANGE_THRESHOLD) {
@@ -70,6 +79,7 @@ export class FileSchemeDocumentProvider
         },
         encoding,
         ignoreDiff,
+        token,
       );
     } else {
       return await this.fileSchemeDocClient.saveByContent(
@@ -80,6 +90,7 @@ export class FileSchemeDocumentProvider
         },
         encoding,
         ignoreDiff,
+        token,
       );
     }
   }
@@ -114,7 +125,7 @@ export class VscodeSchemeDocumentProvider implements IEditorDocumentModelContent
 
   async provideEditorDocumentModelContent(uri: URI, encoding) {
     const content = this.getSchemaContent(uri);
-    return replaceLocalizePlaceholder(content)!;
+    return content;
   }
 
   protected getSchemaContent(uri: URI): string {
@@ -142,5 +153,33 @@ export class VscodeSchemeDocumentProvider implements IEditorDocumentModelContent
       this.listeners[uri.toString()].dispose();
       delete this.listeners[uri.toString()];
     }
+  }
+}
+
+@Injectable()
+export class WalkThroughSnippetSchemeDocumentProvider implements IEditorDocumentModelContentProvider {
+  private documentContentMaps = new Map<string, string>();
+
+  handlesScheme(scheme: string) {
+    return scheme === Schemes.walkThroughSnippet;
+  }
+
+  provideEditorDocumentModelContent(uri: URI, encoding): MaybePromise<string> {
+    if (!this.documentContentMaps.has(uri.toString())) {
+      this.documentContentMaps.set(uri.toString(), '');
+    }
+
+    return this.documentContentMaps.get(uri.toString())!;
+  }
+
+  isReadonly(): MaybePromise<boolean> {
+    return false;
+  }
+
+  private _onDidChangeContent: Emitter<URI> = new Emitter();
+  onDidChangeContent: Event<URI> = this._onDidChangeContent.event;
+
+  preferLanguageForUri() {
+    return 'plaintext';
   }
 }

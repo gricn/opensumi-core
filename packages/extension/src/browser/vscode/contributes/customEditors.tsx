@@ -1,27 +1,40 @@
-import React = require('react');
+import React from 'react';
 
-import { Injectable, Autowired } from '@opensumi/di';
-import { useInjectable, IEventBus } from '@opensumi/ide-core-browser';
-import { CancellationTokenSource, Disposable, ILogger, match } from '@opensumi/ide-core-common';
-import { EditorComponentRegistry, IEditorPriority, ReactEditorComponent } from '@opensumi/ide-editor/lib/browser';
+import { Autowired, Injectable } from '@opensumi/di';
+import { IEventBus, useInjectable } from '@opensumi/ide-core-browser';
+import {
+  CUSTOM_EDITOR_SCHEME,
+  CancellationTokenSource,
+  Disposable,
+  ILogger,
+  LifeCyclePhase,
+  match,
+} from '@opensumi/ide-core-common';
+import {
+  EditorComponentRegistry,
+  EditorOpenType,
+  IEditorPriority,
+  ReactEditorComponent,
+} from '@opensumi/ide-editor/lib/browser';
 import { IWebviewService } from '@opensumi/ide-webview';
 import { WebviewMounter } from '@opensumi/ide-webview/lib/browser/editor-webview';
 
-import { VSCodeContributePoint, Contributes, ExtensionService } from '../../../common';
-import { ICustomEditorOptions, CUSTOM_EDITOR_SCHEME } from '../../../common/vscode';
+import { Contributes, ExtensionService, LifeCycle, VSCodeContributePoint } from '../../../common';
+import { ICustomEditorOptions } from '../../../common/vscode';
 import {
+  CustomEditorOptionChangeEvent,
   CustomEditorScheme,
   CustomEditorShouldDisplayEvent,
-  CustomEditorShouldHideEvent,
-  CustomEditorOptionChangeEvent,
-  CustomEditorShouldSaveEvent,
-  CustomEditorShouldRevertEvent,
   CustomEditorShouldEditEvent,
+  CustomEditorShouldHideEvent,
+  CustomEditorShouldRevertEvent,
+  CustomEditorShouldSaveEvent,
 } from '../../../common/vscode/custom-editor';
 import { IActivationEventService } from '../../types';
 
 @Injectable()
 @Contributes('customEditors')
+@LifeCycle(LifeCyclePhase.Initialize)
 export class CustomEditorContributionPoint extends VSCodeContributePoint<CustomEditorScheme[]> {
   @Autowired(EditorComponentRegistry)
   private editorComponentRegistry: EditorComponentRegistry;
@@ -35,36 +48,32 @@ export class CustomEditorContributionPoint extends VSCodeContributePoint<CustomE
   private options = new Map<string, ICustomEditorOptions>();
 
   contribute() {
-    const customEditors = this.json || [];
-    customEditors.forEach((c) => {
-      this.registerSingleCustomEditor(c);
-    });
-    this.addDispose(
-      this.eventBus.on(CustomEditorOptionChangeEvent, (e) => {
-        if (this.options.has(e.payload.viewType)) {
-          this.options.set(e.payload.viewType, e.payload.options);
-        }
-      }),
-    );
+    for (const contrib of this.contributesMap) {
+      const { extensionId, contributes } = contrib;
+      contributes.forEach((c) => {
+        this.registerSingleCustomEditor(c, extensionId);
+      });
+      this.addDispose(
+        this.eventBus.on(CustomEditorOptionChangeEvent, (e) => {
+          if (this.options.has(e.payload.viewType)) {
+            this.options.set(e.payload.viewType, e.payload.options);
+          }
+        }),
+      );
+    }
   }
 
   getOptions(viewType: string) {
     return this.options.get(viewType) || {};
   }
 
-  private registerSingleCustomEditor(customEditor: CustomEditorScheme) {
+  private registerSingleCustomEditor(customEditor: CustomEditorScheme, extensionId: string) {
     try {
       const viewType = customEditor.viewType;
       this.options.set(customEditor.viewType, {});
       const componentId = `${CUSTOM_EDITOR_SCHEME}-${customEditor.viewType}`;
       const component = createCustomEditorComponent(customEditor.viewType, componentId, () =>
         this.getOptions(customEditor.viewType),
-      );
-      this.addDispose(
-        this.editorComponentRegistry.registerEditorComponent({
-          uid: componentId,
-          component,
-        }),
       );
 
       const patterns = customEditor.selector.map((s) => s.filenamePattern).filter((p) => typeof p === 'string');
@@ -84,9 +93,9 @@ export class CustomEditorContributionPoint extends VSCodeContributePoint<CustomE
               ) {
                 results.push({
                   componentId,
-                  type: 'component',
+                  type: EditorOpenType.component,
                   title: customEditor.displayName
-                    ? this.getLocalizeFromNlsJSON(customEditor.displayName)
+                    ? this.getLocalizeFromNlsJSON(customEditor.displayName, extensionId)
                     : customEditor.viewType,
                   weight: priority === IEditorPriority.default ? Number.MAX_SAFE_INTEGER : Number.MIN_SAFE_INTEGER,
                   priority,
@@ -127,6 +136,16 @@ export class CustomEditorContributionPoint extends VSCodeContributePoint<CustomE
             }
           },
         ),
+      );
+
+      this.addDispose(
+        this.editorComponentRegistry.registerEditorComponent({
+          uid: componentId,
+          component,
+          metadata: {
+            customEditor: viewType,
+          },
+        }),
       );
     } catch (e) {
       this.logger.error(e);

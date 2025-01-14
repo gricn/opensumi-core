@@ -1,27 +1,26 @@
-import { ChildProcess, fork, ForkOptions } from 'child_process';
+import { ChildProcess, ForkOptions, fork } from 'child_process';
 import qs from 'querystring';
 
 import {
-  app,
   BrowserWindow,
-  shell,
-  ipcMain,
   BrowserWindowConstructorOptions,
   IpcMainEvent,
   WebPreferences,
+  app,
+  ipcMain,
+  shell,
 } from 'electron';
-import semver from 'semver';
 import treeKill from 'tree-kill';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  ExtensionCandidate,
-  getDebugLogger,
-  Disposable,
-  isMacintosh,
-  URI,
-  FileUri,
   Deferred,
+  Disposable,
+  ExtensionCandidate,
+  FileUri,
+  URI,
+  getDebugLogger,
+  isMacintosh,
 } from '@opensumi/ide-core-common';
 import { normalizedIpcHandlerPathAsync } from '@opensumi/ide-core-common/lib/utils/ipc';
 
@@ -79,12 +78,6 @@ export class CodeWindow extends Disposable implements ICodeWindow {
 
     this.browser = new BrowserWindow({
       show: false,
-      webPreferences: {
-        ...defaultWebPreferences,
-        ...this.appConfig?.overrideWebPreferences,
-        nodeIntegration: this.appConfig?.browserNodeIntegrated,
-        preload: this.appConfig?.browserPreload,
-      },
       frame: isMacintosh,
       titleBarStyle: 'hidden',
       height: DEFAULT_WINDOW_HEIGHT,
@@ -93,7 +86,15 @@ export class CodeWindow extends Disposable implements ICodeWindow {
       trafficLightPosition: { x: 10, y: 10 },
       ...this.appConfig.overrideBrowserOptions,
       ...options,
+      webPreferences: {
+        ...defaultWebPreferences,
+        ...this.appConfig?.overrideWebPreferences,
+        nodeIntegration: this.appConfig?.browserNodeIntegrated,
+        preload: this.appConfig?.browserPreload,
+        ...options.webPreferences,
+      },
     });
+
     if (options) {
       if (options.extensionDir) {
         this.extensionDir = options.extensionDir;
@@ -173,7 +174,7 @@ export class CodeWindow extends Disposable implements ICodeWindow {
 
   async start() {
     if (this.isRemote) {
-      getDebugLogger().log('Remote 模式，停止创建 Server 进程');
+      getDebugLogger().log('[Remote mode] stop creating Server process');
     } else {
       this.startNode();
     }
@@ -201,8 +202,8 @@ export class CodeWindow extends Disposable implements ICodeWindow {
   }
 
   async startNode() {
-    await this.clear();
     this._nodeReady = new Deferred();
+    await this.clear();
     this.node = new KTNodeProcess(
       this.appConfig.nodeEntry,
       this.appConfig.extensionEntry,
@@ -215,26 +216,12 @@ export class CodeWindow extends Disposable implements ICodeWindow {
   }
 
   bindEvents() {
-    // 外部打开http
-    if (semver.lt(process.versions.electron, '13.0.0')) {
-      // Deprecated: WebContents new-window event
-      // https://www.electronjs.org/docs/latest/breaking-changes#deprecated-webcontents-new-window-event
-      this.browser.webContents.on('new-window', (event, url) => {
-        if (!event.defaultPrevented) {
-          event.preventDefault();
-          if (url.indexOf('http') === 0) {
-            shell.openExternal(url);
-          }
-        }
-      });
-    } else {
-      this.browser.webContents.setWindowOpenHandler((details) => {
-        if (details.url.indexOf('http') === 0) {
-          shell.openExternal(details.url);
-        }
-        return { action: 'deny' };
-      });
-    }
+    this.browser.webContents.setWindowOpenHandler((details) => {
+      if (details.url.indexOf('http') === 0) {
+        shell.openExternal(details.url);
+      }
+      return { action: 'deny' };
+    });
   }
 
   async clear() {
@@ -290,11 +277,11 @@ export class KTNodeProcess {
               EXTENSION_HOST_ENTRY: this.extensionEntry,
               EXTENSION_DIR: this.extensionDir,
               CODE_WINDOW_CLIENT_ID: this.windowClientId,
+              WORKSPACE_DIR: workspace,
             },
             stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
           };
           const forkArgs: string[] = [];
-          forkOptions.env!.WORKSPACE_DIR = workspace;
           forkArgs.push('--listenPath', rpcListenPath);
           this._process = fork(this.forkPath, forkArgs, forkOptions);
           this._process.on('message', (message) => {
@@ -305,14 +292,14 @@ export class KTNodeProcess {
           this._process.on('error', (error) => {
             reject(error);
           });
-          this._process.stdout.on('data', (data) => {
+          this._process.stdout?.on('data', (data) => {
             data = data.toString();
             if (data.length > 500) {
               data = data.slice(0, 500) + '...';
             }
             process.stdout.write('[node]' + data);
           });
-          this._process.stderr.on('data', (data) => {
+          this._process.stderr?.on('data', (data) => {
             data = data.toString();
             if (data.length > 500) {
               data = data.slice(0, 500) + '...';
@@ -332,13 +319,18 @@ export class KTNodeProcess {
   }
 
   /**
-   * 注意：方法需要的时间较长，需要执行完成后再关闭窗口
+   * 注意：该方法执行的时间较长，需要执行完成后再关闭窗口
    */
   async dispose() {
     const logger = getDebugLogger();
     logger.log('KTNodeProcess dispose', this._process.pid);
     if (this._process) {
       return new Promise<void>((resolve, reject) => {
+        if (!this._process.pid) {
+          resolve();
+          return;
+        }
+
         treeKill(this._process.pid, 'SIGKILL', (err) => {
           if (err) {
             logger.error(`tree kill error \n ${err.message}`);

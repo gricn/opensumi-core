@@ -1,23 +1,19 @@
-import { Provider, Injectable } from '@opensumi/di';
+import { Injectable, Provider } from '@opensumi/di';
 import { NodeModule } from '@opensumi/ide-core-node';
 
-import { VSXExtensionBackSerivceToken, VSXExtensionServicePath } from '../common';
+import { IOpenvsxMarketplaceService } from '../common';
 
-import { VSXExtensionService } from './vsx-extension.service';
+import { OpenvsxMarketplaceService } from './marketplace';
+import { VSXExtensionRemoteService } from './vsx-extension.service';
 
 @Injectable()
 export class OpenVsxExtensionManagerModule extends NodeModule {
   providers: Provider[] = [
     {
-      token: VSXExtensionBackSerivceToken,
-      useClass: VSXExtensionService,
+      token: IOpenvsxMarketplaceService,
+      useClass: OpenvsxMarketplaceService,
     },
   ];
 
-  backServices = [
-    {
-      servicePath: VSXExtensionServicePath,
-      token: VSXExtensionBackSerivceToken,
-    },
-  ];
+  remoteServices = [VSXExtensionRemoteService];
 }

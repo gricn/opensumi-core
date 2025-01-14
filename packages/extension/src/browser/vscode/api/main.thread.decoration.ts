@@ -1,15 +1,14 @@
-import { Injectable, Optional, Autowired } from '@opensumi/di';
+import { Autowired, Injectable, Optional } from '@opensumi/di';
 import { IRPCProtocol } from '@opensumi/ide-connection';
-import { UriComponents, Uri as URI, Emitter, CancellationToken } from '@opensumi/ide-core-common';
-import { IDisposable, dispose } from '@opensumi/ide-core-common';
-import { IDecorationsService, IDecorationData } from '@opensumi/ide-decoration';
+import { CancellationToken, Emitter, IDisposable, Uri as URI, UriComponents, dispose } from '@opensumi/ide-core-common';
+import { IDecorationData, IDecorationsService } from '@opensumi/ide-decoration';
 
 import { ExtHostAPIIdentifier } from '../../../common/vscode';
 import {
+  DecorationData,
+  DecorationRequest,
   IExtHostDecorationsShape,
   IMainThreadDecorationsShape,
-  DecorationRequest,
-  DecorationData,
 } from '../../../common/vscode/decoration';
 
 class DecorationRequestsQueue {
@@ -46,7 +45,7 @@ class DecorationRequestsQueue {
       // make request
       const requests = this._requests;
       const resolver = this._resolver;
-      this._proxy.$provideDecorations(Object.values(requests), CancellationToken.None).then((data) => {
+      this._proxy.$provideFileDecorations(Object.values(requests), CancellationToken.None).then((data) => {
         // eslint-disable-next-line guard-for-in
         for (const id in resolver) {
           resolver[id](data[id]);

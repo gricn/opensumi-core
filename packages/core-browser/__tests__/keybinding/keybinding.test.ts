@@ -1,12 +1,11 @@
 import {
+  BrowserKeyboardLayoutImpl,
   IContextKeyService,
+  Keybinding,
   KeybindingContribution,
   KeybindingRegistry,
   KeybindingRegistryImpl,
-  Keybinding,
   KeybindingScope,
-  ILogger,
-  BrowserKeyboardLayoutImpl,
   KeybindingService,
   SpecialCases,
 } from '@opensumi/ide-core-browser';
@@ -17,15 +16,14 @@ import {
 import {
   ContextKeyDefinedExpr,
   ContextKeyEqualsExpr,
+  ContextKeyExpr,
   ContextKeyNotEqualsExpr,
   ContextKeyNotExpr,
   ContextKeyRegexExpr,
-  ContextKeyExpr,
 } from '@opensumi/monaco-editor-core/esm/vs/platform/contextkey/common/contextkey';
 
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
-import { MockLogger } from '../../__mocks__/logger';
 import { KeybindingsResultCollection } from '../../src';
 import { KeyboardLayoutService } from '../../src/keyboard/keyboard-layout-service';
 import { GlobalBrowserStorageService, IStatusBarService } from '../../src/services';
@@ -43,41 +41,13 @@ describe('KeybindingRegistry', () => {
   };
 
   beforeAll(() => {
-    injector = createBrowserInjector(
-      [],
-      new MockInjector([
-        {
-          token: GlobalBrowserStorageService,
-          useValue: mockGlobalBrowserStorageService,
-        },
-        {
-          token: KeyboardNativeLayoutService,
-          useClass: BrowserKeyboardLayoutImpl,
-        },
-        {
-          token: KeyboardLayoutChangeNotifierService,
-          useClass: BrowserKeyboardLayoutImpl,
-        },
-        {
-          token: KeyboardLayoutService,
-          useClass: KeyboardLayoutService,
-        },
-        {
-          token: KeybindingRegistry,
-          useClass: KeybindingRegistryImpl,
-        },
-      ]),
-    );
+    injector = createBrowserInjector([]);
 
     // mock used instance
     injector.overrideProviders(
       {
         token: KeybindingContribution,
         useValue: {},
-      },
-      {
-        token: ILogger,
-        useClass: MockLogger,
       },
       {
         token: IContextKeyService,
@@ -91,6 +61,26 @@ describe('KeybindingRegistry', () => {
           removeElement: () => {},
           addElement: () => {},
         },
+      },
+      {
+        token: GlobalBrowserStorageService,
+        useValue: mockGlobalBrowserStorageService,
+      },
+      {
+        token: KeyboardNativeLayoutService,
+        useClass: BrowserKeyboardLayoutImpl,
+      },
+      {
+        token: KeyboardLayoutChangeNotifierService,
+        useClass: BrowserKeyboardLayoutImpl,
+      },
+      {
+        token: KeyboardLayoutService,
+        useClass: KeyboardLayoutService,
+      },
+      {
+        token: KeybindingRegistry,
+        useClass: KeybindingRegistryImpl,
       },
     );
 
@@ -295,45 +285,13 @@ describe('KeybindingService', () => {
   };
 
   beforeAll(() => {
-    injector = createBrowserInjector(
-      [],
-      new MockInjector([
-        {
-          token: GlobalBrowserStorageService,
-          useValue: mockGlobalBrowserStorageService,
-        },
-        {
-          token: KeyboardNativeLayoutService,
-          useClass: BrowserKeyboardLayoutImpl,
-        },
-        {
-          token: KeyboardLayoutChangeNotifierService,
-          useClass: BrowserKeyboardLayoutImpl,
-        },
-        {
-          token: KeyboardLayoutService,
-          useClass: KeyboardLayoutService,
-        },
-        {
-          token: KeybindingService,
-          useClass: KeybindingRegistryImpl,
-        },
-        {
-          token: KeybindingRegistry,
-          useFactory: (injector) => injector.get(KeybindingService),
-        },
-      ]),
-    );
+    injector = createBrowserInjector([]);
 
     // mock used instance
     injector.overrideProviders(
       {
         token: KeybindingContribution,
         useValue: {},
-      },
-      {
-        token: ILogger,
-        useClass: MockLogger,
       },
       {
         token: IContextKeyService,
@@ -347,6 +305,30 @@ describe('KeybindingService', () => {
           removeElement: () => {},
           addElement: () => {},
         },
+      },
+      {
+        token: GlobalBrowserStorageService,
+        useValue: mockGlobalBrowserStorageService,
+      },
+      {
+        token: KeyboardNativeLayoutService,
+        useClass: BrowserKeyboardLayoutImpl,
+      },
+      {
+        token: KeyboardLayoutChangeNotifierService,
+        useClass: BrowserKeyboardLayoutImpl,
+      },
+      {
+        token: KeyboardLayoutService,
+        useClass: KeyboardLayoutService,
+      },
+      {
+        token: KeybindingService,
+        useClass: KeybindingRegistryImpl,
+      },
+      {
+        token: KeybindingRegistry,
+        useFactory: (injector) => injector.get(KeybindingService),
       },
     );
     keybindingRegistry = injector.get(KeybindingRegistry);
@@ -489,7 +471,7 @@ describe('KeybindingService', () => {
       (ctrlSEvent as any).character = 's';
       (ctrlSEvent as any).ctrlKey = true;
       keybindingService.run(ctrlSEvent as any);
-      expect(testFn).toBeCalled();
+      expect(testFn).toHaveBeenCalled();
       handle.dispose();
     });
   });

@@ -1,25 +1,20 @@
 import { IContextKeyService } from '@opensumi/ide-core-browser';
-import { Disposable, URI, MarkerManager, Emitter } from '@opensumi/ide-core-common';
+import { Disposable, Emitter, MarkerManager, URI } from '@opensumi/ide-core-common';
 import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
 import { WorkbenchEditorService } from '@opensumi/ide-editor';
 import { IEditorDocumentModelService } from '@opensumi/ide-editor/lib/browser';
 import {
-  INormalizedDocumentSymbol,
   DocumentSymbolStore,
+  INormalizedDocumentSymbol,
 } from '@opensumi/ide-editor/lib/browser/breadcrumb/document-symbol';
-import { SymbolKind } from '@opensumi/ide-extension/lib/hosted/api/worker/worker.ext-types';
 import { IMainLayoutService } from '@opensumi/ide-main-layout';
-import { IOutlineDecorationService } from '@opensumi/ide-outline';
-import {
-  OutlineRoot,
-  OutlineCompositeTreeNode,
-  OutlineTreeNode,
-} from '@opensumi/ide-outline/lib/browser/outline-node.define';
-import { OutlineEventService } from '@opensumi/ide-outline/lib/browser/services/outline-event.service';
-import { OutlineModelService } from '@opensumi/ide-outline/lib/browser/services/outline-model.service';
-import { OutlineTreeService } from '@opensumi/ide-outline/lib/browser/services/outline-tree.service';
 
 import styles from '../../../../src/browser/outline-node.module.less';
+import { OutlineCompositeTreeNode, OutlineRoot, OutlineTreeNode } from '../../../src/browser/outline-node.define';
+import { OutlineEventService } from '../../../src/browser/services/outline-event.service';
+import { OutlineModelService } from '../../../src/browser/services/outline-model.service';
+import { OutlineTreeService } from '../../../src/browser/services/outline-tree.service';
+import { IOutlineDecorationService } from '../../../src/common';
 
 describe('OutlineTreeModelService', () => {
   let outlineTreeModelService: OutlineModelService;
@@ -29,7 +24,8 @@ describe('OutlineTreeModelService', () => {
     name: 'test',
     id: 'id',
     detail: '',
-    kind: SymbolKind.Boolean,
+    // kind: SymbolKind.Boolean,
+    kind: 16,
     range: {
       startColumn: 0,
       endColumn: 10,
@@ -68,6 +64,7 @@ describe('OutlineTreeModelService', () => {
     onDidActiveChange: jest.fn(() => Disposable.create(() => {})),
     onDidSelectionChange: jest.fn(() => Disposable.create(() => {})),
     onDidChange: jest.fn(() => Disposable.create(() => {})),
+    onDidViewCollapseChange: jest.fn(() => Disposable.create(() => {})),
   };
 
   const mockWorkbenchEditorService = {
@@ -138,7 +135,7 @@ describe('OutlineTreeModelService', () => {
 
     await outlineTreeModelService.whenReady;
 
-    await outlineTreeModelService.treeModel.root.ensureLoaded();
+    await outlineTreeModelService.treeModel!.ensureReady;
   });
 
   afterAll(() => {
@@ -168,18 +165,18 @@ describe('OutlineTreeModelService', () => {
   });
 
   it('should init success', () => {
-    expect(mockOutlineTreeService.resolveChildren).toBeCalledTimes(3);
+    expect(mockOutlineTreeService.resolveChildren).toHaveBeenCalledTimes(3);
   });
 
   it('initTreeModel method should be work', () => {
-    expect(mockOutlineEventService.onDidActiveChange).toBeCalledTimes(1);
-    expect(mockOutlineEventService.onDidChange).toBeCalledTimes(1);
-    expect(mockOutlineEventService.onDidSelectionChange).toBeCalledTimes(1);
-    expect(mockMarkerManager.onMarkerChanged).toBeCalledTimes(1);
+    expect(mockOutlineEventService.onDidActiveChange).toHaveBeenCalledTimes(1);
+    expect(mockOutlineEventService.onDidChange).toHaveBeenCalledTimes(1);
+    expect(mockOutlineEventService.onDidSelectionChange).toHaveBeenCalledTimes(1);
+    expect(mockMarkerManager.onMarkerChanged).toHaveBeenCalledTimes(1);
   });
 
   it('activeNodeDecoration method should be work', () => {
-    const node = outlineTreeModelService.treeModel.root!.children![0] as OutlineTreeNode;
+    const node = outlineTreeModelService.treeModel!.root!.children![0] as OutlineTreeNode;
     outlineTreeModelService.activeNodeDecoration(node);
     const decoration = outlineTreeModelService.decorations.getDecorations(node);
     expect(decoration).toBeDefined();
@@ -187,7 +184,7 @@ describe('OutlineTreeModelService', () => {
   });
 
   it('enactiveNodeDecoration method should be work', () => {
-    const node = outlineTreeModelService.treeModel.root!.children![0] as OutlineTreeNode;
+    const node = outlineTreeModelService.treeModel!.root!.children![0] as OutlineTreeNode;
     outlineTreeModelService.activeNodeDecoration(node);
     let decoration = outlineTreeModelService.decorations.getDecorations(node);
     expect(decoration).toBeDefined();
@@ -199,7 +196,7 @@ describe('OutlineTreeModelService', () => {
   });
 
   it('removeNodeDecoration method should be work', () => {
-    const node = outlineTreeModelService.treeModel.root!.children![0] as OutlineTreeNode;
+    const node = outlineTreeModelService.treeModel!.root!.children![0] as OutlineTreeNode;
     outlineTreeModelService.activeNodeDecoration(node);
     let decoration = outlineTreeModelService.decorations.getDecorations(node);
     outlineTreeModelService.removeNodeDecoration();
@@ -215,8 +212,8 @@ describe('OutlineTreeModelService', () => {
   });
 
   it('handleTreeBlur method should be work', () => {
-    const node = outlineTreeModelService.treeModel.root!.children![0] as OutlineTreeNode;
-    outlineTreeModelService.initDecorations(outlineTreeModelService.treeModel.root);
+    const node = outlineTreeModelService.treeModel!.root!.children![0] as OutlineTreeNode;
+    outlineTreeModelService.initDecorations(outlineTreeModelService.treeModel!.root);
     outlineTreeModelService.activeNodeDecoration(node);
     let decoration = outlineTreeModelService.decorations.getDecorations(node);
     expect(decoration).toBeDefined();
@@ -232,15 +229,15 @@ describe('OutlineTreeModelService', () => {
     let mockNode = { expanded: false };
     outlineTreeModelService.handleTreeHandler(treeHandle);
     outlineTreeModelService.toggleDirectory(mockNode as any);
-    expect(treeHandle.expandNode).toBeCalledTimes(1);
+    expect(treeHandle.expandNode).toHaveBeenCalledTimes(1);
     mockNode = { expanded: true };
     outlineTreeModelService.toggleDirectory(mockNode as any);
-    expect(treeHandle.collapseNode).toBeCalledTimes(1);
+    expect(treeHandle.collapseNode).toHaveBeenCalledTimes(1);
   });
 
   it('refresh method should be work', (done) => {
     outlineTreeModelService.onDidRefreshed(() => {
-      expect(mockOutlineDecorationService.updateDiagnosisInfo).toBeCalledTimes(1);
+      expect(mockOutlineDecorationService.updateDiagnosisInfo).toHaveBeenCalledTimes(1);
       done();
     });
     outlineTreeModelService.refresh();
@@ -248,15 +245,15 @@ describe('OutlineTreeModelService', () => {
 
   it('collapseAll method should be work', async () => {
     await outlineTreeModelService.collapseAll();
-    const node = outlineTreeModelService.treeModel.root!.children![0] as OutlineTreeNode;
+    const node = outlineTreeModelService.treeModel?.root?.getTreeNodeAtIndex(0) as OutlineTreeNode;
     expect((node as OutlineCompositeTreeNode).expanded).toBeFalsy();
   });
 
   it('location method should be work', async () => {
     const treeHandle = { ensureVisible: jest.fn() } as any;
     outlineTreeModelService.handleTreeHandler(treeHandle);
-    const node = outlineTreeModelService.treeModel.root!.children![0] as OutlineTreeNode;
+    const node = outlineTreeModelService.treeModel?.root?.getTreeNodeAtIndex(0) as OutlineTreeNode;
     await outlineTreeModelService.location(node);
-    expect(treeHandle.ensureVisible).toBeCalledTimes(1);
+    expect(treeHandle.ensureVisible).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,17 +1,14 @@
-import { Injectable, Autowired, Injector, INJECTOR_TOKEN } from '@opensumi/di';
-import { QuickInputOptions, IQuickInputService, QuickOpenService } from '@opensumi/ide-core-browser/lib/quick-open';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
+import { VALIDATE_TYPE } from '@opensumi/ide-components';
+import { IQuickInputService, QuickInputOptions, QuickOpenService } from '@opensumi/ide-core-browser/lib/quick-open';
 import { Deferred, Emitter, Event, withNullAsUndefined } from '@opensumi/ide-core-common';
 
-import { QuickTitleBar } from './quick-title-bar';
 import { InputBoxImpl } from './quickInput.inputBox';
 
 @Injectable()
 export class QuickInputService implements IQuickInputService {
   @Autowired(QuickOpenService)
   protected readonly quickOpenService: QuickOpenService;
-
-  @Autowired(QuickTitleBar)
-  protected readonly quickTitleBar: QuickTitleBar;
 
   @Autowired(INJECTOR_TOKEN)
   protected injector: Injector;
@@ -25,6 +22,10 @@ export class QuickInputService implements IQuickInputService {
 
     const result = new Deferred<string | undefined>();
     const validateInput = options && options.validateInput;
+    // 兼容旧逻辑
+    if (options.hideOnDidAccept === undefined) {
+      options.hideOnDidAccept = true;
+    }
 
     const inputBox = this.injector.get(InputBoxImpl, [options]);
     this.inputBox = inputBox;
@@ -38,7 +39,8 @@ export class QuickInputService implements IQuickInputService {
       const error = validateInput && v !== undefined ? withNullAsUndefined(await validateInput(v)) : undefined;
       // 每次都要设置一下，因为 error 为空说明没有错
       return {
-        validationMessage: error,
+        validationMessage: typeof error === 'string' ? error : error?.message,
+        validationType: typeof error === 'string' ? VALIDATE_TYPE.ERROR : error?.type ?? VALIDATE_TYPE.ERROR,
       };
     };
 

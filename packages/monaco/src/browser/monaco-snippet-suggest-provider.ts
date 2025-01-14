@@ -1,27 +1,31 @@
 import * as jsoncparser from 'jsonc-parser';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
+  Disposable,
+  DisposableCollection,
+  IDisposable,
+  ILogger,
   IRange,
   Uri,
-  localize,
-  ILogger,
-  Disposable,
-  IDisposable,
-  DisposableCollection,
-  path,
   isPatternInWord,
+  localize,
+  path,
 } from '@opensumi/ide-core-common';
 import { IFileServiceClient } from '@opensumi/ide-file-service/lib/common';
-import { SnippetParser } from '@opensumi/monaco-editor-core/esm/vs/editor/contrib/snippet/snippetParser';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import { ITextModel } from '@opensumi/monaco-editor-core/esm/vs/editor/common/model';
+import { SnippetParser } from '@opensumi/monaco-editor-core/esm/vs/editor/contrib/snippet/browser/snippetParser';
 
-import { ITextModel } from './monaco-api/types';
+import * as monaco from '../common';
+
+import { languageFeaturesService } from './monaco-api/languages';
 
 const { Path } = path;
 
 @Injectable()
 export class MonacoSnippetSuggestProvider implements monaco.languages.CompletionItemProvider {
+  _debugDisplayName = 'MonacoSnippetSuggestProvider';
+
   @Autowired(IFileServiceClient)
   protected readonly filesystem: IFileServiceClient;
 
@@ -62,7 +66,7 @@ export class MonacoSnippetSuggestProvider implements monaco.languages.Completion
       return undefined;
     }
     // TODO embed languageId, get languageId at position
-    const languageId = model.getModeId();
+    const languageId = model.getLanguageId();
     await this.loadSnippets(languageId);
     const languageSnippets = this.snippets.get(languageId) || [];
     const pos = { lineNumber: position.lineNumber, column: 1 };
@@ -217,7 +221,7 @@ export class MonacoSnippetSuggestProvider implements monaco.languages.Completion
       if (Array.isArray(body)) {
         body = body.join('\n');
       }
-      if (typeof prefix !== 'string' || typeof body !== 'string') {
+      if (typeof body !== 'string') {
         return;
       }
       const scopes: string[] = [];
@@ -235,16 +239,31 @@ export class MonacoSnippetSuggestProvider implements monaco.languages.Completion
           }
         }
       }
-      toDispose.push(
-        this.push({
-          scopes,
-          name,
-          prefix,
-          description,
-          body,
-          source,
-        }),
-      );
+      if (Array.isArray(prefix)) {
+        for (const key of prefix) {
+          toDispose.push(
+            this.push({
+              scopes,
+              name,
+              prefix: key,
+              description,
+              body,
+              source,
+            }),
+          );
+        }
+      } else {
+        toDispose.push(
+          this.push({
+            scopes,
+            name,
+            prefix,
+            description,
+            body,
+            source,
+          }),
+        );
+      }
     });
 
     return toDispose;
@@ -289,6 +308,10 @@ export class MonacoSnippetSuggestProvider implements monaco.languages.Completion
 
     return toDispose;
   }
+
+  registerSnippetsProvider() {
+    return languageFeaturesService.completionProvider.register(this.registeredLanguageIds, this);
+  }
 }
 
 export interface SnippetLoadOptions {
@@ -303,7 +326,7 @@ export interface JsonSerializedSnippets {
 export interface JsonSerializedSnippet {
   body: string | string[];
   scope: string;
-  prefix: string;
+  prefix: string | string[];
   description: string;
 }
 export namespace JsonSerializedSnippet {
@@ -326,8 +349,8 @@ export class MonacoSnippetSuggestion implements monaco.languages.CompletionItem 
   readonly detail: string;
   readonly sortText: string;
   readonly noAutoAccept = true;
-  readonly type: 'snippet' = 'snippet';
-  readonly snippetType: 'textmate' = 'textmate';
+  readonly type: 'snippet' = 'snippet' as const;
+  readonly snippetType: 'textmate' = 'textmate' as const;
   readonly kind = monaco.languages.CompletionItemKind.Snippet;
   range: IRange;
 

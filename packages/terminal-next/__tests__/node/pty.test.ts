@@ -1,7 +1,7 @@
 import os from 'os';
 
 import { Injector } from '@opensumi/di';
-import { createNodeInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
+import { createNodeInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
 
 import { TerminalNodePtyModule } from '../../src/node';
 import { PtyService } from '../../src/node/pty';
@@ -19,11 +19,11 @@ describe('PtyService function should be valid', () => {
   }
 
   beforeAll(() => {
-    injector = createNodeInjector([TerminalNodePtyModule], new Injector([]));
+    injector = createNodeInjector([TerminalNodePtyModule]);
   });
 
-  afterAll(() => {
-    injector.disposeAll();
+  afterAll(async () => {
+    await injector.disposeAll();
   });
 
   it('cannot create a invalid shell case1', async () => {

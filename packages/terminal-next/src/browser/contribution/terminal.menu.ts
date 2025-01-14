@@ -1,28 +1,24 @@
 import { Autowired } from '@opensumi/di';
 import {
-  localize,
-  PreferenceService,
-  IPreferenceSettingsService,
-  getSlotLocation,
   AppConfig,
-  getTabbarCtxKey,
-} from '@opensumi/ide-core-browser';
-import {
-  MenuContribution,
-  IMenuRegistry,
-  getTabbarCommonMenuId,
-  MenuId as CoreMenuId,
-  MenuId,
-} from '@opensumi/ide-core-browser/lib/menu/next';
-import { Domain, CommandService, isWindows } from '@opensumi/ide-core-common';
-
-import {
-  ITerminalController,
-  ITerminalGroupViewService,
-  ITerminalSearchService,
-  TerminalContainerId,
+  IPreferenceSettingsService,
+  PreferenceService,
   TERMINAL_COMMANDS,
-} from '../../common';
+  getSlotLocation,
+  getTabbarCtxKey,
+  localize,
+} from '@opensumi/ide-core-browser';
+import { TERMINAL_CONTAINER_ID } from '@opensumi/ide-core-browser/lib/common/container-id';
+import {
+  MenuId as CoreMenuId,
+  IMenuRegistry,
+  MenuContribution,
+  MenuId,
+  getTabbarCommonMenuId,
+} from '@opensumi/ide-core-browser/lib/menu/next';
+import { CommandService, Domain, isWindows } from '@opensumi/ide-core-common';
+
+import { ITerminalController, ITerminalGroupViewService, ITerminalSearchService } from '../../common';
 
 export const group = 'panel_menu';
 export const more1 = 'more_1';
@@ -106,7 +102,7 @@ export class TerminalMenuContribution implements MenuContribution {
     const location = getSlotLocation('@opensumi/ide-terminal-next', this.config.layoutConfig);
     const tabbarCtxKey = getTabbarCtxKey(location);
     const commonMenuId = getTabbarCommonMenuId(location);
-    const when = `${tabbarCtxKey} == ${TerminalContainerId}`;
+    const when = `${tabbarCtxKey} == ${TERMINAL_CONTAINER_ID}`;
     /** 更多菜单 */
     menuRegistry.registerMenuItem(commonMenuId, {
       command: TERMINAL_COMMANDS.CLEAR,
@@ -124,14 +120,14 @@ export class TerminalMenuContribution implements MenuContribution {
 
     menuRegistry.registerMenuItem(commonMenuId, {
       label: localize('terminal.menu.selectType'),
-      submenu: 'tabbar_bottom_select_sub',
+      submenu: MenuId.TerminalDefaultTypeMenu,
       order: 1,
       group: more2,
       when,
     });
 
-    if (this.config.isElectronRenderer && isWindows) {
-      menuRegistry.registerMenuItems('tabbar_bottom_select_sub', [
+    if (isWindows) {
+      menuRegistry.registerMenuItems(MenuId.TerminalDefaultTypeMenu, [
         {
           command: TERMINAL_COMMANDS.SELECT_CMD,
           order: 1,
@@ -148,7 +144,7 @@ export class TerminalMenuContribution implements MenuContribution {
         },
       ]);
     } else {
-      menuRegistry.registerMenuItems('tabbar_bottom_select_sub', [
+      menuRegistry.registerMenuItems(MenuId.TerminalDefaultTypeMenu, [
         {
           command: TERMINAL_COMMANDS.SELECT_ZSH,
           order: 1,

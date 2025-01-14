@@ -1,11 +1,10 @@
-import { observable, action } from 'mobx';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
+import { IContextKeyService, IReporterService, memoize } from '@opensumi/ide-core-browser';
+import { AbstractContextMenuService, IContextMenu, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
+import { IElectronMainUIService } from '@opensumi/ide-core-common/lib/electron';
+import { observableValue, transaction } from '@opensumi/ide-monaco/lib/common/observable';
 
-import { Injectable, Autowired } from '@opensumi/di';
-import { IContextKeyService, IReporterService } from '@opensumi/ide-core-browser';
-import { AbstractContextMenuService, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
-import { IContextMenu } from '@opensumi/ide-core-browser/lib/menu/next';
-
-import { DebugState, DEBUG_REPORT_NAME } from '../../../common';
+import { DEBUG_REPORT_NAME, DebugState } from '../../../common';
 import { DebugSession } from '../../debug-session';
 import { DebugViewModel } from '../debug-view-model';
 
@@ -23,17 +22,12 @@ export class DebugToolbarService {
   @Autowired(IReporterService)
   protected readonly reporterService: IReporterService;
 
-  @observable
-  state: DebugState;
+  @Autowired(INJECTOR_TOKEN)
+  private readonly injector: Injector;
 
-  @observable
-  sessionCount: number;
-
-  @observable
-  currentSession: DebugSession | undefined;
-
-  @observable.shallow
-  sessions: DebugSession[] = [];
+  state = observableValue(this, DebugState.Inactive);
+  currentSession = observableValue<DebugSession | undefined>(this, undefined);
+  sessions = observableValue<DebugSession[]>(this, []);
 
   public readonly toolBarMenuMap: Map<string, IContextMenu> = new Map();
 
@@ -44,28 +38,36 @@ export class DebugToolbarService {
     });
   }
 
-  @action
-  updateModel() {
-    this.state = this.model.state;
-    this.currentSession = this.model.currentSession;
-    this.sessions = Array.from(this.model.sessions).filter(
-      (session: DebugSession) => session && session.state > DebugState.Inactive,
-    );
-    this.sessionCount = this.sessions.length;
+  @memoize
+  get mainUIService() {
+    return this.injector.get(IElectronMainUIService);
   }
 
-  @action
+  updateModel() {
+    transaction((tx) => {
+      this.state.set(this.model.state, tx);
+      this.currentSession.set(this.model.currentSession, tx);
+      this.sessions.set(
+        Array.from(this.model.sessions).filter(
+          (session: DebugSession) => session && session.state > DebugState.Inactive,
+        ),
+        tx,
+      );
+    });
+  }
+
   updateToolBarMenu() {
-    if (this.currentSession && this.currentSession.id && !this.toolBarMenuMap.has(this.currentSession.id)) {
+    const currentSession = this.currentSession.get();
+    if (currentSession && currentSession.id && !this.toolBarMenuMap.has(currentSession.id)) {
       const contextMenu = this.contextMenuService.createMenu({
         id: MenuId.DebugToolBar,
         contextKeyService: this.contextKeyService.createScoped(),
       });
-      this.currentSession.on('terminated', () => {
-        this.toolBarMenuMap.delete(this.currentSession?.id!);
+      currentSession.on('terminated', () => {
+        this.toolBarMenuMap.delete(currentSession.id);
       });
 
-      this.toolBarMenuMap.set(this.currentSession.id, contextMenu);
+      this.toolBarMenuMap.set(currentSession.id, contextMenu);
     }
   }
 
@@ -77,7 +79,7 @@ export class DebugToolbarService {
     this.model.reportAction(session.id, threadId, name);
     const extra = {
       type: languageType,
-      request: this.currentSession?.configuration.request,
+      request: this.currentSession.get()?.configuration?.request,
       sessionId: session.id,
       threadId,
     };
@@ -88,7 +90,7 @@ export class DebugToolbarService {
     };
   }
 
-  doStart = () => this.model.start();
+  doStart = async () => await this.model.start();
 
   doRestart = async () => {
     const reportTimeEnd = this.instrumentReporter('restart');

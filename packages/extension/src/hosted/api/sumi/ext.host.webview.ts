@@ -1,8 +1,8 @@
 import { IRPCProtocol } from '@opensumi/ide-connection';
 import { Disposable, Emitter, path } from '@opensumi/ide-core-common';
 
-import { IPlainWebviewHandle, IExtHostPlainWebview } from '../../../common/sumi/webview';
-import { MainThreadAPIIdentifier, IMainThreadWebview, IExtensionDescription } from '../../../common/vscode';
+import { IExtHostPlainWebview, IPlainWebviewHandle } from '../../../common/sumi/webview';
+import { IExtensionDescription, IMainThreadWebview, MainThreadAPIIdentifier } from '../../../common/vscode';
 
 const { join } = path;
 
@@ -56,6 +56,10 @@ export class PlainWebviewHandle extends Disposable implements IPlainWebviewHandl
 
   postMessage(message: any) {
     return this.proxy.$postMessageToPlainWebview(this.id, message);
+  }
+
+  async setPartition(value?: string | undefined): Promise<void> {
+    await this.proxy.$setPlainWebviewPartition(this.id, value);
   }
 
   async loadUrl(url: string) {

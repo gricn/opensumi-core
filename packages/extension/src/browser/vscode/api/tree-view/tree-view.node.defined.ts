@@ -1,9 +1,9 @@
-import { TreeNode, CompositeTreeNode, ITree } from '@opensumi/ide-components';
+import { CompositeTreeNode, ITree, TreeNode } from '@opensumi/ide-components';
 import { MenuNode } from '@opensumi/ide-core-browser/lib/menu/next';
-import { IAccessibilityInformation } from '@opensumi/ide-core-common';
+import { IAccessibilityInformation, Uri, UriComponents, isObject, isString } from '@opensumi/ide-core-common';
 
-import { ITreeItemLabel } from '../../../../common/vscode';
-import { ICommand } from '../../../../common/vscode/models';
+import { ITreeItemLabel, TreeViewItemCheckboxInfo } from '../../../../common/vscode';
+import { Command } from '../../../../common/vscode/models';
 import { TreeViewDataProvider } from '../main.thread.treeview';
 
 export class ExtensionTreeRoot extends CompositeTreeNode {
@@ -30,7 +30,7 @@ export class ExtensionTreeRoot extends CompositeTreeNode {
   }
 
   get displayName() {
-    return this._displayName || this.name;
+    return this._displayName;
   }
 
   dispose() {
@@ -42,9 +42,10 @@ export class ExtensionCompositeTreeNode extends CompositeTreeNode {
   private _displayName: string;
   private _hightlights?: [number, number][];
   private _strikethrough?: boolean;
-  private _command?: ICommand;
+  private _command?: Command;
   private _tooltip?: string;
   private _resolved = false;
+  private sourceUri?: UriComponents;
 
   constructor(
     tree: TreeViewDataProvider,
@@ -53,22 +54,23 @@ export class ExtensionCompositeTreeNode extends CompositeTreeNode {
     public description: string = '',
     public icon: string = '',
     tooltip = '',
-    command: ICommand | undefined,
+    command: Command | undefined,
     public contextValue: string = '',
     public treeItemId: string = '',
     public actions: MenuNode[],
+    private _checkboxInfo?: TreeViewItemCheckboxInfo,
     private _accessibilityInformation?: IAccessibilityInformation,
     expanded?: boolean,
-    id?: number,
+    sourceUri?: UriComponents,
   ) {
-    super(tree, parent, undefined, {});
+    super(tree, parent, undefined, { name: encodeURIComponent(treeItemId) });
     this.isExpanded = expanded || false;
-    this.id = id || this.id;
+    this.sourceUri = sourceUri;
     this._command = command;
     this._tooltip = tooltip;
-    if (typeof label === 'string') {
+    if (isString(label)) {
       this._displayName = label;
-    } else if (typeof label === 'object') {
+    } else if (isObject(label)) {
       this._displayName = label.label;
       this._hightlights = label.highlights;
       this._strikethrough = label.strikethrough;
@@ -91,6 +93,10 @@ export class ExtensionCompositeTreeNode extends CompositeTreeNode {
     return this._displayName;
   }
 
+  get checkboxInfo() {
+    return this._checkboxInfo;
+  }
+
   get accessibilityInformation() {
     return {
       role: this._accessibilityInformation?.role || 'treeitem',
@@ -100,6 +106,10 @@ export class ExtensionCompositeTreeNode extends CompositeTreeNode {
 
   get strikethrough() {
     return this._strikethrough;
+  }
+
+  get uri(): Uri | undefined {
+    return this.sourceUri && Uri.from(this.sourceUri);
   }
 
   get highlights() {
@@ -112,7 +122,8 @@ export class ExtensionCompositeTreeNode extends CompositeTreeNode {
       this.treeItemId,
     );
     if (resolved) {
-      this._tooltip = resolved.tooltip;
+      // TODO: resolved markdown string tooltip
+      this._tooltip = typeof resolved.tooltip === 'string' ? resolved.tooltip : resolved.tooltip?.value;
       this._command = resolved.command;
     }
     this._resolved = true;
@@ -137,21 +148,18 @@ export class ExtensionTreeNode extends TreeNode {
     public description: string = '',
     public icon: string = '',
     private _tooltip: string | undefined,
-    private _command: ICommand | undefined,
+    private _command: Command | undefined,
     public contextValue: string = '',
     public treeItemId: string = '',
     public actions: MenuNode[],
+    private _checkboxInfo?: TreeViewItemCheckboxInfo,
     private _accessibilityInformation?: IAccessibilityInformation,
-    id?: number,
+    private sourceUri?: UriComponents,
   ) {
-    super(tree as ITree, parent, undefined, {});
-    this.id = id || this.id;
-    // 每个节点应该拥有自己独立的路径，不存在重复性
-    // displayName 作为展示用的字段
-    this.name = String(this.id);
-    if (typeof label === 'string') {
+    super(tree as ITree, parent, undefined, { name: encodeURIComponent(treeItemId) });
+    if (isString(label)) {
       this._displayName = label;
-    } else if (typeof label === 'object') {
+    } else if (isObject(label)) {
       this._displayName = label.label;
       this._hightlights = label.highlights;
       this._strikethrough = label.strikethrough;
@@ -166,12 +174,20 @@ export class ExtensionTreeNode extends TreeNode {
     return this._command;
   }
 
+  get uri(): Uri | undefined {
+    return this.sourceUri && Uri.from(this.sourceUri);
+  }
+
   get tooltip() {
     return this._tooltip;
   }
 
   get displayName() {
     return this._displayName;
+  }
+
+  get checkboxInfo() {
+    return this._checkboxInfo;
   }
 
   get accessibilityInformation() {
@@ -195,7 +211,8 @@ export class ExtensionTreeNode extends TreeNode {
       this.treeItemId,
     );
     if (resolved) {
-      this._tooltip = resolved.tooltip;
+      // TODO: resolved markdown string tooltip
+      this._tooltip = typeof resolved.tooltip === 'string' ? resolved.tooltip : resolved.tooltip?.value;
       this._command = resolved.command;
     }
     this._resolved = true;

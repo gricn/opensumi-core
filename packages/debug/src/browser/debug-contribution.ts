@@ -1,61 +1,66 @@
-import { Autowired } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
 import {
-  Domain,
+  COMMON_COMMANDS,
   ClientAppContribution,
-  localize,
   CommandContribution,
   CommandRegistry,
-  KeybindingContribution,
-  JsonSchemaContribution,
-  IJSONSchemaRegistry,
-  PreferenceSchema,
-  PreferenceContribution,
   CommandService,
-  IReporterService,
-  formatLocalize,
-  CoreConfiguration,
   ComponentContribution,
   ComponentRegistry,
-  KeybindingRegistry,
-  getIcon,
-  PreferenceService,
+  CoreConfiguration,
+  Domain,
+  IJSONSchemaRegistry,
   IPreferenceSettingsService,
-  COMMON_COMMANDS,
+  IReporterService,
+  JsonSchemaContribution,
+  KeybindingContribution,
+  KeybindingRegistry,
+  PreferenceContribution,
+  PreferenceSchema,
+  PreferenceService,
+  formatLocalize,
+  getIcon,
+  localize,
 } from '@opensumi/ide-core-browser';
-import { ToolbarRegistry, TabBarToolbarContribution } from '@opensumi/ide-core-browser/lib/layout';
-import { MenuContribution, MenuId, IMenuRegistry } from '@opensumi/ide-core-browser/lib/menu/next';
-import { URI } from '@opensumi/ide-core-common';
+import { browserViews } from '@opensumi/ide-core-browser/lib/extensions/schema/browserViews';
+import { TabBarToolbarContribution, ToolbarRegistry } from '@opensumi/ide-core-browser/lib/layout';
+import { IMenuRegistry, MenuContribution, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
+import { IExtensionsSchemaService, URI, runWhenIdle } from '@opensumi/ide-core-common';
 import {
   BrowserEditorContribution,
-  IEditorFeatureRegistry,
   EditorComponentRegistry,
   IEditor,
+  IEditorFeatureRegistry,
 } from '@opensumi/ide-editor/lib/browser';
 import { IFileServiceClient, IShadowFileProvider } from '@opensumi/ide-file-service';
 import { FileServiceClient } from '@opensumi/ide-file-service/lib/browser/file-service-client';
 import { IMainLayoutService, IViewsRegistry } from '@opensumi/ide-main-layout';
 import { WelcomeView } from '@opensumi/ide-main-layout/lib/browser/welcome.view';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import * as monaco from '@opensumi/ide-monaco';
 
 import {
-  IDebugSessionManager,
-  launchSchemaUri,
-  DEBUG_CONTAINER_ID,
-  DEBUG_WATCH_ID,
-  DEBUG_VARIABLES_ID,
-  DEBUG_STACK_ID,
   DEBUG_BREAKPOINTS_ID,
+  DEBUG_COMMANDS,
+  DEBUG_CONTAINER_ID,
   DEBUG_FLOATING_CLICK_WIDGET,
   DEBUG_REPORT_NAME,
-  DEBUG_WELCOME_ID,
   DEBUG_SCHEME,
+  DEBUG_STACK_ID,
+  DEBUG_VARIABLES_ID,
+  DEBUG_WATCH_ID,
+  DEBUG_WELCOME_ID,
+  IDebugModelManager,
+  IDebugSessionManager,
   TSourceBrekpointProperties,
+  launchDefaultSchemaUri,
 } from '../common';
 
 import {
-  CONTEXT_DEBUGGERS_AVAILABLE,
-  CONTEXT_IN_DEBUG_MODE,
+  CONTEXT_ACTIVE_BREAKPOINTS,
   CONTEXT_BREAKPOINT_INPUT_FOCUSED,
+  CONTEXT_DEBUGGERS_AVAILABLE,
+  CONTEXT_EXCEPTION_WIDGET_VISIBLE,
+  CONTEXT_IN_DEBUG_MODE,
 } from './../common/constants';
 import { BreakpointManager, SelectedBreakpoint } from './breakpoint';
 import { FloatingClickWidget } from './components/floating-click-widget';
@@ -63,16 +68,16 @@ import { DebugContextKey } from './contextkeys/debug-contextkey.service';
 import { DebugConfigurationManager } from './debug-configuration-manager';
 import { DebugPreferences, debugPreferencesSchema } from './debug-preferences';
 import { DebugProgressService } from './debug-progress.service';
-import { launchSchema } from './debug-schema-updater';
+import { launchSchema } from './debug-schema-manager';
 import { DebugSession } from './debug-session';
 import { DebugSessionManager } from './debug-session-manager';
 import { DebugEditorContribution } from './editor/debug-editor-contribution';
-import { DebugModelManager } from './editor/debug-model-manager';
 import { DebugRunToCursorService } from './editor/debug-run-to-cursor.service';
+import breakpointViewStyles from './view/breakpoints/debug-breakpoints.module.less';
 import { DebugBreakpointsService } from './view/breakpoints/debug-breakpoints.service';
 import { DebugBreakpointView } from './view/breakpoints/debug-breakpoints.view';
 import { DebugConfigurationService } from './view/configuration/debug-configuration.service';
-import { DebugConfigurationView } from './view/configuration/debug-configuration.view';
+import { DebugConfigurationContainerView } from './view/configuration/debug-configuration.view';
 import { DebugToolbarService } from './view/configuration/debug-toolbar.service';
 import { DebugConsoleService } from './view/console/debug-console.service';
 import { DebugViewModel } from './view/debug-view-model';
@@ -81,148 +86,9 @@ import { DebugVariableView } from './view/variables/debug-variables.view';
 import { DebugWatchView } from './view/watch/debug-watch.view';
 
 const LAUNCH_JSON_REGEX = /launch\.json$/;
-
-export namespace DEBUG_COMMANDS {
-  export const ADD_WATCHER = {
-    id: 'debug.watch.add',
-    iconClass: getIcon('plus'),
-  };
-  export const COLLAPSE_ALL_WATCHER = {
-    id: 'debug.watch.collapseAll',
-    iconClass: getIcon('collapse-all'),
-  };
-  export const REMOVE_ALL_WATCHER = {
-    id: 'debug.watch.removeAll',
-    iconClass: getIcon('close-all'),
-  };
-  export const REMOVE_WATCHER = {
-    id: 'debug.watch.remove',
-  };
-  export const EDIT_WATCHER = {
-    id: 'debug.watch.edit',
-  };
-  export const COPY_WATCHER_VALUE = {
-    id: 'debug.watch.copyValue',
-  };
-  export const REMOVE_ALL_BREAKPOINTS = {
-    id: 'debug.breakpoints.remove.all',
-    iconClass: getIcon('close-all'),
-  };
-  export const TOGGLE_BREAKPOINTS = {
-    id: 'debug.breakpoints.toggle',
-    iconClass: getIcon('deactivate-breakpoints'),
-  };
-  export const START = {
-    id: 'debug.start',
-  };
-  export const NEXT = {
-    id: 'debug.next',
-  };
-  export const PREV = {
-    id: 'debug.prev',
-  };
-  export const OVER = {
-    id: 'debug.over',
-  };
-  export const STOP = {
-    id: 'debug.stop',
-  };
-  export const CONTINUE = {
-    id: 'debug.continue',
-  };
-  export const RESTART = {
-    id: 'debug.restart',
-  };
-  export const PAUSE = {
-    id: 'debug.pause',
-  };
-  // menu commands
-  export const DELETE_BREAKPOINT = {
-    id: 'debug.delete.breakpoint',
-    label: localize('debug.menu.delete.breakpoint'),
-  };
-  export const EDIT_BREAKPOINT = {
-    id: 'debug.edit.breakpoint',
-    label: localize('debug.menu.edit.breakpoint'),
-  };
-  export const DISABLE_BREAKPOINT = {
-    id: 'debug.disable.breakpoint',
-    label: localize('debug.menu.disable.breakpoint'),
-  };
-  export const ENABLE_BREAKPOINT = {
-    id: 'debug.enable.breakpoint',
-    label: localize('debug.menu.enable.breakpoint'),
-  };
-  export const ENABLE_LOGPOINT = {
-    id: 'debug.enable.logpoint',
-    label: localize('debug.menu.enable.logpoint'),
-  };
-  export const ADD_BREAKPOINT = {
-    id: 'debug.add.breakpoint',
-    label: localize('debug.menu.add.breakpoint'),
-  };
-  export const ADD_LOGPOINT = {
-    id: 'debug.add.logpoint',
-    label: localize('debug.menu.add.logpoint'),
-  };
-  export const ADD_CONDITIONAL_BREAKPOINT = {
-    id: 'debug.add.conditional',
-    label: localize('debug.menu.add.conditional'),
-  };
-  export const RESTART_FRAME = {
-    id: 'debug.callstack.restart.frame',
-  };
-  export const COPY_STACK_TRACE = {
-    id: 'debug.callstack.copy',
-  };
-  // variables
-  export const SET_VARIABLE_VALUE = {
-    id: 'debug.variables.setValue',
-  };
-  export const COPY_VARIABLE_VALUE = {
-    id: 'debug.variables.copy',
-  };
-  export const COPY_EVALUATE_PATH = {
-    id: 'debug.evaluate.copy',
-  };
-  export const ADD_TO_WATCH_ID = {
-    id: 'debug.addToWatchExpressions',
-  };
-  // console commands
-  export const CLEAR_CONSOLE = {
-    id: 'debug.console.clear',
-    label: localize('debug.console.clear'),
-  };
-  export const COPY_CONSOLE_ITEM = {
-    id: 'debug.console.copy',
-  };
-  export const COPY_CONSOLE_ALL = {
-    id: 'debug.console.copyALl',
-  };
-  export const COLLAPSE_ALL_CONSOLE_ITEM = {
-    id: 'debug.console.collapseAll',
-    label: localize('debug.console.collapseAll'),
-  };
-  export const CONSOLE_ENTER_EVALUATE = {
-    id: 'debug.console.keybing.enter.evaluate',
-  };
-  export const CONSOLE_INPUT_DOWN_ARROW = {
-    id: 'debug.console.input.down.arrow',
-  };
-  export const CONSOLE_INPUT_UP_ARROW = {
-    id: 'debug.console.input.up.arrow',
-  };
-  export const CONSOLE_FILTER_FOCUS = {
-    id: 'debug.console.filter.input.focus',
-  };
-  export const RUN_TO_CURSOR = {
-    id: 'debug.action.runToCursor',
-    label: localize('debug.action.runToCursor'),
-  };
-  export const FORCE_RUN_TO_CURSOR = {
-    id: 'debug.action.forceRunToCursor',
-    label: localize('debug.action.forceRunToCursor'),
-  };
+enum LAUNCH_OPEN {
+  json,
+  editor,
 }
 
 export namespace DebugBreakpointWidgetCommands {
@@ -267,8 +133,8 @@ export class DebugContribution
   @Autowired(DebugConfigurationManager)
   protected readonly configurations: DebugConfigurationManager;
 
-  @Autowired(DebugModelManager)
-  protected debugEditorController: DebugModelManager;
+  @Autowired(IDebugModelManager)
+  protected debugEditorController: IDebugModelManager;
 
   @Autowired(DebugBreakpointsService)
   protected debugBreakpointsService: DebugBreakpointsService;
@@ -294,8 +160,8 @@ export class DebugContribution
   @Autowired(DebugToolbarService)
   protected readonly debugToolbarService: DebugToolbarService;
 
-  @Autowired(DebugEditorContribution)
-  private debugEditorContribution: DebugEditorContribution;
+  @Autowired(INJECTOR_TOKEN)
+  private readonly injector: Injector;
 
   @Autowired(PreferenceService)
   protected readonly preferences: PreferenceService;
@@ -324,7 +190,11 @@ export class DebugContribution
   @Autowired(DebugContextKey)
   protected readonly debugContextKey: DebugContextKey;
 
+  @Autowired(IExtensionsSchemaService)
+  protected readonly extensionsPointService: IExtensionsSchemaService;
+
   private firstSessionStart = true;
+  private openedViewSessions = new Set();
 
   get selectedBreakpoint(): SelectedBreakpoint | undefined {
     const { selectedBreakpoint } = this.breakpointManager;
@@ -334,7 +204,7 @@ export class DebugContribution
   registerEditorComponent(registry: EditorComponentRegistry) {
     registry.registerEditorSideWidget({
       id: DEBUG_FLOATING_CLICK_WIDGET,
-      component: FloatingClickWidget as any,
+      component: FloatingClickWidget,
       displaysOnResource: (r) => {
         const { configUri } = this.preferences.resolve('launch');
         if (!configUri) {
@@ -390,7 +260,7 @@ export class DebugContribution
         priority: 7,
         title: localize('debug.container.title'),
         containerId: DEBUG_CONTAINER_ID,
-        titleComponent: DebugConfigurationView,
+        titleComponent: DebugConfigurationContainerView,
         activateKeyBinding: 'ctrlcmd+shift+d',
       },
     );
@@ -404,7 +274,11 @@ export class DebugContribution
 
   onStart() {
     this.viewsRegistry.registerViewWelcomeContent(DEBUG_WELCOME_ID, {
-      content: formatLocalize('welcome-view.noLaunchJson', DEBUG_COMMANDS.START.id),
+      content: formatLocalize(
+        'welcome-view.noLaunchJson',
+        COMMON_COMMANDS.OPEN_LAUNCH_CONFIGURATION.id,
+        DEBUG_COMMANDS.SHOW_ALL_AUTOMATIC_DEBUG_CONFIGURATIONS.id,
+      ),
       when: 'default',
     });
     this.sessionManager.onDidCreateDebugSession((session: DebugSession) => {
@@ -418,7 +292,12 @@ export class DebugContribution
           this.openDebugView();
         }
       } else if (openDebug !== 'neverOpen') {
-        this.openDebugView();
+        const parentSession = session.parentSession;
+        const sessionId = parentSession?.id || session.id;
+        if (!this.openedViewSessions.has(sessionId)) {
+          this.openedViewSessions.add(sessionId);
+          this.openDebugView();
+        }
       }
 
       if (
@@ -437,18 +316,29 @@ export class DebugContribution
         this.openDebugView();
       }
     });
-    this.sessionManager.onDidDestroyDebugSession((session) => {
+    this.sessionManager.onDidDestroyDebugSession(() => {
       if (this.sessionManager.sessions.length === 0) {
         this.commandService.tryExecuteCommand('statusbar.changeBackgroundColor', 'var(--statusBar-background)');
-        this.commandService.tryExecuteCommand('statusbar.changeColor', 'var(--statusBar-foreground)');
+        this.commandService.tryExecuteCommand('statusbar.changeColor');
       }
     });
-    this.configurations.load();
-    this.breakpointManager.load();
-    this.configurations.onDidChange(() => this.configurations.save());
-    this.breakpointManager.onDidChangeBreakpoints(() => this.breakpointManager.save());
-    this.breakpointManager.onDidChangeExceptionsBreakpoints(() => this.breakpointManager.save());
-    this.breakpointManager.onDidChangeMarkers(() => this.breakpointManager.save());
+    this.configurations.whenReady.then(() => {
+      this.configurations.load();
+      this.configurations.onDidChange(() => this.configurations.save());
+    });
+    this.breakpointManager.load().then(() => {
+      this.breakpointManager.onDidChangeBreakpoints(() => this.breakpointManager.save());
+      this.breakpointManager.onDidChangeExceptionsBreakpoints(() => this.breakpointManager.save());
+      this.breakpointManager.onDidChangeMarkers(() => this.breakpointManager.save());
+    });
+    this.extensionsPointService.appendExtensionPoint(['browserViews', 'properties'], {
+      extensionPoint: DEBUG_CONTAINER_ID,
+      frameworkKind: ['opensumi'],
+      jsonSchema: {
+        ...browserViews.properties,
+        description: formatLocalize('sumiContributes.browserViews.location.custom', localize('menu-bar.title.debug')),
+      },
+    });
   }
 
   // 左侧调试面板
@@ -469,13 +359,17 @@ export class DebugContribution
   onDidRender() {
     const handler = this.mainlayoutService.getTabbarHandler(DEBUG_CONTAINER_ID);
     if (handler) {
-      handler!.setTitleComponent(DebugConfigurationView);
+      handler!.setTitleComponent(DebugConfigurationContainerView);
     }
   }
 
   registerCommands(commands: CommandRegistry) {
     commands.registerCommand(COMMON_COMMANDS.OPEN_LAUNCH_CONFIGURATION, {
-      execute: () => {
+      execute: (type: LAUNCH_OPEN = LAUNCH_OPEN.json) => {
+        if (type === LAUNCH_OPEN.editor) {
+          return this.debugConfigurationService.openLaunchEditor();
+        }
+
         this.debugConfigurationService.openConfiguration();
       },
     });
@@ -529,10 +423,42 @@ export class DebugContribution
         this.debugBreakpointsService.toggleBreakpoints();
       },
     });
+    commands.registerCommand(DEBUG_COMMANDS.ACTIVE_BREAKPOINTS, {
+      execute: () => {
+        const { enable } = this.debugBreakpointsService;
+        if (!enable.get()) {
+          this.debugBreakpointsService.toggleBreakpoints();
+        }
+      },
+    });
+    commands.registerCommand(DEBUG_COMMANDS.DEACTIVE_BREAKPOINTS, {
+      execute: () => {
+        const { enable } = this.debugBreakpointsService;
+        if (enable.get()) {
+          this.debugBreakpointsService.toggleBreakpoints();
+        }
+      },
+    });
     commands.registerCommand(DEBUG_COMMANDS.EDIT_BREAKPOINT, {
       execute: async (position: monaco.Position) => {
         this.reporterService.point(DEBUG_REPORT_NAME?.DEBUG_BREAKPOINT, 'edit');
+        const model = this.debugEditorController.model;
+        if (!model) {
+          return;
+        }
+
+        const { uri } = model;
+        const breakpoint = this.breakpointManager.getBreakpoint(uri, position!.lineNumber);
+        // 更新当前选中的断点
+        if (breakpoint) {
+          this.breakpointManager.selectedBreakpoint = {
+            breakpoint,
+            model,
+          };
+        }
+
         const { selectedBreakpoint } = this;
+
         if (selectedBreakpoint) {
           const { openBreakpointView } = selectedBreakpoint.model;
           let defaultContext: TSourceBrekpointProperties = 'condition';
@@ -554,7 +480,6 @@ export class DebugContribution
         }
       },
       isVisible: () => !!this.selectedBreakpoint && !!this.selectedBreakpoint.breakpoint,
-      isEnabled: () => !!this.selectedBreakpoint && !!this.selectedBreakpoint.breakpoint,
     });
     commands.registerCommand(DEBUG_COMMANDS.DISABLE_BREAKPOINT, {
       execute: async (position: monaco.Position) => {
@@ -699,6 +624,16 @@ export class DebugContribution
       },
       isEnabled: () => this.debugContextKey.contextDebugState.get() === 'Stopped',
     });
+    commands.registerCommand(DEBUG_COMMANDS.SHOW_ALL_AUTOMATIC_DEBUG_CONFIGURATIONS, {
+      execute: async () => {
+        const debugType = await this.configurations.showDynamicConfigurationsTypesQuickPick();
+        if (debugType) {
+          return await this.debugConfigurationService.showDynamicQuickPick(debugType);
+        }
+        return undefined;
+      },
+      isEnabled: () => true,
+    });
   }
 
   registerToolbarItems(registry: ToolbarRegistry) {
@@ -712,15 +647,27 @@ export class DebugContribution
     registry.registerItem({
       id: DEBUG_COMMANDS.REMOVE_ALL_BREAKPOINTS.id,
       command: DEBUG_COMMANDS.REMOVE_ALL_BREAKPOINTS.id,
+      iconClass: getIcon('close-all'),
       viewId: DEBUG_BREAKPOINTS_ID,
       tooltip: localize('debug.breakpoint.removeAll'),
     });
 
     registry.registerItem({
-      id: DEBUG_COMMANDS.TOGGLE_BREAKPOINTS.id,
-      command: DEBUG_COMMANDS.TOGGLE_BREAKPOINTS.id,
+      id: DEBUG_COMMANDS.DEACTIVE_BREAKPOINTS.id,
+      command: DEBUG_COMMANDS.DEACTIVE_BREAKPOINTS.id,
+      iconClass: getIcon('deactivate-breakpoints'),
       viewId: DEBUG_BREAKPOINTS_ID,
-      tooltip: localize('debug.breakpoint.toggle'),
+      tooltip: localize('debug.breakpoint.deactive'),
+      when: CONTEXT_ACTIVE_BREAKPOINTS.equalsTo(true),
+    });
+
+    registry.registerItem({
+      id: DEBUG_COMMANDS.ACTIVE_BREAKPOINTS.id,
+      command: DEBUG_COMMANDS.ACTIVE_BREAKPOINTS.id,
+      iconClass: `${getIcon('activate-breakpoints')} ${breakpointViewStyles.debug_activate_breakpoints_icon}`,
+      viewId: DEBUG_BREAKPOINTS_ID,
+      tooltip: localize('debug.breakpoint.active'),
+      when: CONTEXT_ACTIVE_BREAKPOINTS.equalsTo(false),
     });
     /**
      * end
@@ -728,7 +675,7 @@ export class DebugContribution
   }
 
   registerSchema(registry: IJSONSchemaRegistry) {
-    registry.registerSchema(`${launchSchemaUri}/default`, launchSchema, ['launch.json']);
+    registry.registerSchema(launchDefaultSchemaUri, launchSchema, ['launch.json']);
   }
 
   registerKeybindings(keybindings: KeybindingRegistry) {
@@ -778,6 +725,11 @@ export class DebugContribution
       keybinding: 'esc',
       when: CONTEXT_BREAKPOINT_INPUT_FOCUSED.raw,
     });
+    keybindings.registerKeybinding({
+      command: DEBUG_COMMANDS.EXCEPTION_WIDGET_CLOSE.id,
+      keybinding: 'esc',
+      when: CONTEXT_EXCEPTION_WIDGET_VISIBLE.raw,
+    });
   }
 
   registerMenus(menuRegistry: IMenuRegistry) {
@@ -819,7 +771,7 @@ export class DebugContribution
     menuRegistry.registerMenuItem(MenuId.EditorContext, {
       command: {
         id: DEBUG_COMMANDS.RUN_TO_CURSOR.id,
-        label: DEBUG_COMMANDS.RUN_TO_CURSOR.label,
+        label: DEBUG_COMMANDS.RUN_TO_CURSOR.label || '',
       },
       when: `${CONTEXT_IN_DEBUG_MODE.raw}`,
       group: 'debug',
@@ -828,11 +780,19 @@ export class DebugContribution
     menuRegistry.registerMenuItem(MenuId.EditorContext, {
       command: {
         id: DEBUG_COMMANDS.FORCE_RUN_TO_CURSOR.id,
-        label: DEBUG_COMMANDS.FORCE_RUN_TO_CURSOR.label,
+        label: DEBUG_COMMANDS.FORCE_RUN_TO_CURSOR.label || '',
       },
       when: `${CONTEXT_IN_DEBUG_MODE.raw}`,
       group: 'debug',
       order: 2,
+    });
+
+    menuRegistry.registerMenuItem(MenuId.EditorTitle, {
+      submenu: MenuId.EditorTitleRun,
+      label: localize('debug.menu.title.run'),
+      iconClass: getIcon('start'),
+      group: 'navigation',
+      order: -1,
     });
   }
 
@@ -841,13 +801,17 @@ export class DebugContribution
   }
 
   registerEditorFeature(registry: IEditorFeatureRegistry) {
+    let debugEditorContribution: DebugEditorContribution;
+
     registry.registerEditorFeatureContribution({
-      contribute: (editor: IEditor) => this.debugEditorContribution.contribute(editor),
+      contribute: (editor: IEditor) => {
+        debugEditorContribution = this.injector.get(DebugEditorContribution, [editor]);
+        return debugEditorContribution.contribute(editor);
+      },
     });
-    // 这里是为了通过 MonacoOverrideServiceRegistry 来获取 codeEditorService ，但由于存在时序问题，所以加个 setTimeout 0
-    setTimeout(() => {
-      this.debugEditorContribution.registerDecorationType();
-    }, 0);
+    runWhenIdle(() => {
+      debugEditorContribution?.registerDecorationType();
+    });
     this.preferenceSettings.setEnumLabels(
       'debug.console.filter.mode' as keyof CoreConfiguration,
       {

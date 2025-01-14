@@ -3,26 +3,28 @@ import path from 'path';
 
 import * as fs from 'fs-extra';
 
-import { Injectable } from '@opensumi/di';
+import { WSChannelHandler } from '@opensumi/ide-connection/lib/browser/ws-channel-handler';
 import {
-  PreferenceService,
-  FileUri,
+  AppConfig,
   Disposable,
   DisposableCollection,
-  ILogger,
-  PreferenceScope,
-  ILoggerManagerClient,
-  URI,
+  FileUri,
   IContextKeyService,
+  PreferenceScope,
+  PreferenceService,
+  URI,
 } from '@opensumi/ide-core-browser';
-import { MockLogger } from '@opensumi/ide-core-browser/__mocks__/logger';
-import { AppConfig } from '@opensumi/ide-core-node';
-import { DebugContribution, DebugModule } from '@opensumi/ide-debug/lib/browser';
+import { DebugModule } from '@opensumi/ide-debug/lib/browser';
+import { DebugContribution } from '@opensumi/ide-debug/lib/browser/debug-contribution';
+import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
+import { MockInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
 import { EditorCollectionService } from '@opensumi/ide-editor/lib/browser';
-import { IFileServiceClient, IDiskFileProvider } from '@opensumi/ide-file-service';
+import { IDiskFileProvider, IFileServiceClient } from '@opensumi/ide-file-service';
 import { FileServiceClientModule } from '@opensumi/ide-file-service/lib/browser';
 import { FileServiceContribution } from '@opensumi/ide-file-service/lib/browser/file-service-contribution';
 import { DiskFileSystemProvider } from '@opensumi/ide-file-service/lib/node/disk-file-system.provider';
+import { WatcherProcessManagerToken } from '@opensumi/ide-file-service/lib/node/watcher-process-manager';
+import { MockContextKeyService } from '@opensumi/ide-monaco/__mocks__/monaco.context-key.service';
 import { IMessageService } from '@opensumi/ide-overlay';
 import { IUserStorageService } from '@opensumi/ide-preferences';
 import { PreferencesModule } from '@opensumi/ide-preferences/lib/browser';
@@ -30,21 +32,6 @@ import { UserStorageContribution, UserStorageServiceImpl } from '@opensumi/ide-p
 import { IWorkspaceService } from '@opensumi/ide-workspace';
 import { WorkspacePreferences } from '@opensumi/ide-workspace/lib/browser/workspace-preferences';
 import { WorkspaceService } from '@opensumi/ide-workspace/lib/browser/workspace-service';
-
-import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
-import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
-import { MockContextKeyService } from '../../../monaco/__mocks__/monaco.context-key.service';
-
-@Injectable()
-export class MockLoggerManagerClient {
-  getLogger = () => ({
-    log() {},
-    debug() {},
-    error() {},
-    verbose() {},
-    warn() {},
-  });
-}
 
 /**
  * launch配置项需要与VSCode中的配置项对齐
@@ -429,10 +416,6 @@ describe('Launch Preferences', () => {
             useClass: UserStorageServiceImpl,
           },
           {
-            token: ILogger,
-            useClass: MockLogger,
-          },
-          {
             token: IMessageService,
             useValue: {},
           },
@@ -447,17 +430,9 @@ describe('Launch Preferences', () => {
             useClass: DiskFileSystemProvider,
           },
           {
-            token: ILoggerManagerClient,
-            useClass: MockLoggerManagerClient,
-          },
-          {
             token: EditorCollectionService,
             useValue: mockEditorCollectionService,
           },
-          UserStorageContribution,
-        );
-
-        injector.addProviders(
           {
             token: IWorkspaceService,
             useClass: WorkspaceService,
@@ -468,35 +443,50 @@ describe('Launch Preferences', () => {
               onPreferenceChanged: () => {},
             },
           },
-        );
-
-        injector.overrideProviders({
-          token: IWorkspaceService,
-          useValue: {
-            isMultiRootWorkspaceOpened: false,
-            workspace: {
-              uri: rootUri,
-              isDirectory: true,
-              lastModification: new Date().getTime(),
+          {
+            token: WSChannelHandler,
+            useValue: {
+              clientId: 'test_client_id',
             },
-            roots: Promise.resolve([
-              {
-                uri: rootUri,
-                isDirectory: true,
-                lastModification: new Date().getTime(),
-              },
-            ]),
-            onWorkspaceChanged: () => {},
-            onWorkspaceLocationChanged: () => {},
-            tryGetRoots: () => [
-              {
-                uri: rootUri,
-                isDirectory: true,
-                lastModification: new Date().getTime(),
-              },
-            ],
           },
-        });
+          {
+            token: WatcherProcessManagerToken,
+            useValue: {
+              setClient: () => void 0,
+              watch: (() => 1) as any,
+              unWatch: () => void 0,
+              createProcess: () => void 0,
+            },
+          },
+          {
+            token: IWorkspaceService,
+            useValue: {
+              isMultiRootWorkspaceOpened: false,
+              workspace: {
+                uri: rootUri,
+                isDirectory: true,
+                lastModification: new Date().getTime(),
+              },
+              roots: Promise.resolve([
+                {
+                  uri: rootUri,
+                  isDirectory: true,
+                  lastModification: new Date().getTime(),
+                },
+              ]),
+              onWorkspaceChanged: () => {},
+              onWorkspaceLocationChanged: () => {},
+              tryGetRoots: () => [
+                {
+                  uri: rootUri,
+                  isDirectory: true,
+                  lastModification: new Date().getTime(),
+                },
+              ],
+            },
+          },
+          UserStorageContribution,
+        );
 
         // 覆盖文件系统中的getCurrentUserHome方法，便于用户设置测试
         injector.mock(IFileServiceClient, 'getCurrentUserHome', () => ({
@@ -534,8 +524,9 @@ describe('Launch Preferences', () => {
       });
 
       afterEach(async () => {
-        toTearDown.dispose();
+        await toTearDown.dispose();
         await fs.remove(rootPath);
+        await injector.disposeAll();
       });
 
       const settingsLaunch = settings ? settings.launch : undefined;

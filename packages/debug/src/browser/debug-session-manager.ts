@@ -15,22 +15,22 @@
  ********************************************************************************/
 // Some code copied and modified from https://github.com/eclipse-theia/theia/tree/v1.14.0/packages/debug/src/browser/debug-session-manager.ts
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  WaitUntilEvent,
-  Emitter,
-  Event,
-  URI,
-  IContextKey,
-  DisposableCollection,
-  IContextKeyService,
-  formatLocalize,
-  Uri,
-  IReporterService,
-  uuid,
-  localize,
   COMMON_COMMANDS,
   CommandService,
+  DisposableCollection,
+  Emitter,
+  Event,
+  IContextKey,
+  IContextKeyService,
+  IReporterService,
+  URI,
+  Uri,
+  WaitUntilEvent,
+  formatLocalize,
+  localize,
+  uuid,
 } from '@opensumi/ide-core-browser';
 import { LabelService } from '@opensumi/ide-core-browser/lib/services';
 import { WorkbenchEditorService } from '@opensumi/ide-editor';
@@ -39,29 +39,28 @@ import { ITaskService } from '@opensumi/ide-task/lib/common';
 import { IVariableResolverService } from '@opensumi/ide-variable';
 
 import {
-  DebugConfiguration,
-  DebugError,
-  IDebugServer,
-  DebugServer,
-  DebugSessionOptions,
-  IDebugSessionDTO,
-  DEBUG_REPORT_NAME,
-  IDebugSessionManager,
-  DebugSessionExtra,
-  DebugThreadExtra,
   CONTEXT_DEBUG_STOPPED_KEY,
-  CONTEXT_IN_DEBUG_MODE_KEY,
   CONTEXT_DEBUG_TYPE_KEY,
+  CONTEXT_IN_DEBUG_MODE_KEY,
+  DEBUG_REPORT_NAME,
+  DebugConfiguration,
+  DebugServer,
+  DebugSessionExtra,
+  DebugSessionOptions,
   DebugState,
+  DebugThreadExtra,
+  IDebugModelManager,
+  IDebugServer,
+  IDebugSessionDTO,
+  IDebugSessionManager,
 } from '../common';
 import { IDebugProgress } from '../common/debug-progress';
 
 import { BreakpointManager } from './breakpoint/breakpoint-manager';
 import { DebugContextKey } from './contextkeys/debug-contextkey.service';
 import { DebugSession } from './debug-session';
-import { DebugSessionContributionRegistry, DebugSessionFactory } from './debug-session-contribution';
+import { DebugSessionContributionRegistry } from './debug-session-contribution';
 import { isRemoteAttach } from './debugUtils';
-import { DebugModelManager } from './editor/debug-model-manager';
 import { DebugStackFrame } from './model/debug-stack-frame';
 import { DebugThread } from './model/debug-thread';
 
@@ -136,9 +135,6 @@ export class DebugSessionManager implements IDebugSessionManager {
   @Autowired(DebugSessionContributionRegistry)
   protected readonly sessionContributionRegistry: DebugSessionContributionRegistry;
 
-  @Autowired(DebugSessionFactory)
-  protected readonly debugSessionFactory: DebugSessionFactory;
-
   @Autowired(IDebugServer)
   protected readonly debug: DebugServer;
 
@@ -154,8 +150,8 @@ export class DebugSessionManager implements IDebugSessionManager {
   @Autowired(BreakpointManager)
   protected readonly breakpoints: BreakpointManager;
 
-  @Autowired(DebugModelManager)
-  protected readonly modelManager: DebugModelManager;
+  @Autowired(IDebugModelManager)
+  protected readonly modelManager: IDebugModelManager;
 
   @Autowired(ITaskService)
   protected readonly taskService: ITaskService;
@@ -312,6 +308,11 @@ export class DebugSessionManager implements IDebugSessionManager {
       await this.fireWillStartDebugSession();
       const resolved = await this.resolveConfiguration(options);
       if (!resolved) {
+        if (options.configuration.type) {
+          this.messageService.error(formatLocalize('debug.notSupported.type', options.configuration.type));
+        } else {
+          this.messageService.error(localize('debug.notSupported.any'));
+        }
         return;
       } else if (resolved.configuration.preLaunchTask) {
         this.debugProgressService.onDebugServiceStateChange(DebugState.Initializing);
@@ -343,11 +344,6 @@ export class DebugSessionManager implements IDebugSessionManager {
       }
       return this.doStart(sessionId, resolved, extra);
     } catch (e) {
-      if (DebugError.NotFound.is(e)) {
-        this.messageService.error(formatLocalize('debug.launch.typeNotSupported', e.data.type));
-        return;
-      }
-
       this.messageService.error(localize('debug.launch.catchError'));
       throw e;
     }
@@ -426,12 +422,18 @@ export class DebugSessionManager implements IDebugSessionManager {
     sessionId: string,
     options: DebugSessionOptions,
     extra: DebugSessionExtra,
-  ): Promise<DebugSession> {
+  ): Promise<DebugSession | undefined> {
     const contrib = this.sessionContributionRegistry.get(options.configuration.type);
-    const sessionFactory = contrib ? contrib.debugSessionFactory() : this.debugSessionFactory;
+    if (!contrib) {
+      return;
+    }
+    const sessionFactory = contrib.debugSessionFactory();
     const session = sessionFactory.get(sessionId, options);
     this._sessions.set(sessionId, session);
     this._extraMap.set(sessionId, extra);
+    if (!options.lifecycleManagedByParent) {
+      this.updateCurrentSession(session);
+    }
 
     this.debugTypeKey.set(session.configuration.type);
     this.onDidCreateDebugSessionEmitter.fire(session);
@@ -450,7 +452,7 @@ export class DebugSessionManager implements IDebugSessionManager {
       this.debugContextKey.contextSetVariableSupported.set(session.capabilities.supportsSetVariable ?? false);
       this.debugContextKey.contextRestartFrameSupported.set(session.capabilities.supportsRestartFrame ?? false);
       this.debugContextKey.contextDebugState.set(DebugState[session.state] as keyof typeof DebugState);
-      this.debugContextKey.contextInDdebugMode.set(state !== DebugState.Inactive);
+      this.debugContextKey.contextInDebugMode.set(state !== DebugState.Inactive);
     });
     session.on('terminated', (event) => {
       const restart = event.body && event.body.restart;
@@ -466,7 +468,6 @@ export class DebugSessionManager implements IDebugSessionManager {
       this.onDidReceiveDebugSessionCustomEventEmitter.fire({ event, body, session }),
     );
 
-    this.updateCurrentSession(session);
     return session;
   }
 
@@ -486,16 +487,16 @@ export class DebugSessionManager implements IDebugSessionManager {
     return session && this.doRestart(session);
   }
   protected async doRestart(session: DebugSession, restart?: any): Promise<DebugSession | undefined> {
-    if (await session.restart()) {
+    const { options, configuration } = session;
+    if (await session.restart({ arguments: configuration })) {
       return session;
     }
     await session.terminate(true);
-    const { options, configuration } = session;
     configuration.__restart = restart;
     return this.start(options);
   }
   public updateCurrentSession(session: DebugSession | undefined) {
-    this.currentSession = session || this.sessions[0];
+    this.currentSession = session || this.sessions[this.sessions.length - 1];
   }
 
   get inDebugMode(): boolean {

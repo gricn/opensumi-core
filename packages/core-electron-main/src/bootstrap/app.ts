@@ -1,32 +1,33 @@
-import { app, BrowserWindow, BrowserWindowConstructorOptions } from 'electron';
-import { argv } from 'yargs';
+import { BrowserWindow, BrowserWindowConstructorOptions, app } from 'electron';
 
-import { Injector, ConstructorOf } from '@opensumi/di';
+import { ConstructorOf, Injector } from '@opensumi/di';
 import {
-  createContributionProvider,
   ContributionProvider,
-  URI,
+  EventBusImpl,
   ExtensionCandidate,
   IEventBus,
-  EventBusImpl,
+  URI,
   asExtensionCandidate,
+  createContributionProvider,
 } from '@opensumi/ide-core-common';
 import { IElectronMainLifeCycleService } from '@opensumi/ide-core-common/lib/electron';
+import { suppressNodeJSEpipeError } from '@opensumi/ide-core-common/lib/node';
+import { argv } from '@opensumi/ide-core-common/lib/node/cli';
 
 import { ElectronMainModule } from '../electron-main-module';
 
 import { ElectronMainApiRegistryImpl, ElectronURLHandlerRegistryImpl } from './api';
 import { serviceProviders } from './services';
-import { WindowDestroyedEvent, WindowCreatedEvent } from './services/events';
-import { ICodeWindowOptions } from './types';
+import { WindowCreatedEvent, WindowDestroyedEvent } from './services/events';
 import {
   ElectronAppConfig,
   ElectronMainApiRegistry,
   ElectronMainContribution,
-  IElectronMainApp,
-  IElectronMainApiProvider,
-  IParsedArgs,
   ElectronURLHandlerRegistry,
+  ICodeWindowOptions,
+  IElectronMainApiProvider,
+  IElectronMainApp,
+  IParsedArgs,
 } from './types';
 import { CodeWindow } from './window';
 
@@ -94,6 +95,8 @@ export class ElectronMainApp {
       },
       ...serviceProviders,
     );
+
+    this.bootstrapEPIPESuppression();
     this.injectLifecycleApi();
     createContributionProvider(this.injector, ElectronMainContribution);
     this.createElectronMainModules(this.config.modules);
@@ -105,6 +108,12 @@ export class ElectronMainApp {
   async init() {
     await app.whenReady().then(() => {
       this.onStartContribution();
+    });
+  }
+
+  bootstrapEPIPESuppression() {
+    suppressNodeJSEpipeError(process, () => {
+      // do nothing
     });
   }
 

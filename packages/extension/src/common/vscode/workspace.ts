@@ -1,17 +1,20 @@
-import type vscode from 'vscode';
-
-import { URI, IDisposable, IRange, CancellationToken } from '@opensumi/ide-core-common';
+import { CancellationToken, IDisposable, IRange, URI } from '@opensumi/ide-core-common';
 import { FileStat } from '@opensumi/ide-file-service';
 // eslint-disable-next-line import/no-restricted-paths
-import type { EndOfLineSequence } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
-import { IWorkspaceEdit, IResourceTextEdit, IResourceFileEdit } from '@opensumi/ide-workspace-edit';
+import { IResourceFileEdit, IResourceTextEdit, IWorkspaceEdit } from '@opensumi/ide-workspace-edit';
 
 import { Uri, UriComponents } from './ext-types';
+
 import type * as model from './model.api';
+// eslint-disable-next-line import/no-restricted-paths
+import type { EndOfLineSequence } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
+import type vscode from 'vscode';
 
 export interface IMainThreadWorkspace extends IDisposable {
+  $save(uri: URI): Promise<URI | undefined>;
+  $saveAs(uri: URI): Promise<URI | undefined>;
   $saveAll(): Promise<boolean>;
-  $tryApplyWorkspaceEdit(dto: model.WorkspaceEditDto): Promise<boolean>;
+  $tryApplyWorkspaceEdit(dto: model.WorkspaceEditDto, metadata?: model.WorkspaceEditMetadataDto): Promise<boolean>;
   $updateWorkspaceFolders(
     start: number,
     deleteCount?: number,
@@ -159,15 +162,15 @@ export function reviveWorkspaceEditDto(data: model.WorkspaceEditDto | undefined)
       if (typeof (edit as model.ResourceTextEditDto).resource === 'object') {
         (edit as unknown as IResourceTextEdit).resource = URI.from((edit as model.ResourceTextEditDto).resource);
         (edit as unknown as IResourceTextEdit).options = { openDirtyInEditor: true };
-        (edit as unknown as IResourceTextEdit).textEdit = (edit as model.ResourceTextEditDto).edit;
-        (edit as unknown as IResourceTextEdit).versionId = (edit as model.ResourceTextEditDto).modelVersionId;
+        (edit as unknown as IResourceTextEdit).textEdit = (edit as model.ResourceTextEditDto).textEdit;
+        (edit as unknown as IResourceTextEdit).versionId = (edit as model.ResourceTextEditDto).versionId;
       } else {
         const resourceFileEdit = edit as unknown as IResourceFileEdit;
-        resourceFileEdit.newResource = (edit as model.ResourceFileEditDto).newUri
-          ? URI.from((edit as model.ResourceFileEditDto).newUri!)
+        resourceFileEdit.newResource = (edit as model.ResourceFileEditDto).newResource
+          ? URI.from((edit as model.ResourceFileEditDto).newResource!)
           : undefined;
-        resourceFileEdit.oldResource = (edit as model.ResourceFileEditDto).oldUri
-          ? URI.from((edit as model.ResourceFileEditDto).oldUri!)
+        resourceFileEdit.oldResource = (edit as model.ResourceFileEditDto).oldResource
+          ? URI.from((edit as model.ResourceFileEditDto).oldResource!)
           : undefined;
         // 似乎 vscode 的行为默认不会 showInEditor，参考来自 codeMe 插件
         resourceFileEdit.options = {

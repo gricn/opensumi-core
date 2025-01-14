@@ -1,11 +1,11 @@
-import type vscode from 'vscode';
-
-import { IDisposable, Event } from '@opensumi/ide-core-common';
-import { SaveReason, IEditorDocumentModelContentChange } from '@opensumi/ide-editor';
+import { Event, IDisposable } from '@opensumi/ide-core-common';
+import { IEditorDocumentModelContentChange, SaveReason } from '@opensumi/ide-editor';
 
 import { ExtHostDocumentData } from '../../hosted/api/vscode/doc/ext-data.host';
 
 import { Uri } from './ext-types';
+
+import type vscode from 'vscode';
 export interface IModelChangedEvent {
   /**
    * The actual changes.
@@ -41,10 +41,12 @@ export interface IMainThreadDocumentsShape extends IDisposable {
 }
 
 export interface ExtensionDocumentDataManager extends IExtensionHostDocService {
-  getDocument(resource: Uri | string): vscode.TextDocument | undefined;
+  getDocument(resource: Uri | string): vscode.TextDocument;
   getDocumentData(resource: Uri | string): ExtHostDocumentData | undefined;
   getAllDocument(): vscode.TextDocument[];
-  openTextDocument(path: Uri | string): Promise<vscode.TextDocument | undefined>;
+  openTextDocument(
+    uriOrFileNameOrOptions?: Uri | string | { language?: string; content?: string },
+  ): Promise<vscode.TextDocument>;
   registerTextDocumentContentProvider(scheme: string, provider: vscode.TextDocumentContentProvider): IDisposable;
   onDidOpenTextDocument: Event<vscode.TextDocument>;
   onDidCloseTextDocument: Event<vscode.TextDocument>;
@@ -68,6 +70,7 @@ export interface IExtensionDocumentModelOptionsChangedEvent {
   uri: string;
   encoding?: string;
   languageId?: string;
+  dirty?: boolean;
 }
 
 export interface IExtensionDocumentModelOpenedEvent {
@@ -90,6 +93,7 @@ export interface IExtensionDocumentModelSavedEvent {
 export interface IExtensionDocumentModelWillSaveEvent {
   uri: string;
   reason: SaveReason;
+  dirty: boolean;
 }
 
 export const ExtensionDocumentManagerProxy = Symbol('ExtensionDocumentManagerProxy');

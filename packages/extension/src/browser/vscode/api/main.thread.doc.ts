@@ -1,36 +1,38 @@
-import { Injectable, Optional, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector, Optional } from '@opensumi/di';
 import { IRPCProtocol } from '@opensumi/ide-connection';
 import { PreferenceService } from '@opensumi/ide-core-browser';
 import { LabelService } from '@opensumi/ide-core-browser/lib/services';
 import {
-  WithEventBus,
-  OnEvent,
-  Event,
-  URI,
-  IDisposable,
   Disposable,
-  isUndefinedOrNull,
   Emitter,
+  Event,
+  IDisposable,
   LRUMap,
+  OnEvent,
   Schemes,
+  URI,
+  WithEventBus,
+  isUndefinedOrNull,
 } from '@opensumi/ide-core-common';
 import { ResourceService } from '@opensumi/ide-editor';
 import {
   EditorComponentRegistry,
-  IEditorDocumentModelService,
-  IEditorDocumentModelContentRegistry,
-  IEditorDocumentModelRef,
   EditorDocumentModelContentChangedEvent,
   EditorDocumentModelCreationEvent,
+  EditorDocumentModelOptionChangedEvent,
   EditorDocumentModelRemovalEvent,
   EditorDocumentModelSavedEvent,
-  IEditorDocumentModelContentProvider,
-  EditorDocumentModelOptionChangedEvent,
   EditorDocumentModelWillSaveEvent,
+  EditorOpenType,
+  IEditorDocumentModelContentProvider,
+  IEditorDocumentModelContentRegistry,
+  IEditorDocumentModelRef,
+  IEditorDocumentModelService,
 } from '@opensumi/ide-editor/lib/browser';
+import { UntitledDocumentIdCounter } from '@opensumi/ide-editor/lib/browser/untitled-resource';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
 
-import { ExtHostAPIIdentifier, IMainThreadDocumentsShape, IExtensionHostDocService } from '../../../common/vscode';
+import { ExtHostAPIIdentifier, IExtensionHostDocService, IMainThreadDocumentsShape } from '../../../common/vscode';
 
 const DEFAULT_EXT_HOLD_DOC_REF_MAX_AGE = 1000 * 60 * 3; // 插件进程openDocument持有的最长时间
 const DEFAULT_EXT_HOLD_DOC_REF_MIN_AGE = 1000 * 20; // 插件进程openDocument持有的最短时间，防止bounce
@@ -69,9 +71,10 @@ class ExtensionEditorDocumentProvider implements IEditorDocumentModelContentProv
 
 @Injectable({ multiple: true })
 export class MainThreadExtensionDocumentData extends WithEventBus implements IMainThreadDocumentsShape {
-  private tempDocIdCount = 0;
-
   private readonly proxy: IExtensionHostDocService;
+
+  @Autowired()
+  private tempDocIdCount: UntitledDocumentIdCounter;
 
   @Autowired(IEditorDocumentModelService)
   protected docManager: IEditorDocumentModelService;
@@ -113,12 +116,12 @@ export class MainThreadExtensionDocumentData extends WithEventBus implements IMa
         this.docSyncEnabled.set(
           uriString,
           docRef.instance.getMonacoModel().getValueLength() <
-            (this.preference.get<number>('editor.docExtHostSyncMaxSize') || 2 * 1024 * 1024),
+            this.preference.getValid<number>('editor.docExtHostSyncMaxSize', 4 * 1024 * 1024 * 1024),
         );
         docRef.dispose();
       }
     }
-    return this.docSyncEnabled.get(uriString)!;
+    return this.docSyncEnabled.get(uriString) ?? false;
   }
 
   constructor(@Optional(Symbol()) private rpcProtocol: IRPCProtocol) {
@@ -168,6 +171,7 @@ export class MainThreadExtensionDocumentData extends WithEventBus implements IMa
     await this.proxy.$fireModelWillSaveEvent({
       uri: e.payload.uri.toString(),
       reason: e.payload.reason,
+      dirty: e.payload.dirty,
     });
   }
 
@@ -180,6 +184,7 @@ export class MainThreadExtensionDocumentData extends WithEventBus implements IMa
       encoding: e.payload.encoding,
       uri: e.payload.uri.toString(),
       languageId: e.payload.languageId,
+      dirty: e.payload.dirty,
     });
   }
 
@@ -218,16 +223,19 @@ export class MainThreadExtensionDocumentData extends WithEventBus implements IMa
     });
   }
 
-  async $tryCreateDocument(options: { content: string; language: string }): Promise<string> {
+  async $tryCreateDocument(options?: { content?: string; language?: string }): Promise<string> {
+    if (!options) {
+      options = {};
+    }
     const { language, content } = options;
     const docRef = await this.docManager.createModelReference(
-      new URI(`${Schemes.untitled}://temp/` + this.tempDocIdCount++),
+      new URI(`${Schemes.untitled}://temp/Untitled-` + this.tempDocIdCount.id),
       'ext-create-document',
     );
-    if (options.language) {
+    if (language) {
       docRef.instance.languageId = language;
     }
-    if (!isUndefinedOrNull(options.content)) {
+    if (!isUndefinedOrNull(content)) {
       docRef.instance.updateContent(content);
     }
     return docRef.instance.uri.toString();
@@ -283,7 +291,7 @@ export class MainThreadExtensionDocumentData extends WithEventBus implements IMa
           return;
         }
         results.push({
-          type: 'code',
+          type: EditorOpenType.code,
           readonly: true,
         });
       }),

@@ -1,36 +1,39 @@
-import type vscode from 'vscode';
-
-import { Injectable, Optional, Autowired } from '@opensumi/di';
+import { Autowired, Injectable, Optional } from '@opensumi/di';
 import { IRPCProtocol } from '@opensumi/ide-connection';
-import { ILogger, Disposable, PreferenceService, IDisposable } from '@opensumi/ide-core-browser';
+import { Disposable, IDisposable, ILogger, PreferenceService } from '@opensumi/ide-core-browser';
 import {
-  ITerminalApiService,
-  ITerminalGroupViewService,
-  ITerminalController,
-  ITerminalInfo,
-  ITerminalProcessExtHostProxy,
   IStartExtensionTerminalRequest,
+  ITerminalApiService,
+  ITerminalClient,
+  ITerminalController,
   ITerminalDimensions,
   ITerminalDimensionsDto,
   ITerminalExternalLinkProvider,
-  ITerminalClient,
+  ITerminalGroupViewService,
+  ITerminalInfo,
   ITerminalLink,
+  ITerminalProcessExtHostProxy,
   ITerminalProfileInternalService,
 } from '@opensumi/ide-terminal-next';
 import {
+  EnvironmentVariableServiceToken,
   IEnvironmentVariableService,
   SerializableEnvironmentVariableCollection,
-  EnvironmentVariableServiceToken,
+  deserializeEnvironmentVariableCollection,
 } from '@opensumi/ide-terminal-next/lib/common/environmentVariable';
-import { deserializeEnvironmentVariableCollection } from '@opensumi/ide-terminal-next/lib/common/environmentVariable';
 import { ITerminalProfileService } from '@opensumi/ide-terminal-next/lib/common/profile';
 
-import { IMainThreadTerminal, IExtHostTerminal, ExtHostAPIIdentifier } from '../../../common/vscode';
+import { ExtHostAPIIdentifier, IExtHostTerminal, IMainThreadTerminal } from '../../../common/vscode';
 import { IActivationEventService } from '../../types';
+
+import type vscode from 'vscode';
 
 @Injectable({ multiple: true })
 export class MainThreadTerminal implements IMainThreadTerminal {
   private readonly proxy: IExtHostTerminal;
+
+  shortId2LongIdMap: Map<string, string> = new Map();
+
   private readonly _terminalProcessProxies = new Map<string, ITerminalProcessExtHostProxy>();
   private readonly _profileProviders = new Map<string, IDisposable>();
 
@@ -123,6 +126,11 @@ export class MainThreadTerminal implements IMainThreadTerminal {
         await this.activationEventService.fireEvent(`onTerminalProfile:${id}`);
       }),
     );
+    this.disposable.addDispose(
+      this.profileService.onDidChangeDefaultShell((shell: string) => {
+        this.proxy.$setShell(shell);
+      }),
+    );
   }
 
   private initData() {
@@ -142,40 +150,50 @@ export class MainThreadTerminal implements IMainThreadTerminal {
     this._updateDefaultProfile();
   }
 
+  transform<T>(id: string, cb: (sessionId: string) => T): T {
+    const sessionId = this.shortId2LongIdMap.get(id);
+    return cb(sessionId || id);
+  }
+
   $sendText(id: string, text: string, addNewLine?: boolean) {
-    this.proxy.$acceptTerminalInteraction(id);
-    return this.terminalApi.sendText(id, text, addNewLine);
+    return this.transform(id, (sessionId) => {
+      this.proxy.$acceptTerminalInteraction(sessionId);
+      return this.terminalApi.sendText(sessionId, text, addNewLine);
+    });
   }
 
   $show(id: string, preserveFocus?: boolean) {
-    return this.terminalApi.showTerm(id, preserveFocus);
+    return this.transform(id, (sessionId) => this.terminalApi.showTerm(sessionId, preserveFocus));
   }
 
   $hide(id: string) {
-    return this.terminalApi.hideTerm(id);
+    return this.transform(id, (sessionId) => this.terminalApi.hideTerm(sessionId));
   }
 
   $dispose(id: string) {
-    return this.terminalApi.removeTerm(id);
+    return this.transform(id, (sessionId) => this.terminalApi.removeTerm(sessionId));
   }
 
   $getProcessId(id: string) {
-    return this.terminalApi.getProcessId(id);
+    return this.transform(id, (sessionId) => this.terminalApi.getProcessId(sessionId));
   }
 
-  async $createTerminal(options: vscode.TerminalOptions, id: string) {
+  async $createTerminal(options: vscode.TerminalOptions, shortId: string): Promise<void> {
     await this.controller.ready.promise;
-    const terminal = await this.terminalApi.createTerminal(options, id);
+    const terminal = await this.terminalApi.createTerminal(options, shortId);
     if (!terminal) {
-      return this.logger.error(`Create Terminal ${id} fail.`);
+      // 应该要 throw Error
+      this.logger.error(`Create Terminal ${shortId} fail.`);
+      return;
     }
+    this.shortId2LongIdMap.set(shortId, terminal.id);
   }
 
   private _onRequestStartExtensionTerminal(request: IStartExtensionTerminalRequest): void {
     const proxy = request.proxy;
     this._terminalProcessProxies.set(proxy.terminalId, proxy);
 
-    // Note that onReisze is not being listened to here as it needs to fire when max dimensions
+    // Note that onResize is not being listened to here as it needs to fire when max dimensions
     // change, excluding the dimension override
     const initialDimensions: ITerminalDimensionsDto | undefined =
       request.cols && request.rows
@@ -193,22 +211,26 @@ export class MainThreadTerminal implements IMainThreadTerminal {
     proxy.onRequestInitialCwd(() => this.proxy.$acceptProcessRequestInitialCwd(proxy.terminalId));
   }
 
-  private _getTerminalProcess(terminalId: string): ITerminalProcessExtHostProxy {
-    const terminal = this._terminalProcessProxies.get(terminalId);
-    if (!terminal) {
-      throw new Error(`Unknown terminal: ${terminalId}`);
-    }
-    return terminal;
+  private _getTerminalProcess(id: string): ITerminalProcessExtHostProxy {
+    return this.transform(id, (terminalId) => {
+      const terminal = this._terminalProcessProxies.get(terminalId);
+      if (!terminal) {
+        throw new Error(`Unknown terminal: ${terminalId}`);
+      }
+      return terminal;
+    });
   }
 
-  public $sendProcessTitle(terminalId: string, title: string): void {
-    const terminalWidgetInstance = this.terminalGroupViewService.getWidget(terminalId);
+  public $sendProcessTitle(id: string, title: string): void {
+    return this.transform(id, (terminalId) => {
+      const terminalWidgetInstance = this.terminalGroupViewService.getWidget(terminalId);
 
-    if (terminalWidgetInstance) {
-      terminalWidgetInstance.rename(title);
+      if (terminalWidgetInstance) {
+        terminalWidgetInstance.rename(title);
 
-      this.proxy.$acceptTerminalTitleChange(terminalId, title);
-    }
+        this.proxy.$acceptTerminalTitleChange(terminalId, title);
+      }
+    });
   }
 
   public $sendProcessData(terminalId: string, data: string): void {

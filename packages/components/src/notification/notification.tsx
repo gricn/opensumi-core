@@ -6,6 +6,8 @@ import InfoCircleOutlined from '@ant-design/icons/InfoCircleOutlined';
 import Notification from 'rc-notification';
 import React from 'react';
 
+import { isUndefined } from '@opensumi/ide-utils';
+
 export type NotificationPlacement = 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight';
 
 export type IconType = 'success' | 'info' | 'error' | 'warning';
@@ -161,8 +163,7 @@ export interface ArgsProps {
 function notice(args: ArgsProps) {
   const outerPrefixCls = args.prefixCls || 'kt-notification';
   const prefixCls = `${outerPrefixCls}-notice`;
-  const duration = args.duration === undefined ? defaultDuration : args.duration;
-
+  const duration = isUndefined(args.duration) ? defaultDuration : args.duration;
   let iconNode: React.ReactNode = null;
   if (args.icon) {
     iconNode = <span className={`${prefixCls}-icon`}>{args.icon}</span>;
@@ -171,9 +172,6 @@ function notice(args: ArgsProps) {
       className: `${prefixCls}-icon ${prefixCls}-icon-${args.type}`,
     });
   }
-
-  const autoMarginTag =
-    !args.description && iconNode ? <span className={`${prefixCls}-message-single-line-auto-margin`} /> : null;
 
   const { placement, top, bottom, getContainer, closeIcon } = args;
 
@@ -191,10 +189,7 @@ function notice(args: ArgsProps) {
         content: (
           <div className={iconNode ? `${prefixCls}-with-icon` : ''}>
             {iconNode}
-            <div className={`${prefixCls}-message`}>
-              {autoMarginTag}
-              {args.message}
-            </div>
+            <div className={`${prefixCls}-message`}>{args.message}</div>
             <div className={`${prefixCls}-description`}>{args.description}</div>
             {args.btn ? <span className={`${prefixCls}-btn`}>{args.btn}</span> : null}
           </div>

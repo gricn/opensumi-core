@@ -1,22 +1,31 @@
 import stream from 'stream';
 
-import { IDisposable, MaybePromise, IJSONSchema, IJSONSchemaSnippet, URI } from '@opensumi/ide-core-common';
-import type { editor } from '@opensumi/monaco-editor-core';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import {
+  BinaryBuffer,
+  Disposable,
+  Emitter,
+  Event,
+  IDisposable,
+  IJSONSchema,
+  IJSONSchemaSnippet,
+  MaybePromise,
+  URI,
+  decodeBase64,
+  encodeBase64,
+} from '@opensumi/ide-core-common';
+import * as monaco from '@opensumi/ide-monaco';
 
 import {
+  DebugBreakpointWidgetContext,
   IRuntimeBreakpoint,
   ISourceBreakpoint,
-  DebugBreakpointWidgetContext,
   TSourceBrekpointProperties,
 } from './debug-breakpoint';
 import { DebugConfiguration } from './debug-configuration';
 import { DebugEditor } from './debug-editor';
 import { IDebugHoverWidget } from './debug-hover';
-
-export interface IDebugBreakpointWidget extends IDisposable {
-  position: monaco.Position | undefined;
-}
+import { IMemoryInvalidationEvent, IMemoryRegion, MemoryRange, MemoryRangeType } from './debug-service';
+import { IDebugSession } from './debug-session';
 
 export interface IDebugBreakpointWidget extends IDisposable {
   position: monaco.Position | undefined;
@@ -147,10 +156,10 @@ export interface IDebugModel extends IDisposable {
   acceptBreakpoint: () => void;
   focusStackFrame: () => void;
   breakpoint: ISourceBreakpoint | IRuntimeBreakpoint | undefined;
-  onContextMenu: (event: editor.IEditorMouseEvent | editor.IPartialEditorMouseEvent) => void;
-  onMouseDown: (event: editor.IEditorMouseEvent | editor.IPartialEditorMouseEvent) => void;
-  onMouseMove: (event: editor.IEditorMouseEvent | editor.IPartialEditorMouseEvent) => void;
-  onMouseLeave: (event: editor.IEditorMouseEvent | editor.IPartialEditorMouseEvent) => void;
+  onContextMenu: (event: monaco.editor.IEditorMouseEvent | monaco.editor.IPartialEditorMouseEvent) => void;
+  onMouseDown: (event: monaco.editor.IEditorMouseEvent | monaco.editor.IPartialEditorMouseEvent) => void;
+  onMouseMove: (event: monaco.editor.IEditorMouseEvent | monaco.editor.IPartialEditorMouseEvent) => void;
+  onMouseLeave: (event: monaco.editor.IEditorMouseEvent | monaco.editor.IPartialEditorMouseEvent) => void;
   getBreakpoints(
     uri?: URI | undefined,
     filter?: Partial<monaco.IPosition> | undefined,
@@ -159,4 +168,98 @@ export interface IDebugModel extends IDisposable {
   getBreakpointWidget: () => IDebugBreakpointWidget;
   getDebugHoverWidget: () => IDebugHoverWidget;
   render: () => void;
+}
+
+export class MemoryRegion extends Disposable implements IMemoryRegion {
+  private readonly invalidateEmitter = this.registerDispose(new Emitter<IMemoryInvalidationEvent>());
+
+  /** @inheritdoc */
+  public readonly onDidInvalidate = this.invalidateEmitter.event;
+
+  /** @inheritdoc */
+  public readonly writable = !!this.session.capabilities.supportsWriteMemoryRequest;
+
+  constructor(private readonly memoryReference: string, private readonly session: IDebugSession) {
+    super();
+    this.registerDispose(
+      session.onDidInvalidateMemory((e) => {
+        if (e.body.memoryReference === memoryReference) {
+          this.invalidate(e.body.offset, e.body.count - e.body.offset);
+        }
+      }),
+    );
+  }
+
+  public async read(fromOffset: number, toOffset: number): Promise<MemoryRange[]> {
+    const length = toOffset - fromOffset;
+    const offset = fromOffset;
+    const result = await this.session.readMemory(this.memoryReference, offset, length);
+
+    if (result === undefined || !result.body?.data) {
+      return [{ type: MemoryRangeType.Unreadable, offset, length }];
+    }
+
+    let data: BinaryBuffer;
+    try {
+      data = decodeBase64(result.body.data);
+    } catch (e) {
+      return [{ type: MemoryRangeType.Error, offset, length, error: e.message }];
+    }
+
+    const unreadable = result.body.unreadableBytes || 0;
+    const dataLength = length - unreadable;
+    if (data.byteLength < dataLength) {
+      const pad = BinaryBuffer.alloc(dataLength - data.byteLength);
+      pad.buffer.fill(0);
+      data = BinaryBuffer.concat([data, pad], dataLength);
+    } else if (data.byteLength > dataLength) {
+      data = data.slice(0, dataLength);
+    }
+
+    if (!unreadable) {
+      return [{ type: MemoryRangeType.Valid, offset, length, data }];
+    }
+
+    return [
+      { type: MemoryRangeType.Valid, offset, length: dataLength, data },
+      { type: MemoryRangeType.Unreadable, offset: offset + dataLength, length: unreadable },
+    ];
+  }
+
+  public async write(offset: number, data: BinaryBuffer): Promise<number> {
+    const result = await this.session.writeMemory(this.memoryReference, offset, encodeBase64(data), true);
+    const written = result?.body?.bytesWritten ?? data.byteLength;
+    this.invalidate(offset, offset + written);
+    return written;
+  }
+
+  public override dispose() {
+    super.dispose();
+  }
+
+  private invalidate(fromOffset: number, toOffset: number) {
+    this.invalidateEmitter.fire({ fromOffset, toOffset });
+  }
+}
+
+export enum DebugModelSupportedEventType {
+  down = 'Down',
+  move = 'Move',
+  leave = 'Leave',
+  contextMenu = 'contextMenu',
+}
+
+export const IDebugModelManager = Symbol('DebugModelManager');
+
+export interface IDebugModelManager {
+  init(session?: IDebugSession): void;
+  model: IDebugModel | undefined;
+  resolve(uri: URI): IDebugModel[] | undefined;
+  handleMouseEvent(
+    uri: URI,
+    type: DebugModelSupportedEventType,
+    event: monaco.editor.IEditorMouseEvent | monaco.editor.IPartialEditorMouseEvent,
+    monacoEditor: any,
+  ): void;
+  onModelChanged: Event<monaco.editor.IModelChangedEvent>;
 }

@@ -1,10 +1,10 @@
 /* istanbul ignore file */
-import { Provider, Injectable } from '@opensumi/di';
+import { Injectable, Provider } from '@opensumi/di';
 import { BrowserModule } from '@opensumi/ide-core-browser';
 
+import { MenuBarWebContribution } from './menu-bar-web.contribution';
 import { MenuBarContribution } from './menu-bar.contribution';
 import { AbstractMenubarStore, MenubarStore } from './menu-bar.store';
-import { MenuBar } from './menu-bar.view';
 
 @Injectable()
 export class MenuBarModule extends BrowserModule {
@@ -15,6 +15,5 @@ export class MenuBarModule extends BrowserModule {
       useClass: MenubarStore,
     },
   ];
-
-  component = MenuBar;
+  webProviders = [MenuBarWebContribution];
 }

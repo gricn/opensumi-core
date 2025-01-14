@@ -58,6 +58,7 @@ export class MockWorker {
         MessagePort,
         TextDecoder,
         TextEncoder,
+        queueMicrotask: globalThis.queueMicrotask,
         postMessage: (value: any, transferList?: Array<ArrayBuffer | MessagePort>) => {
           this.onmessage({
             data: value,
@@ -94,6 +95,8 @@ export class MessagePort {
   private onmessageListeners: EventListener[] = [];
 
   constructor() {}
+
+  start() {}
 
   dispatchEvent(event) {
     if (this.onmessage) {

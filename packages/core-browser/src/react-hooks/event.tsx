@@ -1,6 +1,6 @@
 import React from 'react';
 
-import { Event, Disposable, ConstructorOf, BasicEvent, IEventBus } from '@opensumi/ide-core-common';
+import { BasicEvent, ConstructorOf, Disposable, Event, IEventBus } from '@opensumi/ide-core-common';
 
 import { useInjectable } from './injectable-hooks';
 
@@ -69,5 +69,12 @@ export function useUpdateOnEventBusEvent<T = any>(
     return () => {
       disposer.dispose();
     };
+  }, dependencies);
+}
+
+export function useEventEffect<T = any>(event: Event<T>, listener: (args: T) => void, dependencies: any[] = []) {
+  React.useEffect(() => {
+    const disposable = event(listener);
+    return disposable.dispose.bind(disposable);
   }, dependencies);
 }

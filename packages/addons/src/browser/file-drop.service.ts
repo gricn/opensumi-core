@@ -1,16 +1,16 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { formatLocalize } from '@opensumi/ide-core-browser';
 import { IStatusBarService, StatusBarAlignment, StatusBarEntryAccessor } from '@opensumi/ide-core-browser/lib/services';
-import { WithEventBus, Uri, path } from '@opensumi/ide-core-common';
+import { Uri, WithEventBus, path } from '@opensumi/ide-core-common';
 import { FileTreeDropEvent } from '@opensumi/ide-core-common/lib/types/dnd';
 import { IFileServiceClient } from '@opensumi/ide-file-service/lib/common';
 
 const { Path } = path;
 
 import {
-  IFileDropFrontendService,
-  IFileDropBackendService,
   FileDropServicePath,
+  IFileDropBackendService,
+  IFileDropFrontendService,
   IWebkitDataTransfer,
   IWebkitDataTransferItemEntry,
 } from '../common';
@@ -121,7 +121,7 @@ export class FileDropService extends WithEventBus implements IFileDropFrontendSe
     await this.fs.createFile(Uri.file(filePath.toString()).toString());
     await this.dropService.$ensureFileExist(file.name, targetDir);
     const reader = file.stream().getReader();
-    let res: ReadableStreamDefaultReadResult<Uint8Array> = await reader.read();
+    let res: ReadableStreamReadResult<Uint8Array> = await reader.read();
     while (!res.done) {
       await this.dropService.$writeStream(this.toBinaryString(res.value), file.name, targetDir, res.done);
       reporter(res.value?.byteLength);

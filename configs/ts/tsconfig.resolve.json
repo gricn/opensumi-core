@@ -7,6 +7,8 @@
       "@opensumi/ide-utils/lib/*": ["../packages/utils/src/*"],
       "@opensumi/ide-addons": ["../packages/addons/src/index.ts"],
       "@opensumi/ide-addons/lib/*": ["../packages/addons/src/*"],
+      "@opensumi/ide-collaboration": ["../packages/collaboration/src/index.ts"],
+      "@opensumi/ide-collaboration/lib/*": ["../packages/collaboration/src/*"],
       "@opensumi/ide-comments": ["../packages/comments/src/index.ts"],
       "@opensumi/ide-comments/lib/*": ["../packages/comments/src/*"],
       "@opensumi/ide-components": ["../packages/components/src/index.ts"],
@@ -107,8 +109,6 @@
       "@opensumi/ide-toolbar/lib/*": ["../packages/toolbar/src/*"],
       "@opensumi/sumi": ["../packages/types/src/index.ts"],
       "@opensumi/sumi/lib/*": ["../packages/types/src/*"],
-      "@opensumi/ide-userstorage": ["../packages/userstorage/src/index.ts"],
-      "@opensumi/ide-userstorage/lib/*": ["../packages/userstorage/src/*"],
       "@opensumi/ide-variable": ["../packages/variable/src/index.ts"],
       "@opensumi/ide-variable/lib/*": ["../packages/variable/src/*"],
       "@opensumi/ide-webview": ["../packages/webview/src/index.ts"],
@@ -116,7 +116,17 @@
       "@opensumi/ide-workspace": ["../packages/workspace/src/index.ts"],
       "@opensumi/ide-workspace/lib/*": ["../packages/workspace/src/*"],
       "@opensumi/ide-workspace-edit": ["../packages/workspace-edit/src/index.ts"],
-      "@opensumi/ide-workspace-edit/lib/*": ["../packages/workspace-edit/src/*"]
+      "@opensumi/ide-workspace-edit/lib/*": ["../packages/workspace-edit/src/*"],
+      "@opensumi/ide-playwright": ["../../../tools/playwright/src/index.ts"],
+      "@opensumi/ide-playwright/lib/*": ["../../../tools/playwright/src/*"],
+      "@opensumi/cli-engine": ["../../../tools/cli-engine/src/index.ts"],
+      "@opensumi/cli-engine/lib/*": ["../../../tools/cli-engine/src/*"],
+      "@opensumi/ide-design": ["../packages/design/src/index.ts"],
+      "@opensumi/ide-design/lib/*": ["../packages/design/src/*"],
+      "@opensumi/ide-ai-native": ["../packages/ai-native/src/index.ts"],
+      "@opensumi/ide-ai-native/lib/*": ["../packages/ai-native/src/*"],
+      "@opensumi/ide-notebook": ["../packages/notebook/src/index.ts"],
+      "@opensumi/ide-notebook/lib/*": ["../packages/notebook/src/*"]
     }
   }
 }

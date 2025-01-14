@@ -54,6 +54,20 @@ declare module 'vscode' {
      * @return A [disposable](#Disposable) that unregisters this provider when being disposed.
      */
     export function registerCompletionItemProvider(selector: DocumentSelector, provider: CompletionItemProvider, ...triggerCharacters: string[]): Disposable;
+
+    /**
+     * Registers an inline completion provider.
+     *
+     * Multiple providers can be registered for a language. In that case providers are asked in
+     * parallel and the results are merged. A failing provider (rejected promise or exception) will
+     * not cause a failure of the whole operation.
+     *
+     * @param selector A selector that defines the documents this provider is applicable to.
+     * @param provider An inline completion provider.
+     * @return A {@link Disposable} that unregisters this provider when being disposed.
+     */
+    export function registerInlineCompletionItemProvider(selector: DocumentSelector, provider: InlineCompletionItemProvider): Disposable;
+
     /**
      * Register a code lens provider.
      *
@@ -209,6 +223,19 @@ declare module 'vscode' {
     export function registerColorProvider(selector: DocumentSelector, provider: DocumentColorProvider): Disposable;
 
     /**
+     * Register a inlay hints provider.
+     *
+     * Multiple providers can be registered for a language. In that case providers are asked in
+     * parallel and the results are merged. A failing provider (rejected promise or exception) will
+     * not cause a failure of the whole operation.
+     *
+     * @param selector A selector that defines the documents this provider is applicable to.
+     * @param provider An inlay hints provider.
+     * @return A {@link Disposable} that unregisters this provider when being disposed.
+     */
+    export function registerInlayHintsProvider(selector: DocumentSelector, provider: InlayHintsProvider): Disposable;
+
+    /**
      * Register a folding range provider.
      *
      * Multiple providers can be registered for a language. In that case providers are asked in
@@ -262,13 +289,13 @@ declare module 'vscode' {
     export function registerCallHierarchyProvider(selector: DocumentSelector, provider: CallHierarchyProvider): Disposable;
 
     /**
-		 * Register a type hierarchy provider.
-		 *
-		 * @param selector A selector that defines the documents this provider is applicable to.
-		 * @param provider A type hierarchy provider.
-		 * @return A {@link Disposable} that unregisters this provider when being disposed.
-		 */
-		export function registerTypeHierarchyProvider(selector: DocumentSelector, provider: TypeHierarchyProvider): Disposable;
+     * Register a type hierarchy provider.
+     *
+     * @param selector A selector that defines the documents this provider is applicable to.
+     * @param provider A type hierarchy provider.
+     * @return A {@link Disposable} that unregisters this provider when being disposed.
+     */
+    export function registerTypeHierarchyProvider(selector: DocumentSelector, provider: TypeHierarchyProvider): Disposable;
 
     /**
      * Register a linked editing range provider.
@@ -313,6 +340,14 @@ declare module 'vscode' {
      * @return A new diagnostic collection.
      */
     export function createDiagnosticCollection(name?: string): DiagnosticCollection;
+
+    /**
+     * Creates a new {@link LanguageStatusItem language status item}.
+     *
+     * @param id The identifier of the item.
+     * @param selector The document selector that defines for what editors the item shows.
+     */
+    export function createLanguageStatusItem(id: string, selector: DocumentSelector): LanguageStatusItem;
 
     /**
      * Register a code action provider.
@@ -449,6 +484,16 @@ declare module 'vscode' {
     export function registerDocumentRangeSemanticTokensProvider(selector: DocumentSelector, provider: DocumentRangeSemanticTokensProvider, legend: SemanticTokensLegend): Disposable;
 
     /**
+		 * Registers a new {@link DocumentDropEditProvider}.
+		 *
+		 * @param selector A selector that defines the documents this provider applies to.
+		 * @param provider A drop provider.
+		 *
+		 * @returns A {@link Disposable} that unregisters this provider when disposed of.
+		 */
+		export function registerDocumentDropEditProvider(selector: DocumentSelector, provider: DocumentDropEditProvider): Disposable;
+
+    /**
      * Register a provider that locates evaluatable expressions in text documents.
      * VS Code will evaluate the expression in the active debug session and will show the result in the debug hover.
      *
@@ -459,6 +504,163 @@ declare module 'vscode' {
      * @return A [disposable](#Disposable) that unregisters this provider when being disposed.
      */
     export function registerEvaluatableExpressionProvider(selector: DocumentSelector, provider: EvaluatableExpressionProvider): Disposable;
+  }
+
+
+  export enum InlayHintKind {
+    Type = 1,
+    Parameter = 2,
+  }
+
+  /**
+   * An inlay hint label part allows for interactive and composite labels of inlay hints.
+   */
+  export class InlayHintLabelPart {
+
+    /**
+     * The value of this label part.
+     */
+    value: string;
+
+    /**
+     * The tooltip text when you hover over this label part.
+     *
+     * *Note* that this property can be set late during
+     * {@link InlayHintsProvider.resolveInlayHint resolving} of inlay hints.
+     */
+    tooltip?: string | MarkdownString | undefined;
+
+    /**
+     * An optional {@link Location source code location} that represents this label
+     * part.
+     *
+     * The editor will use this location for the hover and for code navigation features: This
+     * part will become a clickable link that resolves to the definition of the symbol at the
+     * given location (not necessarily the location itself), it shows the hover that shows at
+     * the given location, and it shows a context menu with further code navigation commands.
+     *
+     * *Note* that this property can be set late during
+     * {@link InlayHintsProvider.resolveInlayHint resolving} of inlay hints.
+     */
+    location?: Location | undefined;
+
+    /**
+     * An optional command for this label part.
+     *
+     * The editor renders parts with commands as clickable links. The command is added to the context menu
+     * when a label part defines {@link InlayHintLabelPart.location location} and {@link InlayHintLabelPart.command command} .
+     *
+     * *Note* that this property can be set late during
+     * {@link InlayHintsProvider.resolveInlayHint resolving} of inlay hints.
+     */
+    command?: Command | undefined;
+
+    /**
+     * Creates a new inlay hint label part.
+     *
+     * @param value The value of the part.
+     */
+    constructor(value: string);
+  }
+
+  /**
+   * Inlay hint information.
+   */
+   export class InlayHint {
+
+    /**
+     * The position of this hint.
+     */
+    position: Position;
+
+    /**
+     * The label of this hint. A human readable string or an array of {@link InlayHintLabelPart label parts}.
+     *
+     * *Note* that neither the string nor the label part can be empty.
+     */
+    label: string | InlayHintLabelPart[];
+
+    /**
+     * The tooltip text when you hover over this item.
+     *
+     * *Note* that this property can be set late during
+     * {@link InlayHintsProvider.resolveInlayHint resolving} of inlay hints.
+     */
+    tooltip?: string | MarkdownString | undefined;
+
+    /**
+     * The kind of this hint. The inlay hint kind defines the appearance of this inlay hint.
+     */
+    kind?: InlayHintKind;
+
+    /**
+     * Optional {@link TextEdit text edits} that are performed when accepting this inlay hint. The default
+     * gesture for accepting an inlay hint is the double click.
+     *
+     * *Note* that edits are expected to change the document so that the inlay hint (or its nearest variant) is
+     * now part of the document and the inlay hint itself is now obsolete.
+     *
+     * *Note* that this property can be set late during
+     * {@link InlayHintsProvider.resolveInlayHint resolving} of inlay hints.
+     */
+    textEdits?: TextEdit[];
+
+    /**
+     * Render padding before the hint. Padding will use the editor's background color,
+     * not the background color of the hint itself. That means padding can be used to visually
+     * align/separate an inlay hint.
+     */
+    paddingLeft?: boolean;
+
+    /**
+     * Render padding after the hint. Padding will use the editor's background color,
+     * not the background color of the hint itself. That means padding can be used to visually
+     * align/separate an inlay hint.
+     */
+    paddingRight?: boolean;
+
+    /**
+     * Creates a new inlay hint.
+     *
+     * @param position The position of the hint.
+     * @param label The label of the hint.
+     * @param kind The {@link InlayHintKind kind} of the hint.
+     */
+    constructor(position: Position, label: string | InlayHintLabelPart[], kind?: InlayHintKind);
+  }
+
+  /**
+   * The inlay hints provider interface defines the contract between extensions and
+   * the inlay hints feature.
+   */
+  export interface InlayHintsProvider<T extends InlayHint = InlayHint> {
+
+    /**
+     * An optional event to signal that inlay hints have changed.
+     * @see {@link EventEmitter}
+     */
+    onDidChangeInlayHints?: Event<void>;
+
+    /**
+     *
+     * @param model The document in which the command was invoked.
+     * @param range The range for which inlay hints should be computed.
+     * @param token A cancellation token.
+     * @return A list of inlay hints or a thenable that resolves to such.
+     */
+    provideInlayHints(model: TextDocument, range: Range, token: CancellationToken): ProviderResult<T[]>;
+
+    /**
+     * Given an inlay hint fill in {@link InlayHint.tooltip tooltip}, {@link InlayHint.textEdits text edits},
+     * or complete label {@link InlayHintLabelPart parts}.
+     *
+     * *Note* that the editor will resolve an inlay hint at most once.
+     *
+     * @param hint An inlay hint.
+     * @param token A cancellation token.
+     * @return The resolved inlay hint or a thenable that resolves to such. It is OK to return the given `item`. When no result is returned, the given `item` will be used.
+     */
+    resolveInlayHint?(hint: T, token: CancellationToken): ProviderResult<T>;
   }
 
   /**
@@ -1194,10 +1396,10 @@ declare module 'vscode' {
      */
     constructor(items?: T[], isIncomplete?: boolean);
   }
+
   /**
    * A document link is a range in a text document that links to an internal or external resource, like another
    * text document or a web site.
-   * @木农
    */
   export class DocumentLink {
 
@@ -1347,7 +1549,6 @@ declare module 'vscode' {
   /**
    * Folding context (for future use)
    */
-  // tslint:disable-next-line: no-empty-interface
   export interface FoldingContext { }
 
   /**
@@ -1393,6 +1594,47 @@ declare module 'vscode' {
      */
     Outdent = 3,
   }
+
+  /**
+	 * Enumeration of commonly encountered syntax token types.
+	 */
+	export enum SyntaxTokenType {
+		/**
+		 * Everything except tokens that are part of comments, string literals and regular expressions.
+		 */
+		Other = 0,
+		/**
+		 * A comment.
+		 */
+		Comment = 1,
+		/**
+		 * A string literal.
+		 */
+		String = 2,
+		/**
+		 * A regular expression.
+		 */
+		RegEx = 3
+	}
+
+  /**
+	 * Describes pairs of strings where the close string will be automatically inserted when typing the opening string.
+	 */
+	export interface AutoClosingPair {
+		/**
+		 * The string that will trigger the automatic insertion of the closing string.
+		 */
+		open: string;
+		/**
+		 * The closing string that will be automatically inserted when typing the opening string.
+		 */
+		close: string;
+		/**
+		 * A set of tokens where the pair should not be auto closed.
+		 */
+		notIn?: SyntaxTokenType[];
+	}
+
   export interface LanguageConfiguration {
     /**
      * The language's comment settings.
@@ -1419,6 +1661,10 @@ declare module 'vscode' {
      * The language's rules to be evaluated when pressing Enter.
      */
     onEnterRules?: OnEnterRule[];
+    /**
+     * The language's auto closing pairs.
+     */
+    autoClosingPairs?: AutoClosingPair[];
 
     /**
      * **Deprecated** Do not use.
@@ -1530,12 +1776,50 @@ declare module 'vscode' {
      * Indicates that this markdown string is from a trusted source. Only *trusted*
      * markdown supports links that execute commands, e.g. `[Run it](command:myCommandId)`.
      */
-    isTrusted?: boolean;
+    isTrusted?: boolean | {
+			/**
+			 * A set of commend ids that are allowed to be executed by this markdown string.
+			 */
+			readonly enabledCommands: readonly string[];
+		};
 
     /**
      * Indicates that this markdown string can contain [ThemeIcons](#ThemeIcon), e.g. `$(zap)`.
      */
     readonly supportThemeIcons?: boolean;
+
+		/**
+		 * Indicates that this markdown string can contain raw html tags. Defaults to `false`.
+		 *
+		 * When `supportHtml` is false, the markdown renderer will strip out any raw html tags
+		 * that appear in the markdown text. This means you can only use markdown syntax for rendering.
+		 *
+		 * When `supportHtml` is true, the markdown render will also allow a safe subset of html tags
+		 * and attributes to be rendered. See https://github.com/microsoft/vscode/blob/6d2920473c6f13759c978dd89104c4270a83422d/src/vs/base/browser/markdownRenderer.ts#L296
+		 * for a list of all supported tags and attributes.
+		 */
+		supportHtml?: boolean;
+
+    /**
+     * Uri that relative paths are resolved relative to.
+     *
+     * If the `baseUri` ends with `/`, it is considered a directory and relative paths in the markdown are resolved relative to that directory:
+     *
+     * ```ts
+     * const md = new vscode.MarkdownString(`[link](./file.js)`);
+     * md.baseUri = vscode.Uri.file('/path/to/dir/');
+     * // Here 'link' in the rendered markdown resolves to '/path/to/dir/file.js'
+     * ```
+     *
+     * If the `baseUri` is a file, relative paths in the markdown are resolved relative to the parent dir of that file:
+     *
+     * ```ts
+     * const md = new vscode.MarkdownString(`[link](./file.js)`);
+     * md.baseUri = vscode.Uri.file('/path/to/otherFile.js');
+     * // Here 'link' in the rendered markdown resolves to '/path/to/file.js'
+     * ```
+     */
+    baseUri?: Uri;
 
     /**
      * Creates a new markdown string with the given value.
@@ -1805,6 +2089,13 @@ declare module 'vscode' {
   export class RelativePattern {
 
     /**
+		 * A base file path to which this pattern will be matched against relatively. The
+		 * file path must be absolute, should not have any trailing path separators and
+		 * not include any relative segments (`.` or `..`).
+		 */
+		baseUri?: Uri;
+
+    /**
      * A base file path to which this pattern will be matched against relatively.
      */
     base: string;
@@ -1873,6 +2164,11 @@ declare module 'vscode' {
      * to filter documents to a [workspace folder](#WorkspaceFolder).
      */
     pattern?: GlobPattern;
+
+    /**
+     * notebook type, like `jupyter-notebook`
+     */
+    notebookType?: string;
   }
 
   /**
@@ -2015,7 +2311,7 @@ declare module 'vscode' {
      * @param value A value to append 'as given'. The string will be escaped.
      * @return This snippet string.
      */
-    appendText(value: string): SnippetString;
+    appendText(string: string): SnippetString;
 
     /**
      * Builder-function that appends a tabstop (`$1`, `$2` etc) to
@@ -2025,7 +2321,7 @@ declare module 'vscode' {
      * value starting at 1.
      * @return This snippet string.
      */
-    appendTabstop(num?: number): SnippetString;
+    appendTabstop(number?: number): SnippetString;
 
     /**
      * Builder-function that appends a placeholder (`${1:value}`) to
@@ -2037,7 +2333,7 @@ declare module 'vscode' {
      * value starting at 1.
      * @return This snippet string.
      */
-    appendPlaceholder(value: string | ((snippet: SnippetString) => any), num?: number): SnippetString;
+    appendPlaceholder(value: string | ((snippet: SnippetString) => any), number?: number): SnippetString;
 
     /**
      * Builder-function that appends a choice (`${1|a,b,c}`) to
@@ -2048,7 +2344,7 @@ declare module 'vscode' {
      * value starting at 1.
      * @return This snippet string.
      */
-    appendChoice(values: string[], num?: number): SnippetString;
+    appendChoice(values: string[], number?: number): SnippetString;
 
     /**
      * Builder-function that appends a variable (`${VAR}`) to
@@ -2153,6 +2449,26 @@ declare module 'vscode' {
      * signaled by returning `undefined`, `null`, or an empty array.
      */
     provideDocumentRangeFormattingEdits(document: TextDocument, range: Range, options: FormattingOptions, token: CancellationToken): ProviderResult<TextEdit[]>;
+
+    /**
+		 * Provide formatting edits for multiple ranges in a document.
+		 *
+		 * This function is optional but allows a formatter to perform faster when formatting only modified ranges or when
+		 * formatting a large number of selections.
+		 *
+		 * The given ranges are hints and providers can decide to format a smaller
+		 * or larger range. Often this is done by adjusting the start and end
+		 * of the range to full syntax nodes.
+		 *
+		 * @param document The document in which the command was invoked.
+		 * @param ranges The ranges which should be formatted.
+		 * @param options Options controlling formatting.
+		 * @param token A cancellation token.
+		 * @returns A set of text edits or a thenable that resolves to such. The lack of a result can be
+		 * signaled by returning `undefined`, `null`, or an empty array.
+     * @monaco-todo the current monaco version does not yet use this API
+		 */
+		provideDocumentRangesFormattingEdits?(document: TextDocument, ranges: Range[], options: FormattingOptions, token: CancellationToken): ProviderResult<TextEdit[]>;
   }
 
   /**
@@ -2227,6 +2543,143 @@ declare module 'vscode' {
      */
     resolveCompletionItem?(item: T, token: CancellationToken): ProviderResult<T>;
   }
+
+  /**
+   * The inline completion item provider interface defines the contract between extensions and
+   * the inline completion feature.
+   *
+   * Providers are asked for completions either explicitly by a user gesture or implicitly when typing.
+   */
+  export interface InlineCompletionItemProvider {
+
+    /**
+     * Provides inline completion items for the given position and document.
+     * If inline completions are enabled, this method will be called whenever the user stopped typing.
+     * It will also be called when the user explicitly triggers inline completions or explicitly asks for the next or previous inline completion.
+     * In that case, all available inline completions should be returned.
+     * `context.triggerKind` can be used to distinguish between these scenarios.
+     *
+     * @param document The document inline completions are requested for.
+     * @param position The position inline completions are requested for.
+     * @param context A context object with additional information.
+     * @param token A cancellation token.
+     * @return An array of completion items or a thenable that resolves to an array of completion items.
+     */
+    provideInlineCompletionItems(document: TextDocument, position: Position, context: InlineCompletionContext, token: CancellationToken): ProviderResult<InlineCompletionItem[] | InlineCompletionList>;
+  }
+
+  /**
+     * Represents a collection of {@link InlineCompletionItem inline completion items} to be presented
+     * in the editor.
+     */
+  export class InlineCompletionList {
+    /**
+     * The inline completion items.
+     */
+    items: InlineCompletionItem[];
+
+    /**
+     * Creates a new list of inline completion items.
+    */
+    constructor(items: InlineCompletionItem[]);
+  }
+
+  /**
+   * Provides information about the context in which an inline completion was requested.
+   */
+  export interface InlineCompletionContext {
+    /**
+     * Describes how the inline completion was triggered.
+     */
+    readonly triggerKind: InlineCompletionTriggerKind;
+
+    /**
+     * Provides information about the currently selected item in the autocomplete widget if it is visible.
+     *
+     * If set, provided inline completions must extend the text of the selected item
+     * and use the same range, otherwise they are not shown as preview.
+     * As an example, if the document text is `console.` and the selected item is `.log` replacing the `.` in the document,
+     * the inline completion must also replace `.` and start with `.log`, for example `.log()`.
+     *
+     * Inline completion providers are requested again whenever the selected item changes.
+     */
+    readonly selectedCompletionInfo: SelectedCompletionInfo | undefined;
+  }
+
+  /**
+   * Describes the currently selected completion item.
+   */
+  export interface SelectedCompletionInfo {
+    /**
+     * The range that will be replaced if this completion item is accepted.
+     */
+    readonly range: Range;
+
+    /**
+     * The text the range will be replaced with if this completion is accepted.
+     */
+    readonly text: string;
+  }
+
+  /**
+   * Describes how an {@link InlineCompletionItemProvider inline completion provider} was triggered.
+   */
+  export enum InlineCompletionTriggerKind {
+    /**
+     * Completion was triggered explicitly by a user gesture.
+     * Return multiple completion items to enable cycling through them.
+     */
+    Invoke = 0,
+
+    /**
+     * Completion was triggered automatically while editing.
+     * It is sufficient to return a single completion item in this case.
+     */
+    Automatic = 1,
+  }
+
+  /**
+	 * An inline completion item represents a text snippet that is proposed inline to complete text that is being typed.
+	 *
+	 * @see {@link InlineCompletionItemProvider.provideInlineCompletionItems}
+	 */
+	export class InlineCompletionItem {
+		/**
+		 * The text to replace the range with. Must be set.
+		 * Is used both for the preview and the accept operation.
+		 */
+		insertText: string | SnippetString;
+
+		/**
+		 * A text that is used to decide if this inline completion should be shown. When `falsy`
+		 * the {@link InlineCompletionItem.insertText} is used.
+		 *
+		 * An inline completion is shown if the text to replace is a prefix of the filter text.
+		 */
+		filterText?: string;
+
+		/**
+		 * The range to replace.
+		 * Must begin and end on the same line.
+		 *
+		 * Prefer replacements over insertions to provide a better experience when the user deletes typed text.
+		 */
+		range?: Range;
+
+		/**
+		 * An optional {@link Command} that is executed *after* inserting this completion.
+		 */
+		command?: Command;
+
+		/**
+		 * Creates a new inline completion item.
+		 *
+		 * @param insertText The text to replace the range with.
+		 * @param range The range to replace. If not set, the word at the requested position will be used.
+		 * @param command An optional {@link Command} that is executed *after* inserting this completion.
+		 */
+		constructor(insertText: string | SnippetString, range?: Range, command?: Command);
+	}
 
   /**
    * Represents programming constructs like variables, classes, interfaces etc. that appear in a document. Document
@@ -2360,7 +2813,7 @@ declare module 'vscode' {
    * To get an instance of a `DiagnosticCollection` use
    * [createDiagnosticCollection](#languages.createDiagnosticCollection).
    */
-  export interface DiagnosticCollection {
+  export interface DiagnosticCollection extends Iterable<[uri: Uri, diagnostics: readonly Diagnostic[]]>{
 
     /**
      * The name of this diagnostic collection, for instance `typescript`. Every diagnostic
@@ -2636,101 +3089,101 @@ declare module 'vscode' {
   }
 
   /**
-	 * Represents an item of a type hierarchy, like a class or an interface.
-	 */
-	export class TypeHierarchyItem {
-		/**
-		 * The name of this item.
-		 */
-		name: string;
+   * Represents an item of a type hierarchy, like a class or an interface.
+   */
+  export class TypeHierarchyItem {
+    /**
+     * The name of this item.
+     */
+    name: string;
 
-		/**
-		 * The kind of this item.
-		 */
-		kind: SymbolKind;
+    /**
+     * The kind of this item.
+     */
+    kind: SymbolKind;
 
-		/**
-		 * Tags for this item.
-		 */
-		tags?: ReadonlyArray<SymbolTag>;
+    /**
+     * Tags for this item.
+     */
+    tags?: ReadonlyArray<SymbolTag>;
 
-		/**
-		 * More detail for this item, e.g. the signature of a function.
-		 */
-		detail?: string;
+    /**
+     * More detail for this item, e.g. the signature of a function.
+     */
+    detail?: string;
 
-		/**
-		 * The resource identifier of this item.
-		 */
-		uri: Uri;
+    /**
+     * The resource identifier of this item.
+     */
+    uri: Uri;
 
-		/**
-		 * The range enclosing this symbol not including leading/trailing whitespace
-		 * but everything else, e.g. comments and code.
-		 */
-		range: Range;
+    /**
+     * The range enclosing this symbol not including leading/trailing whitespace
+     * but everything else, e.g. comments and code.
+     */
+    range: Range;
 
-		/**
-		 * The range that should be selected and revealed when this symbol is being
-		 * picked, e.g. the name of a class. Must be contained by the {@link TypeHierarchyItem.range range}-property.
-		 */
-		selectionRange: Range;
+    /**
+     * The range that should be selected and revealed when this symbol is being
+     * picked, e.g. the name of a class. Must be contained by the {@link TypeHierarchyItem.range range}-property.
+     */
+    selectionRange: Range;
 
-		/**
-		 * Creates a new type hierarchy item.
-		 *
-		 * @param kind The kind of the item.
-		 * @param name The name of the item.
-		 * @param detail The details of the item.
-		 * @param uri The Uri of the item.
-		 * @param range The whole range of the item.
-		 * @param selectionRange The selection range of the item.
-		 */
-		constructor(kind: SymbolKind, name: string, detail: string, uri: Uri, range: Range, selectionRange: Range);
-	}
+    /**
+     * Creates a new type hierarchy item.
+     *
+     * @param kind The kind of the item.
+     * @param name The name of the item.
+     * @param detail The details of the item.
+     * @param uri The Uri of the item.
+     * @param range The whole range of the item.
+     * @param selectionRange The selection range of the item.
+     */
+    constructor(kind: SymbolKind, name: string, detail: string, uri: Uri, range: Range, selectionRange: Range);
+  }
 
 
-	/**
-	 * The type hierarchy provider interface describes the contract between extensions
-	 * and the type hierarchy feature.
-	 */
-	export interface TypeHierarchyProvider {
+  /**
+   * The type hierarchy provider interface describes the contract between extensions
+   * and the type hierarchy feature.
+   */
+  export interface TypeHierarchyProvider {
 
-		/**
-		 * Bootstraps type hierarchy by returning the item that is denoted by the given document
-		 * and position. This item will be used as entry into the type graph. Providers should
-		 * return `undefined` or `null` when there is no item at the given location.
-		 *
-		 * @param document The document in which the command was invoked.
-		 * @param position The position at which the command was invoked.
-		 * @param token A cancellation token.
-		 * @returns One or multiple type hierarchy items or a thenable that resolves to such. The lack of a result can be
-		 * signaled by returning `undefined`, `null`, or an empty array.
-		 */
-		prepareTypeHierarchy(document: TextDocument, position: Position, token: CancellationToken): ProviderResult<TypeHierarchyItem | TypeHierarchyItem[]>;
+    /**
+     * Bootstraps type hierarchy by returning the item that is denoted by the given document
+     * and position. This item will be used as entry into the type graph. Providers should
+     * return `undefined` or `null` when there is no item at the given location.
+     *
+     * @param document The document in which the command was invoked.
+     * @param position The position at which the command was invoked.
+     * @param token A cancellation token.
+     * @returns One or multiple type hierarchy items or a thenable that resolves to such. The lack of a result can be
+     * signaled by returning `undefined`, `null`, or an empty array.
+     */
+    prepareTypeHierarchy(document: TextDocument, position: Position, token: CancellationToken): ProviderResult<TypeHierarchyItem | TypeHierarchyItem[]>;
 
-		/**
-		 * Provide all supertypes for an item, e.g all types from which a type is derived/inherited. In graph terms this describes directed
-		 * and annotated edges inside the type graph, e.g the given item is the starting node and the result is the nodes
-		 * that can be reached.
-		 *
-		 * @param item The hierarchy item for which super types should be computed.
-		 * @param token A cancellation token.
-		 * @returns A set of direct supertypes or a thenable that resolves to such. The lack of a result can be
-		 * signaled by returning `undefined` or `null`.
-		 */
-		provideTypeHierarchySupertypes(item: TypeHierarchyItem, token: CancellationToken): ProviderResult<TypeHierarchyItem[]>;
+    /**
+     * Provide all supertypes for an item, e.g all types from which a type is derived/inherited. In graph terms this describes directed
+     * and annotated edges inside the type graph, e.g the given item is the starting node and the result is the nodes
+     * that can be reached.
+     *
+     * @param item The hierarchy item for which super types should be computed.
+     * @param token A cancellation token.
+     * @returns A set of direct supertypes or a thenable that resolves to such. The lack of a result can be
+     * signaled by returning `undefined` or `null`.
+     */
+    provideTypeHierarchySupertypes(item: TypeHierarchyItem, token: CancellationToken): ProviderResult<TypeHierarchyItem[]>;
 
-		/**
-		 * Provide all subtypes for an item, e.g all types which are derived/inherited from the given item. In
-		 * graph terms this describes directed and annotated edges inside the type graph, e.g the given item is the starting
-		 * node and the result is the nodes that can be reached.
-		 *
-		 * @param item The hierarchy item for which subtypes should be computed.
-		 * @param token A cancellation token.
-		 * @returns A set of direct subtypes or a thenable that resolves to such. The lack of a result can be
-		 * signaled by returning `undefined` or `null`.
-		 */
-		provideTypeHierarchySubtypes(item: TypeHierarchyItem, token: CancellationToken): ProviderResult<TypeHierarchyItem[]>;
-	}
+    /**
+     * Provide all subtypes for an item, e.g all types which are derived/inherited from the given item. In
+     * graph terms this describes directed and annotated edges inside the type graph, e.g the given item is the starting
+     * node and the result is the nodes that can be reached.
+     *
+     * @param item The hierarchy item for which subtypes should be computed.
+     * @param token A cancellation token.
+     * @returns A set of direct subtypes or a thenable that resolves to such. The lack of a result can be
+     * signaled by returning `undefined` or `null`.
+     */
+    provideTypeHierarchySubtypes(item: TypeHierarchyItem, token: CancellationToken): ProviderResult<TypeHierarchyItem[]>;
+  }
 }

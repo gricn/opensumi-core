@@ -1,1 +1,2 @@
-export * from './workspace-defination';
+export * from './constants';
+export * from './workspace.interface';

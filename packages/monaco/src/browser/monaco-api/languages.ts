@@ -1,33 +1,45 @@
-import { FoldingRangeKind } from '@opensumi/monaco-editor-core/esm/vs/editor/common/modes';
+import { FoldingRangeKind } from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
+import { ILanguageFeaturesService } from '@opensumi/monaco-editor-core/esm/vs/editor/common/services/languageFeatures';
 import {
-  register,
+  getEncodedLanguageId,
   getLanguages,
   onLanguage,
-  getEncodedLanguageId,
-  setLanguageConfiguration,
-  setTokensProvider,
-  setMonarchTokensProvider,
+  onLanguageEncountered,
+  register,
+  registerCodeActionProvider,
+  registerCodeLensProvider,
+  registerColorProvider,
+  registerCompletionItemProvider,
+  registerDeclarationProvider,
+  registerDefinitionProvider,
+  registerDocumentFormattingEditProvider,
+  registerDocumentHighlightProvider,
+  registerDocumentRangeFormattingEditProvider,
+  registerDocumentRangeSemanticTokensProvider,
+  registerDocumentSemanticTokensProvider,
+  registerDocumentSymbolProvider,
+  registerFoldingRangeProvider,
+  registerHoverProvider,
+  registerImplementationProvider,
+  registerInlayHintsProvider,
+  registerInlineCompletionsProvider,
+  registerInlineEditProvider,
+  registerLinkProvider,
+  registerLinkedEditingRangeProvider,
+  registerNewSymbolNameProvider,
+  registerOnTypeFormattingEditProvider,
   registerReferenceProvider,
   registerRenameProvider,
-  registerSignatureHelpProvider,
-  registerHoverProvider,
-  registerDocumentSymbolProvider,
-  registerDocumentHighlightProvider,
-  registerDefinitionProvider,
-  registerImplementationProvider,
-  registerTypeDefinitionProvider,
-  registerCodeLensProvider,
-  registerCodeActionProvider,
-  registerDocumentFormattingEditProvider,
-  registerDocumentRangeFormattingEditProvider,
-  registerOnTypeFormattingEditProvider,
-  registerLinkProvider,
-  registerColorProvider,
-  registerFoldingRangeProvider,
-  registerDeclarationProvider,
   registerSelectionRangeProvider,
-  registerCompletionItemProvider,
+  registerSignatureHelpProvider,
+  registerTokensProviderFactory,
+  registerTypeDefinitionProvider,
+  setColorMap,
+  setLanguageConfiguration,
+  setMonarchTokensProvider,
+  setTokensProvider,
 } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneLanguages';
+import { StandaloneServices } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneServices';
 
 export function createMonacoLanguageApi() {
   return Object.freeze({
@@ -60,9 +72,18 @@ export function createMonacoLanguageApi() {
     registerDeclarationProvider,
     registerSelectionRangeProvider,
     registerCompletionItemProvider,
-    // enums
-    // TODO: const enum
-    // Classes
+    registerInlineCompletionsProvider,
+    registerNewSymbolNameProvider,
     FoldingRangeKind,
+    onLanguageEncountered,
+    registerDocumentRangeSemanticTokensProvider,
+    registerInlineEditProvider,
+    registerTokensProviderFactory,
+    registerLinkedEditingRangeProvider,
+    registerDocumentSemanticTokensProvider,
+    registerInlayHintsProvider,
+    setColorMap,
   });
 }
+
+export const languageFeaturesService = StandaloneServices.get(ILanguageFeaturesService);

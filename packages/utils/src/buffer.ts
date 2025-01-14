@@ -2,13 +2,18 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-// Some code copied and modified from https://github.com/microsoft/vscode/blob/1.44.0/src/vs/base/common/arrays.ts
-import { toCanonicalName, iconvDecode, UTF8 } from './encoding';
+
+import { UTF8, iconvDecode, toCanonicalName } from './encoding';
 import * as strings from './strings';
 
 let textEncoder: TextEncoder | null;
 
-const hasBuffer = typeof Buffer !== 'undefined';
+const isInNodeEnv =
+  typeof process !== 'undefined' &&
+  typeof process.versions !== 'undefined' &&
+  typeof process.versions.node !== 'undefined';
+
+const hasBuffer = isInNodeEnv && typeof Buffer !== 'undefined';
 const hasTextEncoder = typeof TextEncoder !== 'undefined';
 const hasTextDecoder = typeof TextDecoder !== 'undefined';
 
@@ -47,7 +52,7 @@ export class BinaryBuffer {
     }
   }
 
-  static concat(buffers: BinaryBuffer[], totalLength?: number): BinaryBuffer {
+  static concat(buffers: (BinaryBuffer | Uint8Array)[], totalLength?: number): BinaryBuffer {
     if (typeof totalLength === 'undefined') {
       totalLength = 0;
       for (let i = 0, len = buffers.length; i < len; i++) {
@@ -71,7 +76,7 @@ export class BinaryBuffer {
 
   private constructor(buffer: Uint8Array) {
     this.buffer = buffer;
-    this.byteLength = this.buffer.byteLength;
+    this.byteLength = buffer.byteLength;
   }
 
   /**
@@ -94,10 +99,7 @@ export class BinaryBuffer {
   }
 
   slice(start?: number, end?: number): BinaryBuffer {
-    // IMPORTANT: use subarray instead of slice because TypedArray#slice
-    // creates shallow copy and NodeBuffer#slice doesn't. The use of subarray
-    // ensures the same, performant, behaviour.
-    return new BinaryBuffer(this.buffer.subarray(start! /* bad lib.d.ts*/, end));
+    return new BinaryBuffer(this.buffer.subarray(start, end));
   }
 
   set(array: BinaryBuffer | Uint8Array, offset?: number): void {
@@ -183,3 +185,147 @@ export function readUInt8(source: Uint8Array, offset: number): number {
 export function writeUInt8(destination: Uint8Array, value: number, offset: number): void {
   destination[offset] = value;
 }
+
+/** Decodes base64 to a uint8 array. URL-encoded and unpadded base64 is allowed. */
+export function decodeBase64(encoded: string) {
+  let building = 0;
+  let remainder = 0;
+  let bufi = 0;
+
+  // The simpler way to do this is `Uint8Array.from(atob(str), c => c.charCodeAt(0))`,
+  // but that's about 10-20x slower than this function in current Chromium versions.
+
+  const buffer = new Uint8Array(Math.floor((encoded.length / 4) * 3));
+  const append = (value: number) => {
+    switch (remainder) {
+      case 3:
+        buffer[bufi++] = building | value;
+        remainder = 0;
+        break;
+      case 2:
+        buffer[bufi++] = building | (value >>> 2);
+        building = value << 6;
+        remainder = 3;
+        break;
+      case 1:
+        buffer[bufi++] = building | (value >>> 4);
+        building = value << 4;
+        remainder = 2;
+        break;
+      default:
+        building = value << 2;
+        remainder = 1;
+    }
+  };
+
+  for (let i = 0; i < encoded.length; i++) {
+    const code = encoded.charCodeAt(i);
+    // See https://datatracker.ietf.org/doc/html/rfc4648#section-4
+    // This branchy code is about 3x faster than an indexOf on a base64 char string.
+    if (code >= 65 && code <= 90) {
+      append(code - 65); // A-Z starts ranges from char code 65 to 90
+    } else if (code >= 97 && code <= 122) {
+      append(code - 97 + 26); // a-z starts ranges from char code 97 to 122, starting at byte 26
+    } else if (code >= 48 && code <= 57) {
+      append(code - 48 + 52); // 0-9 starts ranges from char code 48 to 58, starting at byte 52
+    } else if (code === 43 || code === 45) {
+      append(62); // "+" or "-" for URLS
+    } else if (code === 47 || code === 95) {
+      append(63); // "/" or "_" for URLS
+    } else if (code === 61) {
+      break; // "="
+    } else {
+      throw new SyntaxError(`Unexpected base64 character ${encoded[i]}`);
+    }
+  }
+
+  const unpadded = bufi;
+  while (remainder > 0) {
+    append(0);
+  }
+
+  // slice is needed to account for overestimation due to padding
+  return BinaryBuffer.wrap(buffer).slice(0, unpadded);
+}
+
+const base64Alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const base64UrlSafeAlphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+/** Encodes a buffer to a base64 string. */
+export function encodeBase64({ buffer }: BinaryBuffer, padded = true, urlSafe = false) {
+  const dictionary = urlSafe ? base64UrlSafeAlphabet : base64Alphabet;
+  let output = '';
+
+  const remainder = buffer.byteLength % 3;
+
+  let i = 0;
+  for (; i < buffer.byteLength - remainder; i += 3) {
+    const a = buffer[i + 0];
+    const b = buffer[i + 1];
+    const c = buffer[i + 2];
+
+    output += dictionary[a >>> 2];
+    output += dictionary[((a << 4) | (b >>> 4)) & 0b111111];
+    output += dictionary[((b << 2) | (c >>> 6)) & 0b111111];
+    output += dictionary[c & 0b111111];
+  }
+
+  if (remainder === 1) {
+    const a = buffer[i + 0];
+    output += dictionary[a >>> 2];
+    output += dictionary[(a << 4) & 0b111111];
+    if (padded) {
+      output += '==';
+    }
+  } else if (remainder === 2) {
+    const a = buffer[i + 0];
+    const b = buffer[i + 1];
+    output += dictionary[a >>> 2];
+    output += dictionary[((a << 4) | (b >>> 4)) & 0b111111];
+    output += dictionary[(b << 2) & 0b111111];
+    if (padded) {
+      output += '=';
+    }
+  }
+
+  return output;
+}
+
+export type ITypedArray = Uint8Array | Uint16Array | Uint32Array;
+export type IDataType = string | Buffer | ITypedArray;
+
+export const getUInt8Buffer = hasBuffer
+  ? (data: IDataType): Uint8Array => {
+      if (typeof data === 'string') {
+        const buf = Buffer.from(data, 'utf8');
+        return new Uint8Array(buf.buffer, buf.byteOffset, buf.length);
+      }
+
+      if (Buffer.isBuffer(data)) {
+        return new Uint8Array(data.buffer, data.byteOffset, data.length);
+      }
+
+      if (ArrayBuffer.isView(data)) {
+        return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      }
+
+      throw new Error('Invalid data type!');
+    }
+  : (data: IDataType): Uint8Array => {
+      if (typeof data === 'string') {
+        if (hasTextEncoder) {
+          if (!textEncoder) {
+            textEncoder = new TextEncoder();
+          }
+          return textEncoder.encode(data);
+        } else {
+          return strings.encodeUTF8(data);
+        }
+      }
+
+      if (ArrayBuffer.isView(data)) {
+        return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      }
+
+      throw new Error('Invalid data type!');
+    };

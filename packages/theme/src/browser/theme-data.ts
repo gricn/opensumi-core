@@ -2,31 +2,26 @@ import { IRawThemeSetting } from 'vscode-textmate';
 
 import { Autowired, Injectable } from '@opensumi/di';
 import {
-  URI,
-  localize,
-  parseWithComments,
+  CharCode,
   ILogger,
   IReporterService,
   REPORT_NAME,
-  isString,
-  CharCode,
+  URI,
   isBoolean,
+  isString,
+  localize,
+  parseWithComments,
 } from '@opensumi/ide-core-browser';
 import { IFileServiceClient } from '@opensumi/ide-file-service/lib/common';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
 
 import { Color } from '../common/color';
 import { editorBackground, editorForeground } from '../common/color-tokens/editor';
 import { parse as parsePList } from '../common/plistParser';
 import {
-  createMatchers,
   ISemanticTokenRegistry,
   ITextMateThemingRule,
   Matcher,
   MatcherWithPriority,
-  nameMatcher,
-  noMatch,
-  parseClassifierString,
   ProbeScope,
   SemanticTokenRule,
   TextMateThemingRuleDefinitions,
@@ -34,19 +29,28 @@ import {
   TokenStyleDefinition,
   TokenStyleDefinitions,
   TokenStyleValue,
+  createMatchers,
+  nameMatcher,
+  noMatch,
+  parseClassifierString,
 } from '../common/semantic-tokens-registry';
 import {
-  ITokenThemeRule,
-  IColors,
   BuiltinTheme,
-  ITokenColorizationRule,
-  IColorMap,
-  getThemeType,
-  IThemeData,
   ColorScheme,
+  HC_BLACK_THEME_NAME,
+  HC_LIGHT_THEME_NAME,
+  IColorMap,
+  IColors,
   ISemanticTokenColorizationSetting,
+  IThemeData,
+  ITokenColorizationRule,
+  ITokenThemeRule,
+  VS_LIGHT_THEME_NAME,
+  getThemeType,
 } from '../common/theme.service';
 import { convertSettings } from '../common/themeCompatibility';
+
+import defaultTheme from './default-theme';
 
 function getScopeMatcher(rule: ITextMateThemingRule): Matcher<ProbeScope> {
   const ruleScope = rule.scope;
@@ -133,13 +137,19 @@ export class ThemeData implements IThemeData {
 
   get type(): ColorScheme {
     switch (this.base) {
-      case 'vs':
+      case VS_LIGHT_THEME_NAME:
         return ColorScheme.LIGHT;
-      case 'hc-black':
-        return ColorScheme.HIGH_CONTRAST;
+      case HC_BLACK_THEME_NAME:
+        return ColorScheme.HIGH_CONTRAST_DARK;
+      case HC_LIGHT_THEME_NAME:
+        return ColorScheme.HIGH_CONTRAST_LIGHT;
       default:
         return ColorScheme.DARK;
     }
+  }
+
+  public getDefaultTheme(): any {
+    return defaultTheme;
   }
 
   public async initializeThemeData(id: string, name: string, base: string, themeLocation: URI) {
@@ -226,7 +236,7 @@ export class ThemeData implements IThemeData {
       json = parseWithComments(content);
       return json;
     } catch (error) {
-      return this.logger.error('主题文件解析出错！', content);
+      return this.logger.error('Theme data parse error.', content);
     }
   }
 
@@ -259,8 +269,8 @@ export class ThemeData implements IThemeData {
     resultColors: IColorMap,
   ): Promise<any> {
     const timer = this.reporter.time(REPORT_NAME.THEME_LOAD);
-    const ret = await this.fileServiceClient.resolveContent(themeLocation.toString());
-    const themeContent = ret.content;
+    const ret = await this.fileServiceClient.readFile(themeLocation.toString());
+    const themeContent = ret.content.toString();
     timer.timeEnd(themeLocation.toString());
     const themeLocationPath = themeLocation.path.toString();
     if (/\.json$/.test(themeLocationPath)) {
@@ -353,9 +363,9 @@ export class ThemeData implements IThemeData {
   }
 
   private async loadSyntaxTokens(themeLocation: URI): Promise<ITokenColorizationRule[]> {
-    const ret = await this.fileServiceClient.resolveContent(themeLocation.toString());
+    const ret = await this.fileServiceClient.readFile(themeLocation.toString());
     try {
-      const theme = parsePList(ret.content);
+      const theme = parsePList(ret.content.toString());
       const settings = theme.settings;
       if (!Array.isArray(settings)) {
         return Promise.reject(
@@ -372,7 +382,7 @@ export class ThemeData implements IThemeData {
   }
 
   // 将 ITokenColorizationRule 转化为 ITokenThemeRule
-  protected transform(tokenColor: ITokenColorizationRule, acceptor: (rule: monaco.editor.ITokenThemeRule) => void) {
+  protected transform(tokenColor: ITokenColorizationRule, acceptor: (rule: ITokenThemeRule) => void) {
     if (tokenColor.scope && tokenColor.settings && tokenColor.scope === 'token.info-token') {
       this.hasDefaultTokens = true;
     }
@@ -699,7 +709,13 @@ const defaultThemeColors: { [baseTheme: string]: ITokenColorizationRule[] } = {
     { scope: 'token.error-token', settings: { foreground: '#f44747' } },
     { scope: 'token.debug-token', settings: { foreground: '#b267e6' } },
   ],
-  hc: [
+  hcLight: [
+    { scope: 'token.info-token', settings: { foreground: '#316bcd' } },
+    { scope: 'token.warn-token', settings: { foreground: '#cd9731' } },
+    { scope: 'token.error-token', settings: { foreground: '#cd3131' } },
+    { scope: 'token.debug-token', settings: { foreground: '#800080' } },
+  ],
+  hcDark: [
     { scope: 'token.info-token', settings: { foreground: '#6796e6' } },
     { scope: 'token.warn-token', settings: { foreground: '#008000' } },
     { scope: 'token.error-token', settings: { foreground: '#FF0000' } },

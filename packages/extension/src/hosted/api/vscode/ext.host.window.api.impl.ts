@@ -1,35 +1,32 @@
-import type vscode from 'vscode';
-
 import { IRPCProtocol } from '@opensumi/ide-connection';
-import { MessageType, IDisposable, CancellationToken, Emitter, IExtensionInfo } from '@opensumi/ide-core-common';
-import { QuickInputOptions } from '@opensumi/ide-quick-open';
+import { CancellationToken, Emitter, Event, IDisposable, IExtensionInfo, MessageType } from '@opensumi/ide-core-common';
 
 import {
+  ICreateOutputChannelOptions,
   IExtHostMessage,
-  IExtHostTreeView,
-  TreeViewOptions,
-  ViewColumn,
-  IWebviewPanelOptions,
-  IWebviewOptions,
-  WebviewPanel,
-  WebviewPanelSerializer,
-  IExtHostWindowState,
-  IExtHostStatusBar,
-  IExtHostQuickOpen,
   IExtHostOutput,
+  IExtHostQuickOpen,
+  IExtHostStatusBar,
   IExtHostTerminal,
+  IExtHostTreeView,
+  IExtHostUrls,
   IExtHostWindow,
-  IMainThreadWindow,
-  MainThreadAPIIdentifier,
+  IExtHostWindowState,
   IExtOpenDialogOptions,
   IExtSaveDialogOptions,
-  IExtHostUrls,
+  IMainThreadWindow,
+  IWebviewOptions,
+  IWebviewPanelOptions,
+  MainThreadAPIIdentifier,
+  ViewColumn,
+  WebviewPanel,
+  WebviewPanelSerializer,
   WebviewViewProvider,
 } from '../../../common/vscode';
 import { IExtHostDecorationsShape } from '../../../common/vscode/decoration';
 import * as types from '../../../common/vscode/ext-types';
 import { Uri } from '../../../common/vscode/ext-types';
-import { throwProposedApiError, IExtensionDescription } from '../../../common/vscode/extension';
+import { IExtensionDescription, throwProposedApiError } from '../../../common/vscode/extension';
 
 import { ExtensionHostEditorService } from './editor/editor.host';
 import { ExtHostWebviewService, ExtHostWebviewViews } from './ext.host.api.webview';
@@ -37,6 +34,8 @@ import { ExtHostCustomEditorImpl } from './ext.host.custom-editor';
 import { ExtHostEditorTabs } from './ext.host.editor-tabs';
 import { ExtHostProgress } from './ext.host.progress';
 import { ExtHostTheming } from './ext.host.theming';
+
+import type vscode from 'vscode';
 
 export function createWindowApiFactory(
   extension: IExtensionDescription,
@@ -63,6 +62,7 @@ export function createWindowApiFactory(
     extensionId: extension.extensionId,
     isBuiltin: extension.isBuiltin,
   };
+  const _onDidWriteTerminalData = new Emitter<vscode.TerminalDataWriteEvent>();
   return {
     // @deprecated
     withScmProgress<R>(task: (progress: vscode.Progress<number>) => Thenable<R>) {
@@ -84,9 +84,6 @@ export function createWindowApiFactory(
         token: vscode.CancellationToken,
       ) => Thenable<R>,
     ) {
-      if (typeof options.location === 'object') {
-        throwProposedApiError(extension);
-      }
       return extHostProgress.withProgress(extension, options, task);
     },
     createStatusBarItem(
@@ -108,8 +105,8 @@ export function createWindowApiFactory(
       }
       return extHostStatusBar.createStatusBarItem(extension, id, alignment, priority);
     },
-    createOutputChannel(name) {
-      return extHostOutput.createOutputChannel(name);
+    createOutputChannel(name: string, options: string | ICreateOutputChannelOptions | undefined): any {
+      return extHostOutput.createOutputChannel(name, options);
     },
     setStatusBarMessage(text: string, arg?: number | Thenable<any>): vscode.Disposable {
       // step2
@@ -155,10 +152,10 @@ export function createWindowApiFactory(
       );
     },
     registerTreeDataProvider<T>(viewId: string, treeDataProvider: vscode.TreeDataProvider<T>) {
-      return extHostTreeView.registerTreeDataProvider(viewId, treeDataProvider);
+      return extHostTreeView.registerTreeDataProvider(viewId, treeDataProvider as any);
     },
-    createTreeView<T>(viewId: string, options: TreeViewOptions<T>) {
-      return extHostTreeView.createTreeView(viewId, options);
+    createTreeView<T>(viewId: string, options: vscode.TreeViewOptions<T>) {
+      return extHostTreeView.createTreeView(viewId, options as any) as vscode.TreeView<T>;
     },
     get activeTextEditor() {
       return extHostEditors.activeEditor && extHostEditors.activeEditor.textEditor;
@@ -172,6 +169,7 @@ export function createWindowApiFactory(
     onDidChangeTextEditorVisibleRanges: extHostEditors.onDidChangeTextEditorVisibleRanges,
     onDidChangeTextEditorOptions: extHostEditors.onDidChangeTextEditorOptions,
     onDidChangeTextEditorViewColumn: extHostEditors.onDidChangeTextEditorViewColumn,
+    onDidWriteTerminalData: _onDidWriteTerminalData.event,
     showTextDocument(
       documentOrUri: vscode.TextDocument | Uri,
       columnOrOptions?: vscode.ViewColumn | vscode.TextDocumentShowOptions,
@@ -191,7 +189,7 @@ export function createWindowApiFactory(
     createQuickPick<T extends vscode.QuickPickItem>(): vscode.QuickPick<T> {
       return extHostQuickOpen.createQuickPick();
     },
-    showInputBox(options?: QuickInputOptions, token?: CancellationToken): PromiseLike<string | undefined> {
+    showInputBox(options?: vscode.InputBoxOptions, token?: CancellationToken): PromiseLike<string | undefined> {
       return extHostQuickOpen.showInputBox(options, token);
     },
     createInputBox(): vscode.InputBox {
@@ -204,7 +202,7 @@ export function createWindowApiFactory(
       options?: IWebviewPanelOptions & IWebviewOptions,
     ): WebviewPanel {
       return extHostWebviews.createWebview(
-        Uri.parse('not-implemented://'),
+        extension.extensionLocation,
         viewType,
         title,
         showOptions,
@@ -215,14 +213,6 @@ export function createWindowApiFactory(
     registerWebviewPanelSerializer(viewType: string, serializer: WebviewPanelSerializer): IDisposable {
       return extHostWebviews.registerWebviewPanelSerializer(viewType, serializer);
     },
-    /**
-     * @deprecated
-     * proposed api registerDecorationProvider
-     * please use registerFileDecorationProvider
-     */
-    registerDecorationProvider: proposedApiFunction(extension, (provider: vscode.DecorationProvider) =>
-      extHostDecorations.registerFileDecorationProvider(provider, extension.id),
-    ),
     registerFileDecorationProvider: (provider: vscode.FileDecorationProvider) =>
       extHostDecorations.registerFileDecorationProvider(provider, extension.id),
     registerUriHandler(handler: vscode.UriHandler) {
@@ -255,6 +245,8 @@ export function createWindowApiFactory(
     onDidCloseTerminal: extHostTerminal.onDidCloseTerminal,
 
     onDidOpenTerminal: extHostTerminal.onDidOpenTerminal,
+
+    onDidChangeTerminalState: extHostTerminal.onDidChangeTerminalState,
 
     createTerminal(
       nameOrOptions?: vscode.TerminalOptions | vscode.ExtensionTerminalOptions | string,
@@ -303,6 +295,15 @@ export function createWindowApiFactory(
     get onDidChangeOpenEditors() {
       return extHostEditorTabs.onDidChangeTabs;
     },
+    get tabGroups() {
+      return extHostEditorTabs.tabGroups;
+    },
+    /** @stubbed Terminal Shell Ingration */
+    onDidChangeTerminalShellIntegration: Event.None,
+    /** @stubbed Terminal Shell Ingration */
+    onDidEndTerminalShellExecution: Event.None,
+    /** @stubbed Terminal Shell Ingration */
+    onDidStartTerminalShellExecution: Event.None,
   };
 }
 

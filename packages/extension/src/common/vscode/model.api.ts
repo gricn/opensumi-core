@@ -1,29 +1,29 @@
-import type vscode from 'vscode';
 import { SymbolInformation } from 'vscode-languageserver-types';
 
 import {
-  Uri as URI,
-  IRange,
-  IDisposable,
-  UriComponents,
-  SymbolTag,
   CancellationToken,
   Event,
+  IDisposable,
   IMarkdownString,
+  IRange,
+  SymbolTag,
+  Uri as URI,
+  UriComponents,
+  isString,
 } from '@opensumi/ide-core-common';
 import { ISingleEditOperation } from '@opensumi/ide-editor';
+
+import { IndentAction, SymbolKind } from './ext-types';
+
+import type { editor, languages } from '@opensumi/ide-monaco';
 // eslint-disable-next-line import/no-restricted-paths
 import type { CallHierarchyItem } from '@opensumi/ide-monaco/lib/browser/contrib/callHierarchy';
 // eslint-disable-next-line import/no-restricted-paths
 import type { TypeHierarchyItem } from '@opensumi/ide-monaco/lib/browser/contrib/typeHierarchy';
-import type { CompletionItemLabel } from '@opensumi/monaco-editor-core/esm/vs/editor/common/modes';
-import { LanguageFeatureRegistry } from '@opensumi/monaco-editor-core/esm/vs/editor/common/modes/languageFeatureRegistry';
-import type { languages, editor } from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
-
+import type { CompletionItemLabel } from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
 // 内置的api类型声明
-
-import { IndentAction, SymbolKind } from './ext-types';
-export { IMarkdownString, SymbolTag, CallHierarchyItem, TypeHierarchyItem };
+import type vscode from 'vscode';
+export { CallHierarchyItem, IMarkdownString, SymbolTag, TypeHierarchyItem };
 
 export interface IRawColorInfo {
   color: [number, number, number, number];
@@ -59,6 +59,10 @@ export interface CustomCodeAction {
   command?: VSCommand;
   edit?: IWorkspaceEditDto;
   isPreferred?: boolean;
+}
+
+export interface WorkspaceEditMetadataDto {
+  isRefactoring?: boolean;
 }
 
 /**
@@ -157,12 +161,19 @@ export interface SerializedOnEnterRule {
 
 export type CharacterPair = [string, string];
 
+export interface SerializedAutoClosingPair {
+  open: string;
+  close: string;
+  notIn?: string[];
+}
+
 export interface SerializedLanguageConfiguration {
   comments?: CommentRule;
   brackets?: CharacterPair[];
   wordPattern?: SerializedRegExp;
   indentationRules?: SerializedIndentationRule;
   onEnterRules?: SerializedOnEnterRule[];
+  autoClosingPairs?: SerializedAutoClosingPair[];
 }
 
 /**
@@ -368,6 +379,7 @@ export class IdObject {
 }
 
 export enum CompletionItemInsertTextRule {
+  None = 0,
   /**
    * Adjust whitespace/indentation of multiline insert texts to
    * match the current line indentation.
@@ -513,9 +525,9 @@ export interface FileOperationOptions {
   recursive?: boolean;
 }
 
-export type ResourceFileEditDto = languages.WorkspaceFileEdit;
+export type ResourceFileEditDto = languages.IWorkspaceFileEdit;
 
-export type ResourceTextEditDto = languages.WorkspaceTextEdit;
+export type ResourceTextEditDto = languages.IWorkspaceTextEdit;
 
 export interface DocumentLink {
   range: Range;
@@ -610,6 +622,56 @@ export interface SignatureHelpResult extends IDisposable {
 export interface RenameLocation {
   range: Range;
   text: string;
+}
+
+/**
+ * A document filter denotes a document by different properties like
+ * the {@link TextDocument.languageId language}, the {@link Uri.scheme scheme} of
+ * its resource, or a glob-pattern that is applied to the {@link TextDocument.fileName path}.
+ *
+ * Glob patterns can have the following syntax:
+ * - `*` to match one or more characters in a path segment
+ * - `?` to match on one character in a path segment
+ * - `**` to match any number of path segments, including none
+ * - `{}` to group sub patterns into an OR expression. (e.g. `**​/*.{ts,js}` matches all TypeScript and JavaScript files)
+ * - `[]` to declare a range of characters to match in a path segment (e.g., `example.[0-9]` to match on `example.0`, `example.1`, …)
+ * - `[!...]` to negate a range of characters to match in a path segment (e.g., `example.[!0-9]` to match on `example.a`, `example.b`, but not `example.0`)
+ *
+ * @sample A language filter that applies to typescript files on disk: `{ language: 'typescript', scheme: 'file' }`
+ * @sample A language filter that applies to all package.json paths: `{ language: 'json', pattern: '**package.json' }`
+ */
+export type TextDocumentFilter =
+  | {
+      /** A language id, like `typescript`. */
+      language: string;
+      /** A Uri {@link Uri.scheme scheme}, like `file` or `untitled`. */
+      scheme?: string;
+      /** A glob pattern, like `*.{ts,js}`. */
+      pattern?: string;
+    }
+  | {
+      /** A language id, like `typescript`. */
+      language?: string;
+      /** A Uri {@link Uri.scheme scheme}, like `file` or `untitled`. */
+      scheme: string;
+      /** A glob pattern, like `*.{ts,js}`. */
+      pattern?: string;
+    }
+  | {
+      /** A language id, like `typescript`. */
+      language?: string;
+      /** A Uri {@link Uri.scheme scheme}, like `file` or `untitled`. */
+      scheme?: string;
+      /** A glob pattern, like `*.{ts,js}`. */
+      pattern: string;
+    };
+
+/**
+ * From vscode-languageserver-node/protocol/src/common/protocol.ts
+ */
+export function isDocumentFilter(value: any): value is TextDocumentFilter {
+  const candidate: TextDocumentFilter = value;
+  return isString(candidate.language) || isString(candidate.scheme) || isString(candidate.pattern);
 }
 
 export interface Rejection {
@@ -766,5 +828,3 @@ export interface FoldingRangeProvider {
     token: CancellationToken,
   ): vscode.ProviderResult<FoldingRange[]>;
 }
-
-export const FoldingRangeProviderRegistry = new LanguageFeatureRegistry<FoldingRangeProvider>();

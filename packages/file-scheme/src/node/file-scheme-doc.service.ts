@@ -1,18 +1,23 @@
 import { existsSync, readFile, statSync, writeFile } from 'fs-extra';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { IHashCalculateService } from '@opensumi/ide-core-common/lib/hash-calculate/hash-calculate';
 import {
-  IEditorDocumentModelSaveResult,
-  URI,
-  IEditorDocumentChange,
   BasicTextLines,
+  CancellationToken,
+  IEditorDocumentChange,
+  IEditorDocumentModelSaveResult,
+  SaveTaskErrorCause,
+  SaveTaskResponseState,
+  Throttler,
+  URI,
+  iconvDecode,
+  iconvEncode,
   isEditChange,
 } from '@opensumi/ide-core-node';
 import { IFileService } from '@opensumi/ide-file-service';
-import { encode, decode } from '@opensumi/ide-file-service/lib/node/encoding';
 
-import { IFileSchemeDocNodeService, ISavingContent, IContentChange } from '../common';
+import { IContentChange, IFileSchemeDocNodeService, ISavingContent } from '../common';
 
 @Injectable()
 export class FileSchemeDocNodeServiceImpl implements IFileSchemeDocNodeService {
@@ -22,6 +27,8 @@ export class FileSchemeDocNodeServiceImpl implements IFileSchemeDocNodeService {
   @Autowired(IHashCalculateService)
   private readonly hashCalculateService: IHashCalculateService;
 
+  private saveQueueByUri = new Map<string, Throttler>();
+
   // 由于此处只处理file协议，为了简洁，不再使用 fileService,
 
   async $saveByChange(
@@ -29,18 +36,25 @@ export class FileSchemeDocNodeServiceImpl implements IFileSchemeDocNodeService {
     change: IContentChange,
     encoding?: string | undefined,
     force = false,
+    token?: CancellationToken,
   ): Promise<IEditorDocumentModelSaveResult> {
     try {
       const fsPath = new URI(uri).codeUri.fsPath;
       if (existsSync(fsPath)) {
         const mtime = statSync(fsPath).mtime.getTime();
         const contentBuffer = await readFile(fsPath);
-        const content = decode(contentBuffer, encoding ? encoding : 'utf8');
+        if (token?.isCancellationRequested) {
+          return {
+            state: SaveTaskResponseState.ERROR,
+            errorMessage: SaveTaskErrorCause.CANCEL,
+          };
+        }
+        const content = iconvDecode(contentBuffer, encoding ? encoding : 'utf8');
         if (!force) {
           const currentMd5 = this.hashCalculateService.calculate(content);
           if (change.baseMd5 !== currentMd5) {
             return {
-              state: 'diff',
+              state: SaveTaskResponseState.DIFF,
             };
           }
         }
@@ -48,19 +62,19 @@ export class FileSchemeDocNodeServiceImpl implements IFileSchemeDocNodeService {
         if (statSync(fsPath).mtime.getTime() !== mtime) {
           throw new Error('File has been modified during saving, please retry');
         }
-        await writeFile(fsPath, encode(contentRes, encoding ? encoding : 'utf8'));
+        await writeFile(fsPath, iconvEncode(contentRes, encoding ? encoding : 'utf8'));
         return {
-          state: 'success',
+          state: SaveTaskResponseState.SUCCESS,
         };
       } else {
         return {
-          state: 'error',
-          errorMessage: 'useByContent',
+          state: SaveTaskResponseState.ERROR,
+          errorMessage: SaveTaskErrorCause.USE_BY_CONTENT,
         };
       }
     } catch (e) {
       return {
-        state: 'error',
+        state: SaveTaskResponseState.ERROR,
         errorMessage: e.toString(),
       };
     }
@@ -71,34 +85,57 @@ export class FileSchemeDocNodeServiceImpl implements IFileSchemeDocNodeService {
     content: ISavingContent,
     encoding?: string | undefined,
     force = false,
+    token?: CancellationToken,
   ): Promise<IEditorDocumentModelSaveResult> {
-    try {
-      const stat = await this.fileService.getFileStat(uri);
-      if (stat) {
-        if (!force) {
-          const res = await this.fileService.resolveContent(uri, { encoding });
-          if (content.baseMd5 !== this.hashCalculateService.calculate(res.content)) {
-            return {
-              state: 'diff',
-            };
-          }
+    const doSaveByContent = async () => {
+      try {
+        const stat = await this.fileService.getFileStat(uri);
+        if (token?.isCancellationRequested) {
+          return {
+            state: SaveTaskResponseState.ERROR,
+            errorMessage: SaveTaskErrorCause.CANCEL,
+          };
         }
-        await this.fileService.setContent(stat, content.content, { encoding });
+        if (stat) {
+          if (!force) {
+            const res = await this.fileService.resolveContent(uri, { encoding });
+            if (token?.isCancellationRequested) {
+              return {
+                state: SaveTaskResponseState.ERROR,
+                errorMessage: SaveTaskErrorCause.CANCEL,
+              };
+            }
+            if (content.baseMd5 !== this.hashCalculateService.calculate(res.content)) {
+              return {
+                state: SaveTaskResponseState.DIFF,
+              };
+            }
+          }
+
+          await this.fileService.setContent(stat, content.content, { encoding });
+
+          return {
+            state: SaveTaskResponseState.SUCCESS,
+          };
+        } else {
+          await this.fileService.createFile(uri, { content: content.content, encoding });
+          return {
+            state: SaveTaskResponseState.SUCCESS,
+          };
+        }
+      } catch (e) {
         return {
-          state: 'success',
-        };
-      } else {
-        await this.fileService.createFile(uri, { content: content.content, encoding });
-        return {
-          state: 'success',
+          state: SaveTaskResponseState.ERROR,
+          errorMessage: e.toString(),
         };
       }
-    } catch (e) {
-      return {
-        state: 'error',
-        errorMessage: e.toString(),
-      };
+    };
+
+    // 根据 URI 来区分保存队列，不同 URI 可并行保存，相同 URI 保证强时序
+    if (!this.saveQueueByUri.get(uri)) {
+      this.saveQueueByUri.set(uri, new Throttler());
     }
+    return this.saveQueueByUri.get(uri)!.queue(doSaveByContent);
   }
 
   async $getMd5(uri: string, encoding?: string | undefined): Promise<string | undefined> {

@@ -1,10 +1,9 @@
 import { Disposable, Emitter, Event } from '@opensumi/ide-core-common';
-import { IValidEditOperation } from '@opensumi/monaco-editor-core/esm/vs/editor/common/model';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import { IAttachedView, IValidEditOperation } from '@opensumi/monaco-editor-core/esm/vs/editor/common/model';
+import * as monaco from '@opensumi/ide-monaco';
 
 import { EndOfLineSequence, EOL } from '../../../src/browser/monaco-api/types';
 import { MockedMonacoUri } from '../common/uri';
-
 
 let id = 1;
 
@@ -17,7 +16,7 @@ export class MockedMonacoModel extends Disposable implements monaco.editor.IText
   id: string;
   _lines: string[];
   uri: monaco.Uri;
-  language: string;
+  language = 'plaintext';
   _isDisposed = false;
 
   // 获取上一个版本内容供 editorWorkerService 用
@@ -46,28 +45,17 @@ export class MockedMonacoModel extends Disposable implements monaco.editor.IText
   private eol: monaco.editor.EndOfLineSequence = EndOfLineSequence.LF as any;
   private value: string;
 
-  options: monaco.editor.TextModelResolvedOptions = {
-    tabSize: 2,
-    _textModelResolvedOptionsBrand: void 0,
-    indentSize: 0,
-    insertSpaces: true,
-    defaultEOL: 1,
-    trimAutoWhitespace: false,
-    equals() {
-      return true;
-    },
-    createChangeEvent(newOpts: monaco.editor.TextModelResolvedOptions) {
-      return {
-        tabSize: true,
-        indentSize: true,
-        insertSpaces: true,
-        trimAutoWhitespace: true,
-      };
-    },
+  options = new monaco.editor.TextModelResolvedOptions({
     bracketPairColorizationOptions: {
       enabled: true,
+      independentColorPoolPerBracketType: true,
     },
-  };
+    defaultEOL: 1,
+    indentSize: 2,
+    insertSpaces: true,
+    tabSize: 2,
+    trimAutoWhitespace: false,
+  });
 
   constructor(value, language, uri?: monaco.Uri) {
     super();
@@ -77,6 +65,29 @@ export class MockedMonacoModel extends Disposable implements monaco.editor.IText
     this.language = language;
     this.value = value;
   }
+  isTooLargeForHeapOperation(): boolean {
+    throw new Error('Method not implemented.');
+  }
+  setLanguage(languageId: string, source?: string | undefined): void;
+  setLanguage(languageSelection: monaco.languages.ILanguageSelection, source?: string | undefined): void;
+  setLanguage(languageSelection: unknown, source?: unknown): void {
+    throw new Error('Method not implemented.');
+  }
+  getAllMarginDecorations(ownerId?: number | undefined): monaco.editor.IModelDecoration[] {
+    throw new Error('Method not implemented.');
+  }
+  tokenization: any;
+  getLanguageIdAtPosition(lineNumber: number, column: number): string {
+    throw new Error('Method not implemented.');
+  }
+  getTokenTypeIfInsertingCharacter(lineNumber: number, column: number, character: string) {
+    throw new Error('Method not implemented.');
+  }
+  tokenizeLineWithEdit(position: monaco.IPosition, length: number, newText: string) {
+    throw new Error('Method not implemented.');
+  }
+  bracketPairs: any;
+  guides: any;
   mightContainUnusualLineTerminators(): boolean {
     throw new Error('Method not implemented.');
   }
@@ -101,13 +112,9 @@ export class MockedMonacoModel extends Disposable implements monaco.editor.IText
   getInjectedTextDecorations(ownerId?: number): monaco.editor.IModelDecoration[] {
     throw new Error('Method not implemented.');
   }
-  _setTrackedRange(id: string | null, newRange: null, newStickiness: monaco.editor.TrackedRangeStickiness): null;
-  _setTrackedRange(
-    id: string | null,
-    newRange: monaco.Range,
-    newStickiness: monaco.editor.TrackedRangeStickiness,
-  ): string;
-  _setTrackedRange(id: any, newRange: any, newStickiness: any): string | null {
+  _setTrackedRange(id: string | null, newRange: null, newStickiness: monaco.TrackedRangeStickiness): null;
+  _setTrackedRange(id: string | null, newRange: monaco.Range, newStickiness: monaco.TrackedRangeStickiness): string;
+  _setTrackedRange(id: unknown, newRange: unknown, newStickiness: unknown): string | null {
     throw new Error('Method not implemented.');
   }
   popStackElement(): void {
@@ -196,31 +203,6 @@ export class MockedMonacoModel extends Disposable implements monaco.editor.IText
   setMode(languageIdentifier: any): void {
     throw new Error('Method not implemented.');
   }
-  getLanguageIdAtPosition(lineNumber: number, column: number) {
-    throw new Error('Method not implemented.');
-  }
-  findMatchingBracketUp(bracket: string, position: monaco.IPosition): monaco.Range | null {
-    throw new Error('Method not implemented.');
-  }
-  findPrevBracket(position: monaco.IPosition): monaco.editor.IFoundBracket | null {
-    throw new Error('Method not implemented.');
-  }
-  findNextBracket(position: monaco.IPosition): monaco.editor.IFoundBracket | null {
-    throw new Error('Method not implemented.');
-  }
-  findEnclosingBrackets(position: monaco.IPosition, maxDuration?: number): [monaco.Range, monaco.Range] | null {
-    throw new Error('Method not implemented.');
-  }
-  matchBracket(position: monaco.IPosition): [monaco.Range, monaco.Range] | null {
-    throw new Error('Method not implemented.');
-  }
-  getActiveIndentGuide(
-    lineNumber: number,
-    minLineNumber: number,
-    maxLineNumber: number,
-  ): monaco.editor.IActiveIndentGuideInfo {
-    throw new Error('Method not implemented.');
-  }
   getLinesIndentGuides(startLineNumber: number, endLineNumber: number): number[] {
     throw new Error('Method not implemented.');
   }
@@ -260,7 +242,7 @@ export class MockedMonacoModel extends Disposable implements monaco.editor.IText
   onDidChangeAttached(listener: () => void): monaco.IDisposable {
     throw new Error('Method not implemented.');
   }
-  onBeforeAttached(): void {
+  onBeforeAttached(): IAttachedView {
     throw new Error('Method not implemented.');
   }
   onBeforeDetached(): void {
@@ -309,6 +291,7 @@ export class MockedMonacoModel extends Disposable implements monaco.editor.IText
       isUndoing: false,
       isRedoing: false,
       isFlush: true,
+      isEolChange: false,
     });
   }
 
@@ -415,7 +398,7 @@ export class MockedMonacoModel extends Disposable implements monaco.editor.IText
   ): monaco.editor.FindMatch | null {
     throw new Error('Method not implemented.');
   }
-  getModeId(): string {
+  getLanguageId(): string {
     return this.language;
   }
   getWordAtPosition(position: monaco.IPosition): monaco.editor.IWordAtPosition | null {
@@ -482,23 +465,16 @@ export class MockedMonacoModel extends Disposable implements monaco.editor.IText
     throw new Error('Method not implemented.');
   }
   updateOptions(newOpts: monaco.editor.ITextModelUpdateOptions): void {
-    this.options = {
-      ...this.options,
-      ...newOpts,
-      equals() {
-        return true;
-      },
-      createChangeEvent(newOpts: monaco.editor.TextModelResolvedOptions) {
-        return {
-          tabSize: true,
-          indentSize: true,
-          insertSpaces: true,
-          trimAutoWhitespace: true,
-        };
-      },
-    };
-    // @ts-ignore
-    this._onDidChangeOptions.fire(this.options);
+    this.options.createChangeEvent(
+      new monaco.editor.TextModelResolvedOptions({
+        bracketPairColorizationOptions: newOpts.bracketColorizationOptions!,
+        indentSize: newOpts.indentSize!,
+        insertSpaces: newOpts.insertSpaces!,
+        tabSize: newOpts.tabSize!,
+        trimAutoWhitespace: newOpts.trimAutoWhitespace!,
+        defaultEOL: this.options.defaultEOL,
+      }),
+    );
   }
   detectIndentation(defaultInsertSpaces: boolean, defaultTabSize: number): void {
     return;
@@ -532,6 +508,7 @@ export class MockedMonacoModel extends Disposable implements monaco.editor.IText
         isUndoing: false,
         isRedoing: false,
         isFlush: true,
+        isEolChange: false,
       });
     }
 

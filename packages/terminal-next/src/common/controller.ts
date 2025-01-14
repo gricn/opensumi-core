@@ -1,18 +1,20 @@
 import { IContextKeyService } from '@opensumi/ide-core-browser';
-import { Event, Disposable, Deferred, IDisposable } from '@opensumi/ide-core-common';
-
-// eslint-disable-next-line import/no-restricted-paths
-import type { ILinkHoverTargetOptions } from '../browser/links/link-manager';
+import { Deferred, Disposable, Event, IDisposable, Uri } from '@opensumi/ide-core-common';
+import { IObservable } from '@opensumi/ide-monaco/lib/common/observable';
 
 import {
   ITerminalClient,
   ITerminalExitEvent,
-  ITerminalTitleChangeEvent,
   ITerminalExternalLinkProvider,
+  ITerminalTitleChangeEvent,
 } from './client';
-import { ITerminalLaunchError, ITerminalProcessExtHostProxy, IStartExtensionTerminalRequest } from './extension';
-import { ITerminalInfo, ICreateTerminalOptions, TerminalOptions } from './pty';
-import { IWidgetGroup, IWidget } from './resize';
+import { IStartExtensionTerminalRequest, ITerminalLaunchError, ITerminalProcessExtHostProxy } from './extension';
+import { ITerminalProfile } from './profile';
+import { ICreateTerminalOptions, IShellLaunchConfig, ITerminalInfo, TerminalOptions } from './pty';
+import { IWidget, IWidgetGroup } from './resize';
+
+// eslint-disable-next-line import/no-restricted-paths
+import type { ILinkHoverTargetOptions } from '../browser/links/link-manager';
 
 export interface ITerminalExternalClient {
   readonly id: string;
@@ -57,6 +59,12 @@ export interface ICreateClientWithWidgetOptions {
   beforeCreate?: (terminalId: string) => void;
 }
 
+export interface TerminalCliterFilter {
+  id?: string;
+  name?: string;
+  isTaskExecutor?: boolean;
+}
+
 export const ITerminalController = Symbol('ITerminalController');
 export interface ITerminalController extends Disposable {
   ready: Deferred<void>;
@@ -66,6 +74,7 @@ export interface ITerminalController extends Disposable {
   themeBackground: string;
   contextKeyService?: IContextKeyService;
   viewReady: Deferred<void>;
+  disposeTerminalClients(filter?: TerminalCliterFilter): void;
   initContextKey(dom: HTMLDivElement): void;
   firstInitialize(): void;
   recovery(history: ITerminalBrowserHistory): Promise<void>;
@@ -74,22 +83,25 @@ export interface ITerminalController extends Disposable {
   blur(): void;
   onContextMenu(e: React.MouseEvent<HTMLElement>): void;
   findClientFromWidgetId(widgetId: string): ITerminalClient | undefined;
-  /**
-   * @deprecated 请使用 `createClientWithWidget2` Will removed in 2.17.0
-   */
-  createClientWithWidget(options: TerminalOptions): Promise<ITerminalClient>;
-  createClientWithWidget2(options: ICreateClientWithWidgetOptions): Promise<ITerminalClient>;
+  createTerminalWithWidgetByTerminalOptions(options: ICreateClientWithWidgetOptions): Promise<ITerminalClient>;
   createTerminal(options: ICreateTerminalOptions): Promise<ITerminalClient>;
+  createTerminalWithWidget(options: ICreateTerminalOptions): Promise<ITerminalClient>;
   clearCurrentGroup(): void;
   clearAllGroups(): void;
   showTerminalPanel(): void;
   hideTerminalPanel(): void;
+  toggleTerminalPanel(): void;
   toJSON(): ITerminalBrowserHistory;
-
+  convertTerminalOptionsToLaunchConfig(options: TerminalOptions): IShellLaunchConfig;
+  convertProfileToLaunchConfig(
+    shellLaunchConfigOrProfile: IShellLaunchConfig | ITerminalProfile | undefined,
+    cwd?: Uri | string,
+  ): IShellLaunchConfig;
   onDidOpenTerminal: Event<ITerminalInfo>;
   onDidCloseTerminal: Event<ITerminalExitEvent>;
   onDidTerminalTitleChange: Event<ITerminalTitleChangeEvent>;
   onDidChangeActiveTerminal: Event<string>;
+  onThemeBackgroundChange: Event<string>;
 
   requestStartExtensionTerminal(
     proxy: ITerminalProcessExtHostProxy,
@@ -103,28 +115,32 @@ export interface ITerminalController extends Disposable {
 
 export const ITerminalSearchService = Symbol('ITerminalSearchService');
 export interface ITerminalSearchService {
-  show: boolean;
-  input: string;
+  isVisible: boolean;
+  onVisibleChange: Event<boolean>;
+
+  text: string;
+
   open(): void;
   clear(): void;
   close(): void;
   search(): void;
-  onOpen: Event<void>;
 }
 
 export const ITerminalGroupViewService = Symbol('ITerminalGroupViewService');
 export interface ITerminalGroupViewService {
-  currentGroupIndex: number;
-  currentGroupId: string;
-  currentWidgetId: string;
-  currentGroup: IWidgetGroup;
-  currentWidget: IWidget;
-  groups: IWidgetGroup[];
+  readonly groups: IObservable<IWidgetGroup[]>;
+  readonly currentGroupIndex: IObservable<number>;
+  readonly currentGroup: IObservable<IWidgetGroup>;
+  readonly currentGroupId: IObservable<string>;
+  readonly currentWidgetId: IObservable<string>;
+  readonly currentWidget: IObservable<IWidget>;
 
   createGroup(): number;
   getGroup(index: number): IWidgetGroup;
   selectGroup(index: number): void;
   removeGroup(index: number): void;
+
+  swapGroup(i: number, j: number): void;
 
   createWidget(group: IWidgetGroup, id?: string, reuse?: boolean, isSimpleWidget?: boolean): IWidget;
   getWidget(id: string): IWidget;

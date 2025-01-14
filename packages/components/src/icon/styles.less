@@ -1,4 +1,6 @@
-.kt-icon {
+@import '../style/variable.less';
+
+.@{prefix}-icon {
   display: inline-block;
   background-repeat: no-repeat;
   cursor: pointer;
@@ -10,7 +12,7 @@
   }
 
   &-loading {
-    animation: ktIconloadingCircle 1s infinite linear;
+    animation: kt-icon-spin 1s infinite linear;
   }
 
   &-small {
@@ -23,12 +25,12 @@
 
   &-clickable {
     &:hover {
-      // transform: scale(1.2);
+      // transform: scale(1.1);
       color: var(--kt-icon-hoverForeground);
     }
 
     &:active {
-      // transform: scale(1.2);
+      // transform: scale(1.1);
       color: var(--kt-icon-clickForeground);
     }
   }
@@ -40,7 +42,7 @@
   }
 }
 
-@keyframes ktIconloadingCircle {
+@keyframes kt-icon-spin {
   100% {
     transform: rotate(360deg);
   }

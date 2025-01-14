@@ -1,5 +1,9 @@
-import { Disposable, Emitter, Event as BaseEvent, IDisposable } from '@opensumi/ide-core-common';
-import { isWebKit } from '@opensumi/ide-core-common';
+import { Event as BaseEvent, Disposable, Emitter, IDisposable, isWebKit } from '@opensumi/ide-core-common';
+import { space } from '@opensumi/ide-utils/lib/strings';
+
+import fastdom from './fastdom';
+
+export * from './event';
 
 export const EventType = {
   // Mouse
@@ -73,11 +77,16 @@ export function isAncestor(testChild: Node | null, testAncestor: Node | null): b
 
 export class DomListener implements IDisposable {
   private _handler: (e: any) => void;
-  private _node: Element | Window | Document;
+  private _node: EventTarget;
   private readonly _type: string;
-  private readonly _useCapture: boolean;
+  private readonly _useCapture: boolean | AddEventListenerOptions;
 
-  constructor(node: Element | Window | Document, type: string, handler: (e: any) => void, useCapture?: boolean) {
+  constructor(
+    node: EventTarget,
+    type: string,
+    handler: (e: any) => void,
+    useCapture?: boolean | AddEventListenerOptions,
+  ) {
     this._node = node;
     this._type = type;
     this._handler = handler;
@@ -97,6 +106,33 @@ export class DomListener implements IDisposable {
     this._node = null!;
     this._handler = null!;
   }
+}
+
+export function addDisposableListener<K extends keyof GlobalEventHandlersEventMap>(
+  node: EventTarget,
+  type: K,
+  handler: (event: GlobalEventHandlersEventMap[K]) => void,
+  useCapture?: boolean,
+): IDisposable;
+export function addDisposableListener(
+  node: EventTarget,
+  type: string,
+  handler: (event: any) => void,
+  useCapture?: boolean,
+): IDisposable;
+export function addDisposableListener(
+  node: EventTarget,
+  type: string,
+  handler: (event: any) => void,
+  options: AddEventListenerOptions,
+): IDisposable;
+export function addDisposableListener(
+  node: EventTarget,
+  type: string,
+  handler: (event: any) => void,
+  useCaptureOrOptions?: boolean | AddEventListenerOptions,
+): IDisposable {
+  return new DomListener(node, type, handler, useCaptureOrOptions);
 }
 
 export class FocusTracker extends Disposable {
@@ -141,4 +177,25 @@ export class FocusTracker extends Disposable {
 
 export function trackFocus(element: HTMLElement | Window): IFocusTracker {
   return new FocusTracker(element);
+}
+
+export { fastdom };
+/**
+ * https://developer.mozilla.org/zh-CN/docs/Web/API/MouseEvent/button
+ */
+export const MouseEventButton = {
+  Left: 0,
+  Middle: 1,
+  Right: 2,
+  Back: 3,
+  Forward: 4,
+};
+
+export function createClassNameTokens(className: string): string[] {
+  return className.split(space).filter(Boolean);
+}
+
+export function addClassName(node: HTMLElement, className: string): void {
+  const tokens = createClassNameTokens(className);
+  node.classList.add(...tokens);
 }

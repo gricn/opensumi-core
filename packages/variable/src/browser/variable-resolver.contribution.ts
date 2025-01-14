@@ -1,21 +1,20 @@
 import { Autowired } from '@opensumi/di';
 import {
   ClientAppContribution,
-  ContributionProvider,
   Command,
   CommandContribution,
   CommandRegistry,
+  ContributionProvider,
   Domain,
-  VariableRegistry,
   VariableContribution,
-  localize,
+  VariableRegistry,
 } from '@opensumi/ide-core-browser';
 
 import { VariableQuickOpenService } from './variable-quick-open.service';
 
 export const LIST_VARIABLES: Command = {
   id: 'variable.list',
-  label: localize('variable.list.all'),
+  label: '%variable.list.all%',
 };
 
 @Domain(ClientAppContribution, CommandContribution)

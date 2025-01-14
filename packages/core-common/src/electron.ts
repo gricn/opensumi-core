@@ -1,8 +1,8 @@
-import type Electron from 'electron';
-
 import { IDisposable } from '@opensumi/ide-utils';
 
 import { ExtensionCandidate } from './types';
+
+import type Electron from 'electron';
 
 export interface IElectronMainApi<Events> {
   on(event: Events, listener: (...args) => void): IDisposable;
@@ -27,7 +27,14 @@ export interface IElectronMainUIServiceShape {
 
   showSaveDialog(windowId: number, options: Electron.SaveDialogOptions): Promise<string | undefined>;
 
-  setZoomFactor(webContentsId: number, options: { value?: number; delta?: number }): void;
+  /**
+   * 默认：最小缩放因子为 0.25，最大缩放因子为 5.0
+   */
+  setZoomFactor(
+    webContentsId: number,
+    options: { value?: number; delta?: number; minValue?: number | undefined; maxValue?: number | undefined },
+  ): Promise<void>;
+  getZoomFactor(webContentsId: number): Promise<number | undefined>;
 
   /**
    * 在资源管理器里打开文件
@@ -98,6 +105,21 @@ export interface IElectronMainUIServiceShape {
    * @param windowId
    */
   getWebContentsId(windowId: number): Promise<number>;
+
+  /**
+   * clipboard 相关 read/write Text/Buffer
+   */
+  readClipboardText(): Promise<string>;
+  writeClipboardText(text: string): Promise<void>;
+  readClipboardBuffer(field: string): Promise<Uint8Array>;
+  writeClipboardBuffer(field: string, buffer: Uint8Array): Promise<void>;
+  /**
+   * Specifies whether the window’s document has been edited, and the icon in title
+   * bar will become gray when set to `true`.
+   *
+   * @platform darwin
+   */
+  setDocumentEdited(windowId: number, edited: boolean): void;
 }
 
 export interface IElectronMainUIService

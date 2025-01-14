@@ -60,7 +60,7 @@ export interface PreferenceDataSchema {
 }
 
 export interface PreferenceItem {
-  type?: JsonType | JsonType[];
+  type?: PreferencePropertyType | PreferencePropertyType[];
   minimum?: number;
   /**
    * content assist (UI) default value
@@ -75,11 +75,14 @@ export interface PreferenceItem {
   items?: PreferenceItem;
   properties?: { [name: string]: PreferenceItem };
   additionalProperties?: object;
-  [name: string]: any;
   overridable?: boolean;
+
+  description?: string;
+  markdownDescription?: string;
 
   deprecationMessage?: string;
   markdownDeprecationMessage?: string;
+  [name: string]: any;
 }
 
 export interface PreferenceSchemaProperty extends PreferenceItem {
@@ -105,4 +108,15 @@ export namespace PreferenceDataProperty {
   }
 }
 
-export type JsonType = 'string' | 'array' | 'number' | 'integer' | 'object' | 'boolean' | 'null' | 'string[]';
+export const PREFERENCE_PROPERTY_TYPE = {
+  STRING: 'string',
+  ARRAY: 'array',
+  INT: 'integer',
+  NUMBER: 'number',
+  OBJECT: 'object',
+  BOOLEAN: 'boolean',
+  NULL: 'null',
+  STRING_ARRAY: 'string[]',
+} as const;
+
+export type PreferencePropertyType = typeof PREFERENCE_PROPERTY_TYPE[keyof typeof PREFERENCE_PROPERTY_TYPE];

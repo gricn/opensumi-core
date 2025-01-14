@@ -1,7 +1,4 @@
-import type vscode from 'vscode';
-
-import { Uri as URI, Cache } from '@opensumi/ide-core-common';
-import { DisposableStore } from '@opensumi/ide-core-common';
+import { Cache, DisposableStore, Uri as URI } from '@opensumi/ide-core-common';
 
 import {
   ExtensionDocumentDataManager,
@@ -12,17 +9,19 @@ import {
   RangeSuggestDataDto,
 } from '../../../../common/vscode';
 import * as Converter from '../../../../common/vscode/converter';
-import { SnippetString, Range, CompletionList, CompletionItemLabel } from '../../../../common/vscode/ext-types';
+import { CompletionItemLabel, CompletionList, Range, SnippetString } from '../../../../common/vscode/ext-types';
 import {
+  ChainedCacheId,
   CompletionContext,
-  Position,
   CompletionItemInsertTextRule,
   Range as ModelRange,
-  ChainedCacheId,
+  Position,
 } from '../../../../common/vscode/model.api';
 import { CommandsConverter } from '../ext.host.command';
 
 import { getPerformance } from './util';
+
+import type vscode from 'vscode';
 
 export class CompletionAdapter {
   private cache = new Cache<{
@@ -82,35 +81,7 @@ export class CompletionAdapter {
     for (let i = 0; i < list.items.length; i++) {
       const item = list.items[i];
       // check for bad completion item first
-      const dto = {
-        [ISuggestDataDtoField.label]:
-          typeof item.label === 'string' ? item.label : this.convertCompletionLabel(item.label),
-        [ISuggestDataDtoField.kind]: item.kind ? Converter.CompletionItemKind.from(item.kind) : undefined,
-        [ISuggestDataDtoField.sortText]: item.sortText,
-        [ISuggestDataDtoField.filterText]: item.filterText,
-        x: [pid, i] as [number, number],
-      };
-
-      // 如果不支持 resolveCompletionItem 则全量返回
-      if (typeof this.delegate.resolveCompletionItem !== 'function') {
-        if (item.textEdit) {
-          dto[ISuggestDataDtoField.insertText] = item.textEdit.newText;
-        } else if (typeof item.insertText === 'string') {
-          dto[ISuggestDataDtoField.insertText] = item.insertText;
-        } else if (item.insertText instanceof SnippetString) {
-          dto[ISuggestDataDtoField.insertText] = item.insertText.value;
-          dto[ISuggestDataDtoField.insertTextRules] = CompletionItemInsertTextRule.InsertAsSnippet;
-        } else {
-          dto[ISuggestDataDtoField.insertText] = typeof item.label === 'string' ? item.label : item.label.label;
-        }
-        dto[ISuggestDataDtoField.documentation] = item.documentation;
-      }
-
-      const range = this.convertRange(item, inserting, replacing);
-      if (range) {
-        dto[ISuggestDataDtoField.range] = range;
-      }
-
+      const dto = this.convertCompletionItem(item, [pid, i], inserting, replacing);
       completions.push(dto);
     }
     return result;
@@ -192,7 +163,7 @@ export class CompletionAdapter {
       range = item.range;
     }
 
-    let toRange;
+    let toRange: RangeSuggestDataDto.ISuggestRangeDto | undefined;
 
     if (Range.isRange(range)) {
       toRange = RangeSuggestDataDto.to(Converter.Range.from(range));
@@ -244,7 +215,9 @@ export class CompletionAdapter {
         item.additionalTextEdits && item.additionalTextEdits.map(Converter.fromTextEdit),
       [ISuggestDataDtoField.command]: this.commandConverter.toInternal(item.command, disposables),
       [ISuggestDataDtoField.commitCharacters]: item.commitCharacters,
-      [ISuggestDataDtoField.insertTextRules]: item.keepWhitespace ? CompletionItemInsertTextRule.KeepWhitespace : 0,
+      [ISuggestDataDtoField.insertTextRules]: item.keepWhitespace
+        ? CompletionItemInsertTextRule.KeepWhitespace
+        : CompletionItemInsertTextRule.None,
     };
 
     const convertRange = this.convertRange(item, defaultInserting, defaultReplacing);

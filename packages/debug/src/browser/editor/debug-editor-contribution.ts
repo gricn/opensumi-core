@@ -1,44 +1,42 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector, Optional } from '@opensumi/di';
 import {
-  IContextKeyService,
-  PreferenceService,
-  MonacoOverrideServiceRegistry,
-  ServiceNames,
-  Position,
-} from '@opensumi/ide-core-browser';
-import {
-  IDisposable,
-  Disposable,
-  RunOnceScheduler,
   CancellationTokenSource,
-  onUnexpectedExternalError,
-  createMemoizer,
-  Event,
-  arrays,
   Constants,
+  Disposable,
+  Event,
+  IContextKeyService,
+  IDisposable,
+  MonacoOverrideServiceRegistry,
+  Position,
+  PreferenceService,
+  RunOnceScheduler,
+  ServiceNames,
+  arrays,
+  createMemoizer,
+  onUnexpectedExternalError,
   strings,
 } from '@opensumi/ide-core-browser';
-import { IEditor, IDecorationApplyOptions } from '@opensumi/ide-editor';
-import { WorkbenchEditorService } from '@opensumi/ide-editor';
+import { IDecorationApplyOptions, IEditor, WorkbenchEditorService } from '@opensumi/ide-editor';
 import { IEditorFeatureContribution } from '@opensumi/ide-editor/lib/browser';
 import { MonacoCodeService } from '@opensumi/ide-editor/lib/browser/editor.override';
 import { WorkbenchEditorServiceImpl } from '@opensumi/ide-editor/lib/browser/workbench-editor.service';
+import * as monaco from '@opensumi/ide-monaco';
+import { languageFeaturesService } from '@opensumi/ide-monaco/lib/browser/monaco-api/languages';
 import { Range } from '@opensumi/monaco-editor-core/esm/vs/editor/common/core/range';
+import { StandardTokenType } from '@opensumi/monaco-editor-core/esm/vs/editor/common/encodedTokenAttributes';
 import { ITextModel } from '@opensumi/monaco-editor-core/esm/vs/editor/common/model';
-import { StandardTokenType } from '@opensumi/monaco-editor-core/esm/vs/editor/common/modes';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
 import { DebugProtocol } from '@opensumi/vscode-debugprotocol';
 
 import { DebugContextKey } from '../contextkeys/debug-contextkey.service';
+import { DebugExceptionWidget } from '../debug-exception-widget';
+import { DebugSession } from '../debug-session';
 import { DebugSessionManager } from '../debug-session-manager';
 import { DebugStackFrame } from '../model';
 import { DebugVariable, DebugWatchNode, DebugWatchRoot } from '../tree';
 
-import { IDebugSessionManager } from './../../common';
+import { DebugState, IDebugExceptionInfo, IDebugModelManager, IDebugSessionManager } from './../../common';
 import { InlineValueContext } from './../../common/inline-values';
 import { DEFAULT_WORD_REGEXP } from './../debugUtils';
-import { DebugModelManager } from './debug-model-manager';
-import { InlineValuesProviderRegistry } from './inline-values';
 
 const INLINE_VALUE_DECORATION_KEY = 'inlinevaluedecoration';
 const MAX_NUM_INLINE_VALUES = 100;
@@ -149,8 +147,8 @@ function getWordToLineNumbersMap(model: ITextModel | null): Map<string, number[]
       continue;
     }
 
-    model.forceTokenization(lineNumber);
-    const lineTokens = model.getLineTokens(lineNumber);
+    model.tokenization.forceTokenization(lineNumber);
+    const lineTokens = model.tokenization.getLineTokens(lineNumber);
     for (let tokenIndex = 0, tokenCount = lineTokens.getCount(); tokenIndex < tokenCount; tokenIndex++) {
       const tokenType = lineTokens.getStandardTokenType(tokenIndex);
 
@@ -181,11 +179,14 @@ function getWordToLineNumbersMap(model: ITextModel | null): Map<string, number[]
 export class DebugEditorContribution implements IEditorFeatureContribution {
   private static readonly MEMOIZER = createMemoizer();
 
+  @Autowired(INJECTOR_TOKEN)
+  protected readonly injector: Injector;
+
   @Autowired(IContextKeyService)
   protected readonly contextKeyService: IContextKeyService;
 
-  @Autowired(DebugModelManager)
-  protected readonly debugModelManager: DebugModelManager;
+  @Autowired(IDebugModelManager)
+  protected readonly debugModelManager: IDebugModelManager;
 
   @Autowired(IDebugSessionManager)
   protected readonly debugSessionManager: DebugSessionManager;
@@ -205,7 +206,9 @@ export class DebugEditorContribution implements IEditorFeatureContribution {
   private readonly disposer: Disposable = new Disposable();
   private readonly editorDisposer: Disposable = new Disposable();
 
-  constructor() {}
+  private debugExceptionWidget: DebugExceptionWidget | undefined;
+
+  constructor(@Optional() private readonly editor: IEditor) {}
 
   public contribute(editor: IEditor): IDisposable {
     this.disposer.addDispose(
@@ -213,8 +216,17 @@ export class DebugEditorContribution implements IEditorFeatureContribution {
         const currentSession = this.debugSessionManager.currentSession;
         if (currentSession) {
           this.editorDisposer.addDispose(
-            currentSession.onDidChange(() => {
-              this.setHoverEnabled(editor);
+            currentSession.onDidChange(async () => {
+              this.setHoverEnabled(editor, currentSession.state === DebugState.Running);
+
+              const currentFrame = currentSession.currentThread?.currentFrame;
+              if (!currentFrame) {
+                return;
+              }
+
+              if (editor.currentUri && currentFrame.source?.uri.isEqual(editor.currentUri)) {
+                await this.toggleExceptionWidget();
+              }
             }),
           );
 
@@ -248,6 +260,14 @@ export class DebugEditorContribution implements IEditorFeatureContribution {
             }),
           ]);
 
+          this.disposer.addDispose(
+            currentSession.onDidChangeState((state: DebugState) => {
+              if (state !== DebugState.Stopped) {
+                this.toggleExceptionWidget();
+              }
+            }),
+          );
+
           this.disposer.addDispose(currentSession);
 
           this.registerEditorListener(editor);
@@ -257,6 +277,7 @@ export class DebugEditorContribution implements IEditorFeatureContribution {
 
     this.disposer.addDispose(this.editorDisposer);
 
+    this.toggleExceptionWidget();
     return this.disposer;
   }
 
@@ -294,6 +315,7 @@ export class DebugEditorContribution implements IEditorFeatureContribution {
 
     this.editorDisposer.addDispose(
       editor.monacoEditor.onDidChangeModel(async () => {
+        this.toggleExceptionWidget();
         await this.directRunUpdateInlineValueDecorations(editor);
       }),
     );
@@ -306,7 +328,7 @@ export class DebugEditorContribution implements IEditorFeatureContribution {
     codeEditorService.registerDecorationType('inline-value-decoration', INLINE_VALUE_DECORATION_KEY, {});
   }
 
-  public setHoverEnabled(editor: IEditor, isEnabled = !this.debugContextKey.contextInDdebugMode.get()) {
+  public setHoverEnabled(editor: IEditor, isEnabled = !this.debugContextKey.contextInDebugMode.get()) {
     editor.monacoEditor.updateOptions({
       hover: {
         enabled: isEnabled,
@@ -323,7 +345,7 @@ export class DebugEditorContribution implements IEditorFeatureContribution {
   }
 
   private removeInlineValuesScheduler(editor: IEditor): RunOnceScheduler {
-    return new RunOnceScheduler(() => editor.monacoEditor.removeDecorations(INLINE_VALUE_DECORATION_KEY), 100);
+    return new RunOnceScheduler(() => editor.monacoEditor.removeDecorationsByType(INLINE_VALUE_DECORATION_KEY), 100);
   }
 
   private async updateInlineValueDecorations(stackFrame: DebugStackFrame | undefined, editor: IEditor): Promise<void> {
@@ -351,7 +373,7 @@ export class DebugEditorContribution implements IEditorFeatureContribution {
 
     let allDecorations: IDecorationApplyOptions[];
 
-    if (InlineValuesProviderRegistry.has(model)) {
+    if (languageFeaturesService.inlineValuesProvider.has(model)) {
       const findVariable = async (_key: string, caseSensitiveLookup: boolean): Promise<string | undefined> => {
         const scopes = await stackFrame.getMostSpecificScopes(stackFrame.range());
         const key = caseSensitiveLookup ? _key : _key.toLowerCase();
@@ -376,7 +398,7 @@ export class DebugEditorContribution implements IEditorFeatureContribution {
       const token = new CancellationTokenSource().token;
 
       const ranges = editor.monacoEditor.getVisibleRanges();
-      const providers = InlineValuesProviderRegistry.ordered(model).reverse();
+      const providers = languageFeaturesService.inlineValuesProvider.ordered(model).reverse();
 
       allDecorations = [];
       const lineDecorations = new Map<number, InlineSegment[]>();
@@ -482,6 +504,82 @@ export class DebugEditorContribution implements IEditorFeatureContribution {
       allDecorations = decorationsPerScope.reduce((previous, current) => previous.concat(current), []);
     }
 
-    editor.monacoEditor.setDecorations('inline-value-decoration', INLINE_VALUE_DECORATION_KEY, allDecorations as any[]);
+    editor.monacoEditor.setDecorationsByType(
+      'inline-value-decoration',
+      INLINE_VALUE_DECORATION_KEY,
+      allDecorations as any[],
+    );
+  }
+
+  // debug exception widget
+  private async toggleExceptionWidget(): Promise<void> {
+    const currentSession = this.debugSessionManager.currentSession;
+    if (!currentSession) {
+      this.closeExceptionWidget();
+      return;
+    }
+
+    const { currentThread } = currentSession;
+    if (!currentThread) {
+      this.closeExceptionWidget();
+      return;
+    }
+
+    // 找出第一个调用堆栈帧是引发异常的帧，且 source.presentationHint 为非 deemphasize 的
+    const exceptionStack = currentThread.frames.find(
+      (s) => !!(s && s.source && s.source.available && s.source.presentationHint !== 'deemphasize'),
+    );
+    if (!exceptionStack) {
+      this.closeExceptionWidget();
+      return;
+    }
+
+    const samUri = this.editor.currentUri?.isEqual(exceptionStack.source?.uri!);
+
+    if (this.debugExceptionWidget && !samUri) {
+      this.closeExceptionWidget();
+    } else if (samUri) {
+      const exceptionInfo = await currentThread?.fetchExceptionInfo();
+      if (exceptionInfo) {
+        this.showExceptionWidget(
+          exceptionInfo,
+          currentSession,
+          exceptionStack.range().startLineNumber,
+          exceptionStack.range().startColumn,
+        );
+      }
+    }
+  }
+
+  private showExceptionWidget(
+    exceptionInfo: IDebugExceptionInfo,
+    debugSession: DebugSession,
+    lineNumber: number,
+    column: number,
+  ): void {
+    if (this.debugExceptionWidget) {
+      this.debugExceptionWidget.dispose();
+    }
+
+    const editor = debugSession?.currentEditor();
+
+    this.debugExceptionWidget = this.injector.get(DebugExceptionWidget, [editor, exceptionInfo]);
+    this.debugExceptionWidget.show(monaco.positionToRange({ lineNumber, column }), 10);
+    this.debugExceptionWidget.focus();
+    editor?.revealRangeInCenter({
+      startLineNumber: lineNumber,
+      startColumn: column,
+      endLineNumber: lineNumber,
+      endColumn: column,
+    });
+    this.debugContextKey.contextExceptionWidgetVisible.set(true);
+  }
+
+  private closeExceptionWidget(): void {
+    if (this.debugExceptionWidget) {
+      this.debugContextKey.contextExceptionWidgetVisible.set(false);
+      this.debugExceptionWidget.dispose();
+      this.debugExceptionWidget = undefined;
+    }
   }
 }

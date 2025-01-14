@@ -3,17 +3,18 @@ import path from 'path';
 import * as fs from 'fs-extra';
 import temp from 'temp';
 
-import { MockLoggerManageClient } from '@opensumi/ide-core-browser/__mocks__/logger';
-import { URI, StoragePaths, FileUri, IFileServiceClient, ILoggerManagerClient } from '@opensumi/ide-core-common';
+import { WSChannelHandler } from '@opensumi/ide-connection/lib/browser';
+import { AppConfig } from '@opensumi/ide-core-browser';
+import { FileUri, IFileServiceClient, ILoggerManagerClient, StoragePaths, URI } from '@opensumi/ide-core-common';
 import { IHashCalculateService } from '@opensumi/ide-core-common/lib/hash-calculate/hash-calculate';
-import { AppConfig } from '@opensumi/ide-core-node';
-import { IExtensionStorageServer, IExtensionStoragePathServer } from '@opensumi/ide-extension-storage';
+import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
+import { MockInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
+import { IExtensionStoragePathServer, IExtensionStorageServer } from '@opensumi/ide-extension-storage';
 import { FileStat, IDiskFileProvider } from '@opensumi/ide-file-service';
 import { FileServiceClient } from '@opensumi/ide-file-service/lib/browser/file-service-client';
 import { DiskFileSystemProvider } from '@opensumi/ide-file-service/lib/node/disk-file-system.provider';
+import { WatcherProcessManagerToken } from '@opensumi/ide-file-service/lib/node/watcher-process-manager';
 
-import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
-import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
 import { ExtensionStorageModule } from '../../src/browser';
 
 process.on('unhandledRejection', (reason) => {
@@ -31,10 +32,6 @@ describe('Extension Storage Server -- Setup directory should be worked', () => {
 
     injector.addProviders(
       {
-        token: ILoggerManagerClient,
-        useClass: MockLoggerManageClient,
-      },
-      {
         token: AppConfig,
         useValue: {},
       },
@@ -45,6 +42,22 @@ describe('Extension Storage Server -- Setup directory should be worked', () => {
       {
         token: IDiskFileProvider,
         useClass: DiskFileSystemProvider,
+      },
+      {
+        token: WSChannelHandler,
+        useValue: {
+          clientId: 'test_client_id',
+        },
+      },
+      {
+        token: WatcherProcessManagerToken,
+        useValue: {
+          setClient: () => void 0,
+          watch: (() => 1) as any,
+          unWatch: () => void 0,
+          createProcess: () => void 0,
+          setWatcherFileExcludes: () => void 0,
+        },
       },
     );
     const hashImpl = injector.get(IHashCalculateService) as IHashCalculateService;
@@ -59,9 +72,9 @@ describe('Extension Storage Server -- Setup directory should be worked', () => {
     return initializeInjector();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     track.cleanupSync();
-    injector.disposeAll();
+    await injector.disposeAll();
   });
 
   it('Extension Path Server should setup directory correctly', async () => {
@@ -100,10 +113,6 @@ describe('Extension Storage Server -- Data operation should be worked', () => {
 
     injector.addProviders(
       {
-        token: ILoggerManagerClient,
-        useClass: MockLoggerManageClient,
-      },
-      {
         token: AppConfig,
         useValue: {},
       },
@@ -114,6 +123,22 @@ describe('Extension Storage Server -- Data operation should be worked', () => {
       {
         token: IDiskFileProvider,
         useClass: DiskFileSystemProvider,
+      },
+      {
+        token: WSChannelHandler,
+        useValue: {
+          clientId: 'test_client_id',
+        },
+      },
+      {
+        token: WatcherProcessManagerToken,
+        useValue: {
+          setClient: () => void 0,
+          watch: (() => 1) as any,
+          unWatch: () => void 0,
+          createProcess: () => void 0,
+          setWatcherFileExcludes: () => void 0,
+        },
       },
     );
 
@@ -140,9 +165,9 @@ describe('Extension Storage Server -- Data operation should be worked', () => {
     await extensionStorage.init(rootFileStat, [rootFileStat], extensionStorageDirName);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     track.cleanupSync();
-    injector.disposeAll();
+    await injector.disposeAll();
   });
 
   it('Global -- set value can be work', async () => {

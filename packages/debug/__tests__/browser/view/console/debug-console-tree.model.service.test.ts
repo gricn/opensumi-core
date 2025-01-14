@@ -1,22 +1,21 @@
 import { WSChannelHandler } from '@opensumi/ide-connection/lib/browser/ws-channel-handler';
 import { IContextKeyService } from '@opensumi/ide-core-browser';
 import { QuickPickService } from '@opensumi/ide-core-browser';
-import { ICtxMenuRenderer, AbstractContextMenuService } from '@opensumi/ide-core-browser/lib/menu/next';
+import { AbstractContextMenuService, ICtxMenuRenderer } from '@opensumi/ide-core-browser/lib/menu/next';
 import { Disposable, IFileServiceClient } from '@opensumi/ide-core-common';
 import {
-  IDebugSessionManager,
-  IDebugSession,
-  DebugSessionOptions,
   DebugModelFactory,
+  DebugSessionOptions,
   IDebugServer,
+  IDebugSession,
+  IDebugSessionManager,
 } from '@opensumi/ide-debug';
-import {
-  DebugSessionFactory,
-  DefaultDebugSessionFactory,
-  DebugPreferences,
-  DebugSessionContributionRegistry,
-} from '@opensumi/ide-debug/lib/browser';
 import { DebugContextKey } from '@opensumi/ide-debug/lib/browser/contextkeys/debug-contextkey.service';
+import { DebugPreferences } from '@opensumi/ide-debug/lib/browser/debug-preferences';
+import {
+  DebugSessionContributionRegistry,
+  DebugSessionFactory,
+} from '@opensumi/ide-debug/lib/browser/debug-session-contribution';
 import { DebugHoverSource } from '@opensumi/ide-debug/lib/browser/editor/debug-hover-source';
 import { DebugConsoleNode } from '@opensumi/ide-debug/lib/browser/tree';
 import { DebugConsoleFilterService } from '@opensumi/ide-debug/lib/browser/view/console/debug-console-filter.service';
@@ -34,6 +33,7 @@ import { ITerminalApiService } from '@opensumi/ide-terminal-next';
 import { IVariableResolverService } from '@opensumi/ide-variable';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
 
+import { MockDebugSession } from '../../../../__mocks__/debug-session';
 import styles from '../../../../src/browser/view/console/debug-console.module.less';
 
 describe('Debug Console Tree Model', () => {
@@ -46,7 +46,7 @@ describe('Debug Console Tree Model', () => {
   } as any;
 
   const createMockSession = (sessionId: string, options: Partial<DebugSessionOptions>): IDebugSession =>
-    debugSessionFactory.get(sessionId, options as any);
+    new MockDebugSession(sessionId, options);
 
   const mockWatcher = {
     callback: jest.fn(),
@@ -59,6 +59,7 @@ describe('Debug Console Tree Model', () => {
       get: jest.fn(() => mockWatcher),
     },
     path: 'testRoot',
+    ensureLoaded: jest.fn(),
   } as any;
 
   const mockDebugSessionManager = {
@@ -115,11 +116,6 @@ describe('Debug Console Tree Model', () => {
       token: IContextKeyService,
       useValue: mockContextKeyService,
     });
-    mockInjector.overrideProviders({
-      token: DebugSessionFactory,
-      useClass: DefaultDebugSessionFactory,
-    });
-
     mockInjector.overrideProviders({
       token: WorkbenchEditorService,
       useValue: {},
@@ -194,7 +190,6 @@ describe('Debug Console Tree Model', () => {
     });
 
     debugConsoleModelService = mockInjector.get(DebugConsoleModelService);
-    debugSessionFactory = mockInjector.get(DefaultDebugSessionFactory);
     debugConsoleFilterService = mockInjector.get(DebugConsoleFilterService);
     mockContextKeyService = mockInjector.get(IContextKeyService);
   });
@@ -230,37 +225,37 @@ describe('Debug Console Tree Model', () => {
   });
 
   it('should init success', () => {
-    expect(mockDebugSessionManager.onDidDestroyDebugSession).toBeCalledTimes(1);
-    expect(mockDebugSessionManager.onDidChangeActiveDebugSession).toBeCalledTimes(1);
+    expect(mockDebugSessionManager.onDidDestroyDebugSession).toHaveBeenCalledTimes(1);
+    expect(mockDebugSessionManager.onDidChangeActiveDebugSession).toHaveBeenCalledTimes(1);
   });
 
   it('initTreeModel method should be work', () => {
     const mockSession = {
-      on: jest.fn(),
+      on: jest.fn(() => Disposable.create(() => {})),
       hasSeparateRepl: () => true,
       parentSession: undefined,
     } as Partial<IDebugSession>;
     debugConsoleModelService.initTreeModel(mockSession as any);
-    expect(mockSession.on).toBeCalledTimes(1);
+    expect(mockSession.on).toHaveBeenCalledTimes(1);
   });
 
   it('clear method should be work', () => {
     const mockSession = {
-      on: jest.fn(),
+      on: jest.fn(() => Disposable.create(() => {})),
       hasSeparateRepl: () => true,
       parentSession: undefined,
     } as Partial<IDebugSession>;
     mockDebugSessionManager.currentSession = mockSession as any;
     debugConsoleModelService.clear();
-    expect(mockSession.on).toBeCalledTimes(1);
+    expect(mockSession.on).toHaveBeenCalledTimes(1);
   });
 
   it('activeNodeDecoration method should be work', () => {
     const mockSession = {
-      on: jest.fn(),
+      on: jest.fn(() => Disposable.create(() => {})),
     } as any;
     debugConsoleModelService.initDecorations(mockRoot);
-    const node = new DebugConsoleNode(mockSession, 'test', mockRoot);
+    const node = new DebugConsoleNode({ session: mockSession }, 'test', mockRoot);
     debugConsoleModelService.activeNodeDecoration(node);
     const decoration = debugConsoleModelService.decorations.getDecorations(node);
     expect(decoration).toBeDefined();
@@ -268,10 +263,10 @@ describe('Debug Console Tree Model', () => {
 
   it('enactiveNodeDecoration method should be work', () => {
     const mockSession = {
-      on: jest.fn(),
+      on: jest.fn(() => Disposable.create(() => {})),
     } as any;
     debugConsoleModelService.initDecorations(mockRoot);
-    const node = new DebugConsoleNode(mockSession, 'test', mockRoot);
+    const node = new DebugConsoleNode({ session: mockSession }, 'test', mockRoot);
     debugConsoleModelService.activeNodeDecoration(node);
     let decoration = debugConsoleModelService.decorations.getDecorations(node);
     expect(decoration).toBeDefined();
@@ -283,10 +278,10 @@ describe('Debug Console Tree Model', () => {
 
   it('removeNodeDecoration method should be work', () => {
     const mockSession = {
-      on: jest.fn(),
+      on: jest.fn(() => Disposable.create(() => {})),
     } as any;
     debugConsoleModelService.initDecorations(mockRoot);
-    const node = new DebugConsoleNode(mockSession, 'test', mockRoot);
+    const node = new DebugConsoleNode({ session: mockSession }, 'test', mockRoot);
     debugConsoleModelService.activeNodeDecoration(node);
     let decoration = debugConsoleModelService.decorations.getDecorations(node);
     debugConsoleModelService.removeNodeDecoration();
@@ -303,10 +298,10 @@ describe('Debug Console Tree Model', () => {
 
   it('handleTreeBlur method should be work', () => {
     const mockSession = {
-      on: jest.fn(),
+      on: jest.fn(() => Disposable.create(() => {})),
     } as any;
     debugConsoleModelService.initDecorations(mockRoot);
-    const node = new DebugConsoleNode(mockSession, 'test', mockRoot);
+    const node = new DebugConsoleNode({ session: mockSession }, 'test', mockRoot);
     debugConsoleModelService.initDecorations(mockRoot);
     debugConsoleModelService.activeNodeDecoration(node);
     let decoration = debugConsoleModelService.decorations.getDecorations(node);
@@ -322,10 +317,10 @@ describe('Debug Console Tree Model', () => {
     let mockNode = { expanded: false };
     debugConsoleModelService.handleTreeHandler(treeHandle);
     debugConsoleModelService.toggleDirectory(mockNode as any);
-    expect(treeHandle.expandNode).toBeCalledTimes(1);
+    expect(treeHandle.expandNode).toHaveBeenCalledTimes(1);
     mockNode = { expanded: true };
     debugConsoleModelService.toggleDirectory(mockNode as any);
-    expect(treeHandle.collapseNode).toBeCalledTimes(1);
+    expect(treeHandle.collapseNode).toHaveBeenCalledTimes(1);
   });
 
   it('handleContextMenu method should be work', () => {
@@ -339,9 +334,9 @@ describe('Debug Console Tree Model', () => {
       },
     } as any;
     debugConsoleModelService.handleContextMenu(mockEvent, mockNode);
-    expect(mockCtxMenuRenderer.show).toBeCalledTimes(1);
-    expect(mockEvent.stopPropagation).toBeCalledTimes(1);
-    expect(mockEvent.preventDefault).toBeCalledTimes(1);
+    expect(mockCtxMenuRenderer.show).toHaveBeenCalledTimes(1);
+    expect(mockEvent.stopPropagation).toHaveBeenCalledTimes(1);
+    expect(mockEvent.preventDefault).toHaveBeenCalledTimes(1);
   });
 
   it('refresh method should be work', (done) => {

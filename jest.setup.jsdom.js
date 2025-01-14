@@ -1,8 +1,9 @@
+require('./jest.setup.base');
 require('jest-canvas-mock');
+require('intersection-observer');
+require('jest-fetch-mock').enableMocks();
 const { Buffer } = require('buffer');
 const timer = require('timers');
-
-const fetch = require('node-fetch');
 
 // vscode-jsonrpc 的 node 层需要 setImmediate 函数
 global.setImmediate = timer.setImmediate;
@@ -12,6 +13,8 @@ global.clearImmediate = timer.clearImmediate;
 // packages/extension/__tests__/browser/main.thread.env.test.ts
 // MainThreadEnvAPI Test Suites  › can read/write text via clipboard
 let text = '';
+global.IS_REACT_ACT_ENVIRONMENT = true;
+
 window.navigator = Object.assign(window.navigator, {
   clipboard: {
     writeText(value) {
@@ -22,8 +25,6 @@ window.navigator = Object.assign(window.navigator, {
     },
   },
 });
-
-window.fetch = fetch.default;
 
 // https://github.com/jsdom/jsdom/issues/1742
 document.queryCommandSupported = () => {};
@@ -74,8 +75,6 @@ class MockLocalStorage {
 
 global.localStorage = new MockLocalStorage();
 
-process.env.IS_JEST_TEST = true;
-
 // https://jestjs.io/docs/manual-mocks#mocking-methods-which-are-not-implemented-in-jsdom
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
@@ -89,12 +88,4 @@ Object.defineProperty(window, 'matchMedia', {
     removeEventListener: jest.fn(),
     dispatchEvent: jest.fn(),
   })),
-});
-
-process.on('unhandledRejection', (error) => {
-  // eslint-disable-next-line no-console
-  console.error('unhandledRejection', error);
-  if (process.env.EXIT_ON_UNHANDLED_REJECTION) {
-    process.exit(1); // To exit with a 'failure' code
-  }
 });

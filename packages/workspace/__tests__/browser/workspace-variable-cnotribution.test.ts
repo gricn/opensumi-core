@@ -1,4 +1,4 @@
-import { IContextKeyService, CommandService } from '@opensumi/ide-core-browser';
+import { CommandService, IContextKeyService } from '@opensumi/ide-core-browser';
 import { MockContextKeyService } from '@opensumi/ide-core-browser/__mocks__/context-key';
 import { URI } from '@opensumi/ide-core-common';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
@@ -7,7 +7,6 @@ import { WorkspaceVariableContribution } from '@opensumi/ide-workspace/lib/brows
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
 import { WorkspaceModule } from '../../src/browser';
-
 
 describe('WorkspaceVariableContribution should be work', () => {
   let workspaceVariableContribution: WorkspaceVariableContribution;
@@ -36,8 +35,8 @@ describe('WorkspaceVariableContribution should be work', () => {
     workspaceVariableContribution = injector.get(WorkspaceVariableContribution);
   });
 
-  afterEach(() => {
-    injector.disposeAll();
+  afterEach(async () => {
+    await injector.disposeAll();
     mockWorkspaceService.getWorkspaceRootUri.mockReset();
   });
 
@@ -48,23 +47,23 @@ describe('WorkspaceVariableContribution should be work', () => {
       }),
     };
     workspaceVariableContribution.registerVariables(variables as any);
-    expect(variables.registerVariable).toBeCalledTimes(11);
+    expect(variables.registerVariable).toHaveBeenCalledTimes(11);
   });
 
   it('getWorkspaceRootUri method should be work', async () => {
     const workspaceUri = new URI('file://userhome/');
     workspaceVariableContribution.getWorkspaceRootUri(workspaceUri);
-    expect(mockWorkspaceService.getWorkspaceRootUri).toBeCalledWith(workspaceUri);
+    expect(mockWorkspaceService.getWorkspaceRootUri).toHaveBeenCalledWith(workspaceUri);
   });
 
   it('getResourceUri method should be work', async () => {
     await workspaceVariableContribution.getResourceUri();
-    expect(mockCommandSetvice.executeCommand).toBeCalledWith('editor.getCurrentResource');
+    expect(mockCommandSetvice.executeCommand).toHaveBeenCalledWith('editor.getCurrentResource');
   });
 
   it('getWorkspaceRelativePath method should be work', async () => {
     const workspaceUri = new URI('file://userhome/');
     workspaceVariableContribution.getWorkspaceRelativePath(workspaceUri);
-    expect(mockWorkspaceService.getWorkspaceRootUri).toBeCalledWith(workspaceUri);
+    expect(mockWorkspaceService.getWorkspaceRootUri).toHaveBeenCalledWith(workspaceUri);
   });
 });

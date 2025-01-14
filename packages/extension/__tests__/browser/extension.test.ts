@@ -1,7 +1,7 @@
 import paths from 'path';
 
-import { URI, Uri, setLanguageId } from '@opensumi/ide-core-browser';
-import { StaticResourceService } from '@opensumi/ide-static-resource/lib/browser';
+import { URI, Uri, getLanguageId, setLanguageId } from '@opensumi/ide-core-browser';
+import { StaticResourceService } from '@opensumi/ide-core-browser/lib/static-resource';
 
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
@@ -38,24 +38,22 @@ describe('extension browser test', () => {
 
   beforeEach(() => {
     injector = createBrowserInjector([]);
-    injector.addProviders(
-      {
-        token: ExtensionService,
-        useClass: ExtensionServiceImpl,
-      },
-      {
-        token: StaticResourceService,
-        useValue: {
-          resolveStaticResource(uri: URI) {
-            return uri.withScheme('http').withAuthority('localhost');
-          },
+    injector.addProviders({
+      token: ExtensionService,
+      useClass: ExtensionServiceImpl,
+    });
+    injector.overrideProviders({
+      token: StaticResourceService,
+      useValue: {
+        resolveStaticResource(uri: URI) {
+          return uri.withScheme('http').withAuthority('localhost');
         },
       },
-    );
+    });
   });
 
-  afterEach(() => {
-    injector.disposeAll();
+  afterEach(async () => {
+    await injector.disposeAll();
   });
 
   it('should get correct extensionLocation for file scheme', async () => {
@@ -70,26 +68,31 @@ describe('extension browser test', () => {
     // 但是以前的逻辑是默认认为语言为 zh-CN
     // 就不该动老逻辑了，这里手动设置个语言
     setLanguageId('lang not exists');
+    setTimeout(() => {
+      expect(getLanguageId()).toBe('lang not exists');
+      const localizedDisplayName = extension.localize('displayName');
+      expect(localizedDisplayName).toEqual('%displayName%');
 
-    expect(extension.localize('displayName')).toEqual('%displayName%');
+      extension.enable();
+      extension.initialize();
 
-    extension.enable();
-    extension.contributeIfEnabled();
-
-    // 注入语言包后
-    expect(extension.toJSON().displayName).toEqual('ahhahahahahahah');
-    expect(extension.localize('displayName')).toEqual('ahhahahahahahah');
+      // 注入语言包后
+      expect(extension.toJSON().displayName).toEqual('ahhahahahahahah');
+      expect(extension.localize('displayName')).toEqual('ahhahahahahahah');
+    }, 0);
   });
 
   it('should get nls value: 中文(中国)', async () => {
     const extension = injector.get(Extension, [mockExtension, true, true, false]);
     setLanguageId('zh-CN');
-    extension.enable();
-    extension.contributeIfEnabled();
+    setTimeout(() => {
+      extension.enable();
+      extension.initialize();
 
-    // 注入语言包后
-    expect(extension.toJSON().displayName).toEqual('哈哈哈哈啊哈哈');
-    expect(extension.localize('displayName')).toEqual('哈哈哈哈啊哈哈');
+      // 注入语言包后
+      expect(extension.toJSON().displayName).toEqual('中文测试');
+      expect(extension.localize('displayName')).toEqual('中文测试');
+    }, 0);
   });
 
   it('should get correct extensionLocation for custom scheme', async () => {

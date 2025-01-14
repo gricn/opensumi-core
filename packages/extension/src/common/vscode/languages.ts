@@ -1,80 +1,91 @@
-import globToRegExp = require('glob-to-regexp');
-import {
-  DocumentSelector,
-  CompletionItemProvider,
-  CancellationToken,
-  DefinitionProvider,
-  TypeDefinitionProvider,
-  FoldingRangeProvider,
-  FoldingContext,
-  DocumentColorProvider,
-  DocumentRangeFormattingEditProvider,
-  DocumentFormattingEditProvider,
-  CallHierarchyProvider,
-  TypeHierarchyProvider,
-  InlayHintsProvider,
-} from 'vscode';
+import globToRegExp from 'glob-to-regexp';
 import { SymbolInformation } from 'vscode-languageserver-types';
 
-import { IMarkerData, IRange, Uri, UriComponents, IMarkdownString } from '@opensumi/ide-core-common';
+import { IMarkdownString, IMarkerData, IRange, UriComponents } from '@opensumi/ide-core-common';
 import { IEvaluatableExpression } from '@opensumi/ide-debug/lib/common/evaluatable-expression';
-import { InlineValueContext, InlineValue } from '@opensumi/ide-debug/lib/common/inline-values';
+import { InlineValue, InlineValueContext } from '@opensumi/ide-debug/lib/common/inline-values';
+// eslint-disable-next-line import/order
 import { ILanguageStatus, ISingleEditOperation } from '@opensumi/ide-editor';
-// eslint-disable-next-line import/no-restricted-paths
-import type { ITextModel } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
-import { Range as MonacoRange } from '@opensumi/monaco-editor-core/esm/vs/editor/common/core/range';
-import type {
-  CodeActionContext,
-  SignatureHelpContext,
-  Command,
-  CompletionItemLabel,
-} from '@opensumi/monaco-editor-core/esm/vs/editor/common/modes';
-import * as modes from '@opensumi/monaco-editor-core/esm/vs/editor/common/modes';
 
+// eslint-disable-next-line import/no-restricted-paths
+
+import { IDocumentFilterDto } from './converter';
 import { Disposable } from './ext-types';
 import { IExtensionDescription } from './extension';
 import {
-  SerializedDocumentFilter,
-  Hover,
-  Position,
-  Range,
-  Definition,
-  DefinitionLink,
-  FoldingRange,
-  RawColorInfo,
-  ColorPresentation,
-  DocumentHighlight,
-  FormattingOptions,
-  SingleEditOperation,
-  SerializedLanguageConfiguration,
-  ReferenceContext,
-  Location,
-  ILink,
-  DocumentSymbol,
-  WorkspaceEditDto,
-  RenameLocation,
-  Selection,
-  ISerializedSignatureHelpProviderMetadata,
-  SelectionRange,
-  ICallHierarchyItemDto,
-  ITypeHierarchyItemDto,
-  IOutgoingCallDto,
-  IIncomingCallDto,
+  CacheId,
+  ChainedCacheId,
   CodeLens,
-  SemanticTokensLegend,
-  WithDuration,
+  ColorPresentation,
+  CompletionContext,
   CompletionItemInsertTextRule,
   CompletionItemKind,
   CompletionItemTag,
-  ChainedCacheId,
-  IWorkspaceEditDto,
-  CacheId,
+  Definition,
+  DefinitionLink,
+  DocumentHighlight,
+  DocumentSymbol,
+  FoldingRange,
+  FormattingOptions,
+  Hover,
+  ICallHierarchyItemDto,
   ICodeLensListDto,
-  ISignatureHelpDto,
+  IIncomingCallDto,
+  ILink,
   ILinksListDto,
+  IOutgoingCallDto,
+  ISerializedSignatureHelpProviderMetadata,
+  ISignatureHelpDto,
+  ITypeHierarchyItemDto,
+  IWorkspaceEditDto,
+  Location,
+  Position,
+  Range,
+  RawColorInfo,
+  ReferenceContext,
+  RenameLocation,
+  Selection,
+  SelectionRange,
+  SemanticTokensLegend,
+  SerializedDocumentFilter,
+  SerializedLanguageConfiguration,
   SerializedRegExp,
+  SingleEditOperation,
+  WithDuration,
+  WorkspaceEditDto,
 } from './model.api';
-import { CompletionContext } from './model.api';
+
+// eslint-disable-next-line import/no-restricted-paths
+import type { ITextModel, NewSymbolName } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
+import type { URI as Uri } from '@opensumi/monaco-editor-core/esm/vs/base/common/uri';
+import type * as languages from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
+// eslint-disable-next-line import/no-restricted-paths
+import type {
+  CodeActionContext,
+  Command,
+  CompletionItemLabel,
+  NewSymbolNameTriggerKind,
+  SignatureHelpContext,
+} from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
+import type {
+  CallHierarchyProvider,
+  CancellationToken,
+  CompletionItemProvider,
+  DefinitionProvider,
+  DocumentColorProvider,
+  DocumentFormattingEditProvider,
+  DocumentRangeFormattingEditProvider,
+  DocumentSelector,
+  FoldingContext,
+  FoldingRangeProvider,
+  InlayHintsProvider,
+  InlineCompletionItemProvider,
+  InlineCompletionItemProviderMetadata,
+  TypeDefinitionProvider,
+  TypeHierarchyProvider,
+} from 'vscode';
+
+export type { Command } from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
 
 export interface IMainThreadLanguages {
   $unregister(handle: number): void;
@@ -87,6 +98,13 @@ export interface IMainThreadLanguages {
     selector: SerializedDocumentFilter[],
     triggerCharacters: string[],
     supportsResolveDetails: boolean,
+  ): void;
+  $registerInlineCompletionsSupport(
+    handle: number,
+    selector: IDocumentFilterDto[],
+    supportsHandleDidShowCompletionItem: boolean,
+    extensionId: string,
+    yieldsToExtensionIds: string[],
   ): void;
   $registerDefinitionProvider(handle: number, selector: SerializedDocumentFilter[]): void;
   $registerTypeDefinitionProvider(handle: number, selector: SerializedDocumentFilter[]): void;
@@ -139,6 +157,7 @@ export interface IMainThreadLanguages {
     selector: SerializedDocumentFilter[],
     supportsResoveInitialValues: boolean,
   ): void;
+  $registerNewSymbolNamesProvider(handle: number, selector: SerializedDocumentFilter[]): void;
   $registerSelectionRangeProvider(handle: number, selector: SerializedDocumentFilter[]): void;
   $registerDeclarationProvider(handle: number, selector: SerializedDocumentFilter[]): void;
   $registerCallHierarchyProvider(handle: number, selector: SerializedDocumentFilter[]): void;
@@ -164,7 +183,9 @@ export interface IMainThreadLanguages {
   $registerInlayHintsProvider(
     handle: number,
     selector: SerializedDocumentFilter[],
+    supportsResolve: boolean,
     eventHandle: number | undefined,
+    displayName: string | undefined,
   ): void;
   $emitInlayHintsEvent(eventHandle: number, event?: any): void;
   $setLanguageStatus(handle: number, status: ILanguageStatus): void;
@@ -174,7 +195,7 @@ export interface IMainThreadLanguages {
 export interface IExtHostLanguages {
   getLanguages(): Promise<string[]>;
 
-  registerHoverProvider(selector, provider): Disposable;
+  registerHoverProvider(selector, provider, extension: IExtensionDescription): Disposable;
   $provideHover(handle: number, resource: any, position: any, token: any): Promise<Hover | undefined>;
   $provideHoverWithDuration(
     handle: number,
@@ -187,6 +208,7 @@ export interface IExtHostLanguages {
     selector: DocumentSelector,
     provider: CompletionItemProvider,
     triggerCharacters: string[],
+    extension: IExtensionDescription,
   ): Disposable;
   $provideCompletionItems(
     handle: number,
@@ -202,6 +224,23 @@ export interface IExtHostLanguages {
   ): Promise<ISuggestDataDto | undefined>;
   $releaseCompletionItems(handle: number, id: number): void;
 
+  registerInlineCompletionsProvider(
+    extension: IExtensionDescription,
+    selector: DocumentSelector,
+    provider: InlineCompletionItemProvider,
+    metadata: InlineCompletionItemProviderMetadata | undefined,
+  ): Disposable;
+  $provideInlineCompletions(
+    handle: number,
+    resource: UriComponents,
+    position: Position,
+    context: languages.InlineCompletionContext,
+    token: CancellationToken,
+  ): Promise<IdentifiableInlineCompletions | undefined>;
+  $handleInlineCompletionDidShow(handle: number, pid: number, idx: number, updatedInsertText: string): void;
+  $handleInlineCompletionPartialAccept(handle: number, pid: number, idx: number, acceptedCharacters: number): void;
+  $freeInlineCompletionsList(handle: number, pid: number): void;
+
   $provideDefinition(
     handle: number,
     resource: UriComponents,
@@ -214,7 +253,11 @@ export interface IExtHostLanguages {
     position: Position,
     token: CancellationToken,
   ): Promise<WithDuration<Definition | DefinitionLink[] | undefined>>;
-  registerDefinitionProvider(selector: DocumentSelector, provider: DefinitionProvider): Disposable;
+  registerDefinitionProvider(
+    selector: DocumentSelector,
+    provider: DefinitionProvider,
+    extension: IExtensionDescription,
+  ): Disposable;
 
   $provideTypeDefinition(
     handle: number,
@@ -222,9 +265,17 @@ export interface IExtHostLanguages {
     position: Position,
     token: CancellationToken,
   ): Promise<Definition | DefinitionLink[] | undefined>;
-  registerTypeDefinitionProvider(selector: DocumentSelector, provider: TypeDefinitionProvider): Disposable;
+  registerTypeDefinitionProvider(
+    selector: DocumentSelector,
+    provider: TypeDefinitionProvider,
+    extension: IExtensionDescription,
+  ): Disposable;
 
-  registerFoldingRangeProvider(selector: DocumentSelector, provider: FoldingRangeProvider): Disposable;
+  registerFoldingRangeProvider(
+    selector: DocumentSelector,
+    provider: FoldingRangeProvider,
+    extension: IExtensionDescription,
+  ): Disposable;
   $provideFoldingRange(
     handle: number,
     resource: UriComponents,
@@ -232,7 +283,11 @@ export interface IExtHostLanguages {
     token: CancellationToken,
   ): Promise<FoldingRange[] | undefined>;
 
-  registerColorProvider(selector: DocumentSelector, provider: DocumentColorProvider): Disposable;
+  registerColorProvider(
+    selector: DocumentSelector,
+    provider: DocumentColorProvider,
+    extension: IExtensionDescription,
+  ): Disposable;
   $provideDocumentColors(handle: number, resource: UriComponents, token: CancellationToken): Promise<RawColorInfo[]>;
   $provideColorPresentations(
     handle: number,
@@ -310,6 +365,7 @@ export interface IExtHostLanguages {
     resource: UriComponents,
     rangeOrSelection: Range | Selection,
     context: CodeActionContext,
+    token: CancellationToken,
   ): Promise<ICodeActionListDto | undefined>;
   $resolveCodeAction(
     handle: number,
@@ -378,6 +434,14 @@ export interface IExtHostLanguages {
     token: CancellationToken,
   ): PromiseLike<RenameLocation | undefined>;
 
+  $provideNewSymbolNames(
+    handle: number,
+    resource: Uri,
+    range: Range,
+    triggerKind: NewSymbolNameTriggerKind,
+    token: CancellationToken,
+  ): Promise<NewSymbolName[] | undefined>;
+
   $provideSelectionRanges(
     handle: number,
     resource: UriComponents,
@@ -385,7 +449,11 @@ export interface IExtHostLanguages {
     token: CancellationToken,
   ): Promise<SelectionRange[][]>;
 
-  registerCallHierarchyProvider(selector: DocumentSelector, provider: CallHierarchyProvider): Disposable;
+  registerCallHierarchyProvider(
+    selector: DocumentSelector,
+    provider: CallHierarchyProvider,
+    extension: IExtensionDescription,
+  ): Disposable;
   $prepareCallHierarchy(
     handle: number,
     resource: UriComponents,
@@ -405,7 +473,11 @@ export interface IExtHostLanguages {
     itemId: string,
     token: CancellationToken,
   ): Promise<IOutgoingCallDto[] | undefined>;
-  registerTypeHierarchyProvider(selector: DocumentSelector, provider: TypeHierarchyProvider): Disposable;
+  registerTypeHierarchyProvider(
+    selector: DocumentSelector,
+    provider: TypeHierarchyProvider,
+    extension: IExtensionDescription,
+  ): Disposable;
   $prepareTypeHierarchy(
     handle: number,
     resource: UriComponents,
@@ -471,6 +543,8 @@ export interface IExtHostLanguages {
     range: IRange,
     token: CancellationToken,
   ): Promise<IInlayHintsDto | undefined>;
+  $resolveInlayHint(handle: number, id: ChainedCacheId, token: CancellationToken): Promise<IInlayHintDto | undefined>;
+  $releaseInlayHints(handle: number, id: number): void;
 }
 
 export interface ILinkedEditingRangesDto {
@@ -479,15 +553,19 @@ export interface ILinkedEditingRangesDto {
 }
 
 export interface IInlayHintDto {
-  text: string;
+  label: string | languages.InlayHintLabelPart[];
+  tooltip?: string | IMarkdownString;
+  textEdits?: languages.TextEdit[];
   position: Position;
-  kind: modes.InlayHintKind;
-  whitespaceBefore?: boolean;
-  whitespaceAfter?: boolean;
+  kind?: languages.InlayHintKind;
+  paddingLeft?: boolean;
+  paddingRight?: boolean;
+  cacheId?: ChainedCacheId;
 }
 
 export interface IInlayHintsDto {
   hints: IInlayHintDto[];
+  cacheId?: CacheId;
 }
 
 export interface IInlineValueContextDto {
@@ -520,19 +598,9 @@ export enum ISuggestDataDtoField {
 }
 
 export namespace RangeSuggestDataDto {
-  export type ISuggestRangeDto = [number, number, number, number];
+  export type ISuggestRangeDto = [number, number, number, number] | { insert: IRange; replace: IRange };
   export function to(range: Range) {
     return [range.startLineNumber, range.startColumn, range.endLineNumber, range.endColumn] as ISuggestRangeDto;
-  }
-  export function from(range: ISuggestRangeDto | { insert: IRange; replace: IRange }) {
-    return Array.isArray(range) && range.length === 4
-      ? MonacoRange.lift({
-          startLineNumber: range[0],
-          startColumn: range[1],
-          endLineNumber: range[2],
-          endColumn: range[3],
-        })
-      : range;
   }
 }
 
@@ -574,7 +642,7 @@ export function testGlob(pattern: string, value: string): boolean {
 }
 
 export interface DocumentIdentifier {
-  uri: string;
+  uri: Uri;
   languageId: string;
 }
 
@@ -592,14 +660,14 @@ export interface MonacoModelIdentifier {
 export namespace MonacoModelIdentifier {
   export function fromDocument(document: DocumentIdentifier): MonacoModelIdentifier {
     return {
-      uri: Uri.parse(document.uri),
+      uri: document.uri,
       languageId: document.languageId,
     };
   }
   export function fromModel(model: ITextModel): MonacoModelIdentifier {
     return {
       uri: model.uri,
-      languageId: model.getModeId(),
+      languageId: model.getLanguageId(),
     };
   }
 }
@@ -612,7 +680,9 @@ export interface ICodeActionDto {
   command?: Command;
   kind?: string;
   isPreferred?: boolean;
+  isAI?: boolean;
   disabled?: string;
+  ranges?: IRange[];
 }
 
 export interface ICodeActionListDto {
@@ -624,3 +694,49 @@ export interface ICodeActionProviderMetadataDto {
   readonly providedKinds?: readonly string[];
   readonly documentation?: ReadonlyArray<{ readonly kind: string; readonly command: Command }>;
 }
+
+// inline completion begin
+export interface IdentifiableInlineCompletions extends languages.InlineCompletions<IdentifiableInlineCompletion> {
+  pid: number;
+}
+
+export interface IdentifiableInlineCompletion extends languages.InlineCompletion {
+  idx: number;
+}
+
+/**
+ * How an {@link InlineCompletionsProvider inline completion provider} was triggered.
+ */
+export enum InlineCompletionTriggerKind {
+  /**
+   * Completion was triggered automatically while editing.
+   * It is sufficient to return a single completion item in this case.
+   */
+  Automatic = 0,
+
+  /**
+   * Completion was triggered explicitly by a user gesture.
+   * Return multiple completion items to enable cycling through them.
+   */
+  Explicit = 1,
+}
+
+export interface InlineCompletionContext {
+  /**
+   * How the completion was triggered.
+   */
+  readonly triggerKind: InlineCompletionTriggerKind;
+  readonly selectedSuggestionInfo: SelectedSuggestionInfo | undefined;
+  readonly includeInlineEdits: boolean;
+  readonly includeInlineCompletions: boolean;
+}
+
+export interface SelectedSuggestionInfo {
+  range: IRange;
+  text: string;
+  isSnippetText: boolean;
+  completionKind: CompletionItemKind;
+  equals(other: SelectedSuggestionInfo): boolean;
+}
+
+// inline completion end

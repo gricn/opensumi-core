@@ -1,6 +1,6 @@
-import { Injectable, Optional, Autowired } from '@opensumi/di';
-import { TreeModel, IOptionalMetaData, TreeNodeEvent, CompositeTreeNode } from '@opensumi/ide-components';
-import { URI, ThrottledDelayer, Emitter, Event } from '@opensumi/ide-core-browser';
+import { Autowired, Injectable, Optional } from '@opensumi/di';
+import { IOptionalMetaData, TreeModel, TreeNodeEvent } from '@opensumi/ide-components';
+import { ThrottledDelayer, URI } from '@opensumi/ide-core-browser';
 import { FileStat } from '@opensumi/ide-file-service';
 
 import { Directory } from '../common/file-tree-node.define';
@@ -20,18 +20,13 @@ export class FileTreeModel extends TreeModel {
   public readonly decorationService: FileTreeDecorationService;
 
   private flushDispatchChangeDelayer = new ThrottledDelayer<void>(FileTreeModel.DEFAULT_FLUSH_DELAY);
-  private onWillUpdateEmitter: Emitter<void> = new Emitter();
 
   constructor(@Optional() root: Directory) {
     super();
     this.init(root);
   }
 
-  get onWillUpdate(): Event<void> {
-    return this.onWillUpdateEmitter.event;
-  }
-
-  init(root: CompositeTreeNode) {
+  init(root: Directory) {
     this.root = root;
     // 分支更新时通知树刷新, 不是立即更新，而是延迟更新，待树稳定后再更新
     // 100ms的延迟并不能保证树稳定，特别是在node_modules展开的情况下
@@ -46,7 +41,6 @@ export class FileTreeModel extends TreeModel {
       this.flushDispatchChangeDelayer.cancel();
     }
     this.flushDispatchChangeDelayer.trigger(async () => {
-      await this.onWillUpdateEmitter.fireAndAwait();
       this.dispatchChange();
     });
   }

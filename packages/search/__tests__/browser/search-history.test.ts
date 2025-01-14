@@ -1,7 +1,10 @@
-import { SearchHistory, SEARCH_WORD_SCOPE } from '../../src/browser/search-history';
+import { SEARCH_WORD_SCOPE, SearchHistory } from '../../src/browser/search-history';
 
 class MockSearchServiceClient {
   searchValue: string;
+  searchDebounce() {
+    // noop
+  }
 }
 
 class MockRecentStorage {
@@ -19,7 +22,7 @@ class MockRecentStorage {
   }
 }
 
-describe('测试 SearchHistory', () => {
+describe('SearchHistory test', () => {
   const searchServiceClient: any = new MockSearchServiceClient();
   const mockRecentStorage = new MockRecentStorage();
   const searchHistory = new SearchHistory(searchServiceClient, mockRecentStorage as any);
@@ -38,11 +41,13 @@ describe('测试 SearchHistory', () => {
   });
 
   test('method: setRecentSearchWord', () => {
+    const spy = jest.spyOn(searchServiceClient, 'searchDebounce');
     searchHistory.setRecentSearchWord();
     expect(searchServiceClient.searchValue).toEqual('d');
+    expect(spy).toHaveBeenCalled();
   });
 
-  test('method: setRecentSearchWord 前进到底', () => {
+  test('method: setRecentSearchWord', () => {
     searchHistory.setRecentSearchWord();
     searchHistory.setRecentSearchWord();
     searchHistory.setRecentSearchWord();
@@ -55,11 +60,13 @@ describe('测试 SearchHistory', () => {
   });
 
   test('method: setBackRecentSearchWord', () => {
+    const spy = jest.spyOn(searchServiceClient, 'searchDebounce');
     searchHistory.setBackRecentSearchWord();
     expect(searchServiceClient.searchValue).toEqual('b');
+    expect(spy).toHaveBeenCalled();
   });
 
-  test('method: setBackRecentSearchWord 后退到底', () => {
+  test('method: setBackRecentSearchWord', () => {
     searchHistory.setBackRecentSearchWord();
     searchHistory.setBackRecentSearchWord();
     searchHistory.setBackRecentSearchWord();

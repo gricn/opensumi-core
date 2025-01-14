@@ -3,8 +3,8 @@
  * 但我们要在这个 Service 上做一些封装，比如解析 terminal.type 等来制造一个假的 Profile
  */
 
-import { Injectable, Autowired } from '@opensumi/di';
-import { PreferenceService, path, OperatingSystem } from '@opensumi/ide-core-browser';
+import { Autowired, Injectable } from '@opensumi/di';
+import { OperatingSystem, PreferenceService, TerminalSettingsId, path } from '@opensumi/ide-core-browser';
 
 import {
   IResolveDefaultProfileOptions,
@@ -35,7 +35,7 @@ export class TerminalProfileInternalService implements ITerminalProfileInternalS
   protected readonly serviceClientRPC: ITerminalServiceClient;
 
   private async resolveTerminalTypeProfile(): Promise<ITerminalProfile | undefined> {
-    const shellType = this.preferenceService.get<string>('terminal.type');
+    const shellType = this.preferenceService.get<string>(TerminalSettingsId.Type);
     if (!shellType || shellType === 'default') {
       // 继续走我们的 resolveDefaultProfile
       return;

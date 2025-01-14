@@ -20,6 +20,9 @@
     line-height: inherit;
     outline: none;
     border: none;
+    width: 100%;
+    padding: 0;
+    font-size: 14px;
   }
 
   .kt-select-value {
@@ -40,6 +43,7 @@
     box-sizing: border-box;
 
     & > span {
+      color: var(--kt-select-foreground);
       cursor: pointer;
     }
 
@@ -66,12 +70,12 @@
       color: var(--kt-select-disableForeground);
     }
     &.kt-select-warning {
-      border-color: var(--kt-select-warningColor);
+      border-color: var(--kt-select-warningForeground);
     }
   }
 
   .kt-select-warning-text {
-    background-color: var(--kt-select-warningColor);
+    background-color: var(--kt-select-warningForeground);
     padding: 4px 8px;
     color: @white;
   }
@@ -93,6 +97,10 @@
     height: 28px;
     font-size: 12px;
     line-height: 28px;
+  }
+
+  .kt-select-value-default-icon {
+    margin-left: 5px;
   }
 
   .kt-select-value-small,
@@ -131,7 +139,12 @@
   .kt-select-option-select {
     span {
       display: inline-block;
-      width: 100%;
+      margin: 0 2px;
+      width: calc(100% - 4px);
+      box-sizing: border-box;
+      outline: 1px solid var(--list-focusOutline);
+      outline-offset: -1px;
+      color: var(--kt-selectDropdown-selectionForeground);
       background-color: var(--kt-selectDropdown-selectionBackground);
       &:hover {
         background-color: var(--kt-selectDropdown-selectionBackground);
@@ -155,9 +168,13 @@
     white-space: nowrap;
     line-height: 26px;
     display: inline-block;
-    width: 100%;
+    margin: 0 2px;
+    width: calc(100% - 4px);
     box-sizing: border-box;
     &:hover {
+      box-sizing: border-box;
+      outline: 1px solid var(--list-focusOutline);
+      outline-offset: -1px;
       background-color: var(--kt-selectDropdown-hoverBackground);
     }
   }

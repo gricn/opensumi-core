@@ -15,17 +15,17 @@
  ********************************************************************************/
 // Some code copied and modified from https://github.com/eclipse-theia/theia/tree/v1.14.0/packages/core/src/browser/keyboard/keyboard-layout-service.ts
 
-import { Injectable, Autowired } from '@opensumi/di';
-import { isWindows, Emitter, Event } from '@opensumi/ide-core-common';
+import { Autowired, Injectable } from '@opensumi/di';
+import { Emitter, Event, isWindows } from '@opensumi/ide-core-common';
 import {
-  KeyboardNativeLayoutService,
-  KeyboardLayoutChangeNotifierService,
-  KeymapInfo,
   IWindowsKeyMapping,
+  KeyboardLayoutChangeNotifierService,
+  KeyboardNativeLayoutService,
+  KeymapInfo,
 } from '@opensumi/ide-core-common/lib/keyboard';
 
 import { KeyValidator } from './keyboard-layout-provider';
-import { KeyCode, Key } from './keys';
+import { Key, KeyCode } from './keys';
 
 export interface KeyboardLayout {
   /**
@@ -75,7 +75,7 @@ export class KeyboardLayoutService {
 
   /**
    * 使用当前的键盘布局信息解析快捷键 KeyCode
-   * 如果当前没有监测到布局信息或当前布局信息不包含当前 KeyCode，直接返回入参的 KeycCode
+   * 如果当前没有监测到布局信息或当前布局信息不包含当前 KeyCode，直接返回入参的 KeyCode
    * @param inCode
    */
   public resolveKeyCode(inCode: KeyCode): KeyCode {

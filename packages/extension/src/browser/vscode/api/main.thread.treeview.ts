@@ -1,45 +1,62 @@
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector, Optional } from '@opensumi/di';
-import { Tree, ITreeNodeOrCompositeTreeNode } from '@opensumi/ide-components';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector, Optional } from '@opensumi/di';
+import { CompositeTreeNode, ITreeNodeOrCompositeTreeNode, Tree } from '@opensumi/ide-components';
 import { IRPCProtocol } from '@opensumi/ide-connection';
 import {
+  BinaryBuffer,
+  CancellationToken,
+  CancellationTokenSource,
+  CommandRegistry,
+  Disposable,
+  DisposableStore,
   Emitter,
   Event,
-  DisposableStore,
-  toDisposable,
-  isUndefined,
-  CommandRegistry,
-  localize,
-  getIcon,
-  getExternalIcon,
+  IContextKeyService,
   LabelService,
   URI,
-  IContextKeyService,
-  CancellationTokenSource,
   WithEventBus,
+  getExternalIcon,
+  getIcon,
+  isString,
+  isUndefined,
+  localize,
+  toDisposable,
 } from '@opensumi/ide-core-browser';
 import {
   AbstractMenuService,
-  generateCtxMenu,
   IMenuRegistry,
   MenuId,
   MenuNode,
+  generateCtxMenu,
 } from '@opensumi/ide-core-browser/lib/menu/next';
 import { IProgressService } from '@opensumi/ide-core-browser/lib/progress';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
 import { IMainLayoutService, ViewCollapseChangedEvent } from '@opensumi/ide-main-layout';
-import { IIconService, IconType, IThemeService } from '@opensumi/ide-theme';
+import { IIconService, IThemeService, IconType } from '@opensumi/ide-theme';
 
-import { TreeViewItem, TreeViewBaseOptions, ITreeViewRevealOptions } from '../../../common/vscode';
-import { IMainThreadTreeView, IExtHostTreeView, ExtHostAPIIdentifier } from '../../../common/vscode';
+import { ExtensionHostType } from '../../../common';
+import {
+  ExtHostAPIIdentifier,
+  IExtHostTreeView,
+  IMainThreadTreeView,
+  ITreeViewRevealOptions,
+  IconUrl,
+  TreeViewBaseOptions,
+  TreeViewItem,
+  ViewBadge,
+} from '../../../common/vscode';
+import { DataTransfer } from '../../../common/vscode/converter';
+import { VSDataTransfer, createStringDataTransferItem } from '../../../common/vscode/data-transfer';
+import { DataTransferCache } from '../../../common/vscode/data-transfer-cache';
 import { TreeItemCollapsibleState } from '../../../common/vscode/ext-types';
 import { ExtensionTabBarTreeView } from '../../components';
 
-import { ExtensionTreeViewModel } from './tree-view/tree-view.model.service';
-import { ExtensionCompositeTreeNode, ExtensionTreeRoot, ExtensionTreeNode } from './tree-view/tree-view.node.defined';
+import { ExtensionTreeViewModel, ITreeViewDragAndDropController } from './tree-view/tree-view.model.service';
+import { ExtensionCompositeTreeNode, ExtensionTreeNode, ExtensionTreeRoot } from './tree-view/tree-view.node.defined';
 
 @Injectable({ multiple: true })
 export class MainThreadTreeView extends WithEventBus implements IMainThreadTreeView {
   static TREE_VIEW_COLLAPSE_ALL_COMMAND_ID = 'TREE_VIEW_COLLAPSE_ALL';
+  static TREE_VIEW_COLLAPSE_ALL_COMMAND_ID_WORKER = 'TREE_VIEW_COLLAPSE_ALL_WORKER';
 
   private readonly proxy: IExtHostTreeView;
 
@@ -79,14 +96,19 @@ export class MainThreadTreeView extends WithEventBus implements IMainThreadTreeV
   private userhome?: URI;
 
   readonly treeModels: Map<string, ExtensionTreeViewModel> = new Map<string, ExtensionTreeViewModel>();
+  readonly dndControllers: Map<string, TreeViewDragAndDropController> = new Map<
+    string,
+    TreeViewDragAndDropController
+  >();
 
   private disposableCollection: Map<string, DisposableStore> = new Map();
   private disposable: DisposableStore = new DisposableStore();
 
-  constructor(@Optional(IRPCProtocol) private rpcProtocol: IRPCProtocol) {
+  constructor(@Optional(IRPCProtocol) private rpcProtocol: IRPCProtocol, private extensionHostType: ExtensionHostType) {
     super();
     this.proxy = this.rpcProtocol.getProxy(ExtHostAPIIdentifier.ExtHostTreeView);
     this.disposable.add(toDisposable(() => this.treeModels.clear()));
+    this.disposable.add(toDisposable(() => this.dndControllers.clear()));
     this._registerInternalCommands();
     this.fileServiceClient.getCurrentUserHome().then((home) => {
       if (home) {
@@ -119,12 +141,13 @@ export class MainThreadTreeView extends WithEventBus implements IMainThreadTreeV
   createTreeModel(
     treeViewId: string,
     dataProvider: TreeViewDataProvider,
+    dndController: TreeViewDragAndDropController,
     options: TreeViewBaseOptions,
   ): ExtensionTreeViewModel {
-    return ExtensionTreeViewModel.createModel(this.injector, dataProvider, treeViewId, options || {});
+    return ExtensionTreeViewModel.createModel(this.injector, dataProvider, dndController, treeViewId, options || {});
   }
 
-  $registerTreeDataProvider(treeViewId: string, options: TreeViewBaseOptions): void {
+  async $registerTreeDataProvider(treeViewId: string, options: TreeViewBaseOptions) {
     if (this.treeModels.has(treeViewId)) {
       return;
     }
@@ -139,8 +162,16 @@ export class MainThreadTreeView extends WithEventBus implements IMainThreadTreeV
       this.menuService,
       this.userhome,
     );
-    const model = this.createTreeModel(treeViewId, dataProvider, options);
+    const dndController = new TreeViewDragAndDropController(
+      treeViewId,
+      options.dropMimeTypes as string[],
+      options.dragMimeTypes as string[],
+      options.hasHandleDrag,
+      this.proxy,
+    );
+    const model = this.createTreeModel(treeViewId, dataProvider, dndController, options);
     this.treeModels.set(treeViewId, model);
+    this.dndControllers.set(treeViewId, dndController);
     disposable.add(toDisposable(() => this.treeModels.delete(treeViewId)));
     this.mainLayoutService.replaceViewComponent(
       {
@@ -159,7 +190,10 @@ export class MainThreadTreeView extends WithEventBus implements IMainThreadTreeV
       disposable.add(
         this.menuRegistry.registerMenuItem(MenuId.ViewTitle, {
           command: {
-            id: MainThreadTreeView.TREE_VIEW_COLLAPSE_ALL_COMMAND_ID,
+            id:
+              this.extensionHostType === 'worker'
+                ? MainThreadTreeView.TREE_VIEW_COLLAPSE_ALL_COMMAND_ID_WORKER
+                : MainThreadTreeView.TREE_VIEW_COLLAPSE_ALL_COMMAND_ID,
             label: localize('treeview.command.action.collapse'),
           },
           extraTailArgs: [treeViewId],
@@ -198,39 +232,61 @@ export class MainThreadTreeView extends WithEventBus implements IMainThreadTreeV
     this.disposableCollection.set(treeViewId, disposable);
   }
 
-  $unregisterTreeDataProvider(treeViewId: string) {
+  async $unregisterTreeDataProvider(treeViewId: string) {
     const disposable = this.disposableCollection.get(treeViewId);
     if (disposable) {
       disposable.dispose();
     }
   }
 
-  $refresh(treeViewId: string, itemsToRefresh?: TreeViewItem) {
+  async $resolveDropFileData(treeViewId: string, requestId: number, dataItemId: string) {
+    const controller = this.dndControllers.get(treeViewId);
+    if (!controller) {
+      throw new Error('Unknown tree');
+    }
+    return controller.resolveDropFileData(requestId, dataItemId);
+  }
+
+  async $refresh(treeViewId: string, itemsToRefresh?: TreeViewItem) {
     const treeModel = this.treeModels.get(treeViewId);
     if (treeModel) {
-      treeModel.refresh(itemsToRefresh);
+      await treeModel.refresh(itemsToRefresh);
     }
   }
 
-  $setTitle(treeViewId: string, title: string) {
+  async $setTitle(treeViewId: string, title: string) {
     const handler = this.mainLayoutService.getTabbarHandler(treeViewId);
     if (handler) {
       handler.updateViewTitle(treeViewId, title);
     }
   }
 
-  $setDescription(treeViewId: string, description: string) {
-    // TODO: 框架的 Panel 暂无存储 descrition 信息，暂时为空实现
+  async $setDescription(treeViewId: string, description: string) {
+    const handler = this.mainLayoutService.getTabbarHandler(treeViewId);
+    if (handler) {
+      handler.updateViewDescription(treeViewId, description);
+    }
   }
 
-  $setMessage(treeViewId: string, description: string) {
-    // TODO: 框架的 Panel 暂无存储 message 信息，暂时为空实现
+  async $setBadge(treeViewId: string, badge?: ViewBadge) {
+    const handler = this.mainLayoutService.getTabbarHandler(treeViewId);
+    if (handler) {
+      handler.setBadge(badge ? badge : '');
+      handler.accordionService.updateViewBadge(treeViewId, badge ? badge : '');
+    }
   }
 
-  async $reveal(treeViewId: string, treeItemId: string, options?: ITreeViewRevealOptions) {
+  async $setMessage(treeViewId: string, message: string) {
+    const handler = this.mainLayoutService.getTabbarHandler(treeViewId);
+    if (handler) {
+      handler.updateViewMessage(treeViewId, message);
+    }
+  }
+
+  async $reveal(treeViewId: string, treeItemId?: string, options?: ITreeViewRevealOptions) {
     this.mainLayoutService.revealView(treeViewId);
     const treeModel = this.treeModels.get(treeViewId);
-    if (treeModel) {
+    if (treeModel && treeItemId) {
       treeModel.reveal(treeItemId, options);
     }
   }
@@ -239,7 +295,10 @@ export class MainThreadTreeView extends WithEventBus implements IMainThreadTreeV
     this.disposable.add(
       this.commandRegistry.registerCommand(
         {
-          id: MainThreadTreeView.TREE_VIEW_COLLAPSE_ALL_COMMAND_ID,
+          id:
+            this.extensionHostType === 'worker'
+              ? MainThreadTreeView.TREE_VIEW_COLLAPSE_ALL_COMMAND_ID_WORKER
+              : MainThreadTreeView.TREE_VIEW_COLLAPSE_ALL_COMMAND_ID,
         },
         {
           execute: (treeViewId: string) => {
@@ -349,15 +408,16 @@ export class TreeViewDataProvider extends Tree {
       label,
       description,
       icon,
-      item.tooltip,
+      // TODO: Support ThemeIcon on tooltip
+      typeof item.tooltip === 'string' ? item.tooltip : item.tooltip?.value,
       item.command,
       item.contextValue || '',
       item.id,
       actions,
+      item.checkboxInfo,
       item.accessibilityInformation,
       expanded,
-      // 传入缓存的节点id，保障节点在初始化之后path及id一直保持一致
-      this.treeItemId2TreeNode.get(item.id)?.id,
+      item.resourceUri,
     );
     return node;
   }
@@ -372,21 +432,40 @@ export class TreeViewDataProvider extends Tree {
       label,
       description,
       icon,
-      item.tooltip,
+      // TODO: Support ThemeIcon on tooltip
+      typeof item.tooltip === 'string' ? item.tooltip : item.tooltip?.value,
       item.command,
       item.contextValue || '',
       item.id,
       actions,
+      item.checkboxInfo,
       item.accessibilityInformation,
-      // 传入缓存的节点id，保障节点在初始化之后path及id一直保持一致
-      this.treeItemId2TreeNode.get(item.id)?.id,
+      item.resourceUri,
     );
     return node;
   }
 
+  private isBase64Icon(iconPath?: IconUrl | string) {
+    const isBase64Regx = /^data:image\//;
+    if (iconPath) {
+      if (isString(iconPath)) {
+        return isBase64Regx.test(iconPath);
+      } else {
+        return isBase64Regx.test(iconPath.dark);
+      }
+    }
+    return false;
+  }
+
   async toIconClass(item: TreeViewItem): Promise<string | undefined> {
     if (item.iconUrl || item.icon) {
-      return this.iconService.fromIcon('', item.iconUrl || item.icon, IconType.Background, undefined, true);
+      return this.iconService.fromIcon(
+        '',
+        item.iconUrl || item.icon,
+        this.isBase64Icon(item.iconUrl || item.icon) ? IconType.Base64 : IconType.Background,
+        undefined,
+        true,
+      );
     } else if (item.themeIcon) {
       let themeIconClass = getExternalIcon(item.themeIcon.id);
       if (item.resourceUri) {
@@ -452,6 +531,7 @@ export class TreeViewDataProvider extends Tree {
       if (children && Array.isArray(children)) {
         for (const child of children) {
           const node = await this.createTreeNode(child, parent);
+          this.treeItemId2TreeNode.set(child.id, node);
           nodes.push(node);
         }
       }
@@ -463,7 +543,7 @@ export class TreeViewDataProvider extends Tree {
         }
       }
     } else {
-      nodes = [new ExtensionTreeRoot(this as any, this.treeViewId)];
+      nodes = [new ExtensionTreeRoot(this, this.treeViewId)];
     }
     return nodes;
   }
@@ -507,5 +587,110 @@ export class TreeViewDataProvider extends Tree {
   dispose() {
     super.dispose();
     this.treeItemId2TreeNode.clear();
+  }
+
+  markAsChecked(
+    node: ExtensionTreeNode | ExtensionCompositeTreeNode,
+    checked: boolean,
+    manageCheckboxStateManually?: boolean,
+  ): void {
+    function findParentsToChange(child: ITreeNodeOrCompositeTreeNode, nodes: ITreeNodeOrCompositeTreeNode[]): void {
+      if (
+        child.parent?.checkboxInfo !== undefined &&
+        child.parent.checkboxInfo.checked !== checked &&
+        (!checked ||
+          !child.parent.children?.some((candidate) => candidate !== child && candidate.checkboxInfo?.checked === false))
+      ) {
+        nodes.push(child.parent);
+        findParentsToChange(child.parent, nodes);
+      }
+    }
+
+    function findChildrenToChange(parent: ITreeNodeOrCompositeTreeNode, nodes: ITreeNodeOrCompositeTreeNode[]): void {
+      if (CompositeTreeNode.is(parent)) {
+        parent.children?.forEach((child) => {
+          if (child.checkboxInfo !== undefined && child.checkboxInfo.checked !== checked) {
+            nodes.push(child);
+          }
+          findChildrenToChange(child, nodes);
+        });
+      }
+    }
+
+    const nodesToChange = [node];
+    if (!manageCheckboxStateManually) {
+      findParentsToChange(node, nodesToChange);
+      findChildrenToChange(node, nodesToChange);
+    }
+    nodesToChange.forEach((n) => (n.checkboxInfo!.checked = checked));
+    this.proxy?.$checkStateChanged(this.treeViewId, [{ treeItemId: node.treeItemId, checked }]);
+  }
+}
+
+export class TreeViewDragAndDropController extends Disposable implements ITreeViewDragAndDropController {
+  private readonly dataTransfersCache = new DataTransferCache();
+
+  constructor(
+    public readonly treeViewId: string,
+    readonly dropMimeTypes: string[] = [],
+    readonly dragMimeTypes: string[] = [],
+    public readonly hasHandleDrag: boolean,
+    private readonly _proxy: IExtHostTreeView,
+  ) {
+    super();
+  }
+
+  async handleDrop(
+    dataTransfer: VSDataTransfer,
+    targetTreeItem: ExtensionTreeNode | ExtensionCompositeTreeNode | undefined,
+    token: CancellationToken,
+    operationUuid?: string,
+    sourceTreeId?: string,
+    sourceTreeItemHandles?: string[],
+  ): Promise<void> {
+    const request = this.dataTransfersCache.add(dataTransfer);
+    try {
+      return await this._proxy.$handleDrop(
+        this.treeViewId,
+        request.id,
+        await DataTransfer.toDataTransferDTO(dataTransfer),
+        targetTreeItem?.treeItemId,
+        token,
+        operationUuid,
+        sourceTreeId,
+        sourceTreeItemHandles,
+      );
+    } finally {
+      request.dispose();
+    }
+  }
+
+  async handleDrag(
+    sourceTreeItemHandles: string[],
+    operationUuid: string,
+    token: CancellationToken,
+  ): Promise<VSDataTransfer | undefined> {
+    if (!this.hasHandleDrag) {
+      return;
+    }
+    const additionalDataTransferDTO = await this._proxy.$handleDrag(
+      this.treeViewId,
+      sourceTreeItemHandles,
+      operationUuid,
+      token,
+    );
+    if (!additionalDataTransferDTO) {
+      return;
+    }
+
+    const additionalDataTransfer = new VSDataTransfer();
+    additionalDataTransferDTO.items.forEach(([type, item]) => {
+      additionalDataTransfer.replace(type, createStringDataTransferItem(item.asString));
+    });
+    return additionalDataTransfer;
+  }
+
+  public resolveDropFileData(requestId: number, dataItemId: string): Promise<BinaryBuffer> {
+    return this.dataTransfersCache.resolveDropFileData(requestId, dataItemId);
   }
 }

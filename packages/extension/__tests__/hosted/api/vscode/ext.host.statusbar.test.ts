@@ -1,33 +1,19 @@
-import { RPCProtocol } from '@opensumi/ide-connection';
 import { WSChannelHandler } from '@opensumi/ide-connection/lib/browser/ws-channel-handler';
 import { IContextKeyService, IStatusBarService } from '@opensumi/ide-core-browser';
 import { MockContextKeyService } from '@opensumi/ide-core-browser/__mocks__/context-key';
-import { Emitter, ILoggerManagerClient, uuid } from '@opensumi/ide-core-common';
+import { uuid } from '@opensumi/ide-core-common';
 import { StatusBarService } from '@opensumi/ide-status-bar/lib/browser/status-bar.service';
 
 import { createBrowserInjector } from '../../../../../../tools/dev-tool/src/injector-helper';
 import { mockService } from '../../../../../../tools/dev-tool/src/mock-injector';
 import { mockExtensionDescription } from '../../../../__mocks__/extensions';
-import { MockLoggerManagerClient } from '../../../../__mocks__/loggermanager';
+import { createMockPairRPCProtocol } from '../../../../__mocks__/initRPCProtocol';
 import { MainThreadStatusBar } from '../../../../src/browser/vscode/api/main.thread.statusbar';
-import { MainThreadAPIIdentifier, ExtHostAPIIdentifier } from '../../../../src/common/vscode';
+import { ExtHostAPIIdentifier, MainThreadAPIIdentifier } from '../../../../src/common/vscode';
 import { ThemeColor } from '../../../../src/common/vscode/ext-types';
 import { ExtHostStatusBar } from '../../../../src/hosted/api/vscode/ext.host.statusbar';
 
-const emitterA = new Emitter<any>();
-const emitterB = new Emitter<any>();
-
-const mockClientA = {
-  send: (msg) => emitterB.fire(msg),
-  onMessage: emitterA.event,
-};
-const mockClientB = {
-  send: (msg) => emitterA.fire(msg),
-  onMessage: emitterB.event,
-};
-
-const rpcProtocolExt = new RPCProtocol(mockClientA);
-const rpcProtocolMain = new RPCProtocol(mockClientB);
+const { rpcProtocolExt, rpcProtocolMain } = createMockPairRPCProtocol();
 
 let extHost: ExtHostStatusBar;
 let mainThread: MainThreadStatusBar;
@@ -38,10 +24,6 @@ describe('vscode MainThreadStatusBar Test', () => {
   beforeEach(() => {
     injector = createBrowserInjector([]);
     injector.addProviders(
-      {
-        token: ILoggerManagerClient,
-        useClass: MockLoggerManagerClient,
-      },
       {
         token: WSChannelHandler,
         useValue: mockService({
@@ -66,8 +48,8 @@ describe('vscode MainThreadStatusBar Test', () => {
     );
   });
 
-  afterEach(() => {
-    injector.disposeAll();
+  afterEach(async () => {
+    await injector.disposeAll();
     jest.resetAllMocks();
   });
 
@@ -139,13 +121,13 @@ describe('vscode MainThreadStatusBar Test', () => {
 
     const statusbar = extHost.createStatusBarItem(mockExtensionDescription);
     statusbar.accessibilityInformation = {
-      label: '蛋总',
+      label: 'User',
       role: 'danzong',
     };
     statusbar.show();
     // statusbar host 调用 main 有一个 定时器
     setTimeout(() => {
-      expect($setMessage.mock.calls[0][9]).toStrictEqual({ label: '蛋总', role: 'danzong' });
+      expect($setMessage.mock.calls[0][9]).toStrictEqual({ label: 'User', role: 'danzong' });
       done();
     }, 100);
   });

@@ -1,16 +1,29 @@
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
-import { positionToRange, URI, CommandService } from '@opensumi/ide-core-common';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
+import { IContextKeyService } from '@opensumi/ide-core-browser/lib/context-key';
+import { CommandService, ILineChange, URI, registerLocalizationBundle } from '@opensumi/ide-core-common';
 import { IDocPersistentCacheProvider } from '@opensumi/ide-editor';
 import { EmptyDocCacheImpl, IEditorDocumentModelService } from '@opensumi/ide-editor/src/browser';
 import { IEditorDocumentModel } from '@opensumi/ide-editor/src/browser/';
 import { EditorDocumentModel } from '@opensumi/ide-editor/src/browser/doc-model/main';
+import { positionToRange } from '@opensumi/ide-monaco';
+import { toChange } from '@opensumi/ide-scm/lib/browser/dirty-diff/dirty-diff-util';
 
 import { createBrowserInjector } from '../../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../../tools/dev-tool/src/mock-injector';
 import { createMockedMonaco } from '../../../../monaco/__mocks__/monaco';
+import { MockContextKeyService } from '../../../../monaco/__mocks__/monaco.context-key.service';
 import { SCMService } from '../../../src';
 import { DirtyDiffModel } from '../../../src/browser/dirty-diff/dirty-diff-model';
 import { DirtyDiffWidget } from '../../../src/browser/dirty-diff/dirty-diff-widget';
+
+registerLocalizationBundle({
+  languageId: 'zh-CN',
+  contents: {
+    'scm.dirtyDiff.changes': '第 {0} 个更改 (共 {1} 个)',
+  },
+  languageName: 'Chinese',
+  localizedLanguageName: '中文(中国)',
+});
 
 @Injectable()
 class MockEditorDocumentModelService {
@@ -53,6 +66,10 @@ describe('scm/src/browser/dirty-diff/dirty-diff-widget.ts', () => {
       injector = createBrowserInjector(
         [],
         new MockInjector([
+          {
+            token: IContextKeyService,
+            useClass: MockContextKeyService,
+          },
           {
             token: IDocPersistentCacheProvider,
             useClass: EmptyDocCacheImpl,
@@ -98,31 +115,11 @@ describe('scm/src/browser/dirty-diff/dirty-diff-widget.ts', () => {
       const dirtyDiffModel = injector.get(DirtyDiffModel, [editorModel]);
       const dirtyDiffWidget = injector.get(DirtyDiffWidget, [codeEditor, dirtyDiffModel, commandService]);
 
-      const changes = [
-        {
-          originalStartLineNumber: 11,
-          originalEndLineNumber: 11,
-          modifiedStartLineNumber: 11,
-          modifiedEndLineNumber: 11,
-        },
-        {
-          originalStartLineNumber: 12,
-          originalEndLineNumber: 12,
-          modifiedStartLineNumber: 12,
-          modifiedEndLineNumber: 12,
-        },
-        {
-          originalStartLineNumber: 14,
-          originalEndLineNumber: 14,
-          modifiedStartLineNumber: 14,
-          modifiedEndLineNumber: 14,
-        },
-        {
-          originalStartLineNumber: 15,
-          originalEndLineNumber: 15,
-          modifiedStartLineNumber: 15,
-          modifiedEndLineNumber: 15,
-        },
+      const changes: ILineChange[] = [
+        [11, 11, 11, 11, []],
+        [12, 12, 12, 12, []],
+        [14, 14, 14, 14, []],
+        [15, 15, 15, 15, []],
       ];
       dirtyDiffModel['_changes'] = changes;
       dirtyDiffWidget.updateCurrent(2);
@@ -168,31 +165,11 @@ describe('scm/src/browser/dirty-diff/dirty-diff-widget.ts', () => {
       const fakeDispose = jest.fn();
       dirtyDiffWidget['dispose'] = fakeDispose;
 
-      const changes = [
-        {
-          originalStartLineNumber: 11,
-          originalEndLineNumber: 11,
-          modifiedStartLineNumber: 11,
-          modifiedEndLineNumber: 11,
-        },
-        {
-          originalStartLineNumber: 12,
-          originalEndLineNumber: 12,
-          modifiedStartLineNumber: 12,
-          modifiedEndLineNumber: 12,
-        },
-        {
-          originalStartLineNumber: 14,
-          originalEndLineNumber: 14,
-          modifiedStartLineNumber: 14,
-          modifiedEndLineNumber: 14,
-        },
-        {
-          originalStartLineNumber: 15,
-          originalEndLineNumber: 15,
-          modifiedStartLineNumber: 15,
-          modifiedEndLineNumber: 15,
-        },
+      const changes: ILineChange[] = [
+        [11, 11, 11, 11, []],
+        [12, 12, 12, 12, []],
+        [14, 14, 14, 14, []],
+        [15, 15, 15, 15, []],
       ];
       dirtyDiffModel['_changes'] = changes;
       dirtyDiffWidget.updateCurrent(2);
@@ -206,35 +183,45 @@ describe('scm/src/browser/dirty-diff/dirty-diff-widget.ts', () => {
       const actionList = Array.from(actions.children) as HTMLElement[];
       expect(actionList.length).toBe(5);
       expect(actionList.map((n) => n.className)).toEqual(
-        ['plus', 'rollback', 'up', 'down', 'close'].map((n) => `kaitian-icon kticon-${n}`),
+        ['add', 'discard', 'arrow-up', 'arrow-down', 'close'].map((n) => `kt-icon codicon codicon-${n}`),
       );
       // onclick test
 
       // add
       actionList[0].click();
-      expect(fakeExecCmd).toBeCalledTimes(1);
-      expect(fakeExecCmd.mock.calls[0]).toEqual(['git.stageChange', URI.file('/test/workspace/abc.ts'), changes, 1]);
+      expect(fakeExecCmd).toHaveBeenCalledTimes(1);
+      expect(fakeExecCmd.mock.calls[0]).toEqual([
+        'git.stageChange',
+        URI.file('/test/workspace/abc.ts'),
+        changes.map(toChange),
+        1,
+      ]);
       expect(fakeDispose).toHaveBeenCalledTimes(1);
 
       // revert
       actionList[1].click();
-      expect(fakeExecCmd).toBeCalledTimes(2);
-      expect(fakeExecCmd.mock.calls[1]).toEqual(['git.revertChange', URI.file('/test/workspace/abc.ts'), changes, 1]);
+      expect(fakeExecCmd).toHaveBeenCalledTimes(2);
+      expect(fakeExecCmd.mock.calls[1]).toEqual([
+        'git.revertChange',
+        URI.file('/test/workspace/abc.ts'),
+        changes.map(toChange),
+        1,
+      ]);
       expect(fakeDispose).toHaveBeenCalledTimes(2);
 
       // next
       actionList[2].click();
-      expect(fakeExecCmd).toBeCalledTimes(3);
+      expect(fakeExecCmd).toHaveBeenCalledTimes(3);
       expect(fakeExecCmd.mock.calls[2]).toEqual(['OPEN_DIRTY_DIFF_WIDGET', 14]);
 
       // prev
       actionList[3].click();
-      expect(fakeExecCmd).toBeCalledTimes(4);
+      expect(fakeExecCmd).toHaveBeenCalledTimes(4);
       expect(fakeExecCmd.mock.calls[3]).toEqual(['OPEN_DIRTY_DIFF_WIDGET', 12]);
 
       // close
       actionList[4].click();
-      expect(fakeExecCmd).toBeCalledTimes(4);
+      expect(fakeExecCmd).toHaveBeenCalledTimes(4);
       expect(fakeDispose).toHaveBeenCalledTimes(3);
 
       dirtyDiffWidget['_current'] = positionToRange(14);
@@ -242,36 +229,16 @@ describe('scm/src/browser/dirty-diff/dirty-diff-widget.ts', () => {
       actionList[2].click();
       dirtyDiffModel['findPreviousClosestChangeLineNumber'] = (n) => n;
       actionList[3].click();
-      expect(fakeExecCmd).toBeCalledTimes(4);
+      expect(fakeExecCmd).toHaveBeenCalledTimes(4);
     });
 
     it('ok for applyStyle', () => {
       const dirtyDiffModel = injector.get(DirtyDiffModel, [editorModel]);
       dirtyDiffModel['_changes'] = [
-        {
-          originalStartLineNumber: 11,
-          originalEndLineNumber: 11,
-          modifiedStartLineNumber: 11,
-          modifiedEndLineNumber: 11,
-        },
-        {
-          originalStartLineNumber: 12,
-          originalEndLineNumber: 12,
-          modifiedStartLineNumber: 12,
-          modifiedEndLineNumber: 12,
-        },
-        {
-          originalStartLineNumber: 14,
-          originalEndLineNumber: 14,
-          modifiedStartLineNumber: 14,
-          modifiedEndLineNumber: 14,
-        },
-        {
-          originalStartLineNumber: 15,
-          originalEndLineNumber: 15,
-          modifiedStartLineNumber: 15,
-          modifiedEndLineNumber: 15,
-        },
+        [11, 11, 11, 11, []],
+        [12, 12, 12, 12, []],
+        [14, 14, 14, 14, []],
+        [15, 15, 15, 15, []],
       ];
       const dirtyDiffWidget = injector.get(DirtyDiffWidget, [codeEditor, dirtyDiffModel, commandService]);
 
@@ -285,13 +252,13 @@ describe('scm/src/browser/dirty-diff/dirty-diff-widget.ts', () => {
       const detail = title.children[0];
       expect(detail.tagName).toBe('SPAN');
       expect(detail.className).toBe('dirty-diff-widget-title-detail');
-      expect((detail as HTMLElement).innerText).toBe('第 2 个更改（共 4 个）');
+      expect((detail as HTMLElement).innerText).toBe('第 2 个更改 (共 4 个)');
 
       dirtyDiffWidget.updateCurrent(4);
 
       dirtyDiffWidget['applyStyle']();
       // 上一个 children[0] 已经被移除了
-      expect((title.children[0] as HTMLElement).innerText).toBe('第 4 个更改（共 4 个）');
+      expect((title.children[0] as HTMLElement).innerText).toBe('第 4 个更改 (共 4 个)');
     });
 
     it('ok for relayout', () => {

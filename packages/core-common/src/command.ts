@@ -1,12 +1,10 @@
 import { Autowired, Injectable } from '@opensumi/di';
-import { Disposable, IDisposable, MaybePromise } from '@opensumi/ide-utils';
+import { Disposable, Emitter, Event, IDisposable, MaybePromise } from '@opensumi/ide-utils';
 
 import { ContributionProvider } from './contribution-provider';
-import { replaceLocalizePlaceholder } from './localize';
+import { ILocalizedStr, createLocalizedStr, replaceLocalizePlaceholder } from './localize';
 import { getDebugLogger } from './log';
 import { IExtensionInfo } from './types';
-
-type InterceptorFunction = (result: any) => MaybePromise<any>;
 
 export interface Command {
   /**
@@ -18,29 +16,29 @@ export interface Command {
    * 支持国际化占位符，例如 %evenEditorGroups%
    */
   label?: string;
+  labelLocalized?: ILocalizedStr;
   /**
-   * 要在命令面板显示的图标
+   * 要在命令面板显示的较短的文案
+   * 支持国际化占位符，例如 %evenEditorGroups%
    */
-  iconClass?: string;
-  /**
-   * 要在命令面板显示的图标
-   */
-  toogleIconClass?: string;
+  shortLabel?: string;
+  shortLabelLocalized?: ILocalizedStr;
+
   /**
    * 要在命令面板显示的分组
    * 支持国际化占位符，例如 %evenEditorGroups%
    */
   category?: string;
-
+  categoryLocalized?: ILocalizedStr;
+  /**
+   * 要在命令面板显示的图标
+   */
+  iconClass?: string;
   /**
    * 代理执行的命令
    */
   delegate?: string;
 
-  /**
-   * 在任意语言下都相同的别名
-   */
-  alias?: string;
   /**
    * 是否启用该命令，值为 when 表达式
    * 这个值只影响 UI 是否展示 （命令面板或者菜单）
@@ -128,13 +126,21 @@ export interface CommandContribution {
   registerCommands(commands: CommandRegistry): void;
 }
 
-export type PreCommandInterceptor = (command: string, args: any[]) => MaybePromise<any[]>;
+type PostInterceptorFunction = (result: any) => MaybePromise<any>;
+type PreInterceptorFunction = (args: any[]) => MaybePromise<any[] | boolean>;
+
+export type PreCommandInterceptor = (command: string, args: any[]) => MaybePromise<any[] | boolean>;
 export type PostCommandInterceptor = (command: string, result: any) => MaybePromise<any>;
 
 export const CommandService = Symbol('CommandService');
 export const CommandRegistry = Symbol('CommandRegistry');
 
 export const HANDLER_NOT_FOUND = 'HANDLER_NOT_FOUND';
+
+export interface ICommandEvent {
+  commandId: string;
+  args: any[];
+}
 
 /**
  * 命令执行模块
@@ -145,7 +151,10 @@ export interface CommandService {
    * 执行命令将报错 catch 并 log 输出
    */
   tryExecuteCommand<T>(commandId: string, ...args: any[]): Promise<T | undefined>;
+  onWillExecuteCommand: Event<ICommandEvent>;
+  onDidExecuteCommand: Event<ICommandEvent>;
 }
+
 /**
  * 命令注册和管理模块
  */
@@ -157,6 +166,7 @@ interface CoreCommandRegistry {
    * @returns 销毁命令的方法
    */
   registerCommand<T = any>(command: Command, handler?: CommandHandler<T>): IDisposable;
+  updateCommandDetailById(id: string, command: Partial<Command>): void;
   /**
    * 解绑命令
    * @param commandOrId 要解绑命令或命令 id
@@ -212,9 +222,20 @@ interface CoreCommandRegistry {
    */
   setRecentCommands(commands: Command[]): Command[];
 
+  /**
+   * 为特定的命令注册前置拦截器
+   *
+   * 拦截器的入参是该命令的参数数组，请返回修改后的参数数组或者返回 false 来拦截本次执行
+   */
+  beforeExecuteCommand(commandId: string, interceptorFunc: PreInterceptorFunction): IDisposable;
+  /**
+   * 可以为命令添加拦截器
+   * 拦截器的入参是该命令的参数数组，请返回修改后的参数数组或者返回 false 来拦截本次执行
+   * @param interceptor 每个 command 都会执行一遍
+   */
   beforeExecuteCommand(interceptor: PreCommandInterceptor): IDisposable;
-
-  afterExecuteCommand(interceptor: string | PostCommandInterceptor, result?: InterceptorFunction): IDisposable;
+  afterExecuteCommand(commandId: string, interceptorFunc: PostInterceptorFunction): IDisposable;
+  afterExecuteCommand(interceptor: PostCommandInterceptor): IDisposable;
   /**
    * 是否是通过鉴过权的命令
    * @param commandId
@@ -226,7 +247,7 @@ interface CoreCommandRegistry {
 
 export interface CommandRegistry extends CoreCommandRegistry {
   /**
-   * 从 ContributionProvide 中拿到执行命令 Contributuon
+   * 从 ContributionProvide 中拿到执行命令 Contribution
    * 执行注册操作
    */
   initialize(): void;
@@ -246,10 +267,8 @@ export class CoreCommandRegistryImpl implements CoreCommandRegistry {
 
   public readonly postCommandInterceptors: PostCommandInterceptor[] = [];
 
-  private readonly postCommandInterceptor: Map<string, InterceptorFunction[]> = new Map<
-    string,
-    InterceptorFunction[]
-  >();
+  private readonly preCommandInterceptorMap = new Map<string, PreInterceptorFunction[]>();
+  private readonly postCommandInterceptor = new Map<string, PostInterceptorFunction[]>();
 
   private readonly logger = getDebugLogger();
 
@@ -260,14 +279,24 @@ export class CoreCommandRegistryImpl implements CoreCommandRegistry {
    */
   async executeCommand<T>(commandId: string, ...args: any[]): Promise<T | undefined> {
     const command = this.getCommand(commandId);
-    // 执行代理命令
+    // 执行代理命令。即该命令是另一个命令的 alias，这里转为执行真实的命令
     if (command && command.delegate) {
       return this.executeCommand<T>(command.delegate, ...args);
     }
+
     // 把 before 在 handler 判断前置，对于 onCommand 激活的插件如果没有在 contributes 配置，那么 handler 是不存在的，也就无法激活
     // 如 node debug 插件 https://github.com/microsoft/vscode-node-debug/blob/main/package.json
-    for (const preCommand of this.preCommandInterceptors) {
-      args = await preCommand(commandId, args);
+    const _preCommandInterceptor = this.preCommandInterceptorMap.get(commandId);
+    const preInterceptorWrapper = (_preCommandInterceptor ?? []).map((cb) => (_, args) => cb(args));
+    const currentPreInterceptors = [...preInterceptorWrapper, ...this.preCommandInterceptors];
+    for (const preInterceptor of currentPreInterceptors) {
+      const result = await preInterceptor(commandId, args);
+      if (result === false) {
+        this.logger.log(`command ${commandId} is prevented by pre interceptor`, preInterceptor.name);
+        return undefined;
+      } else if (Array.isArray(result)) {
+        args = result;
+      }
     }
     const handler = this.getActiveHandler(commandId, ...args);
     if (handler) {
@@ -292,7 +321,7 @@ export class CoreCommandRegistryImpl implements CoreCommandRegistry {
     const err = new Error(
       `The command '${commandId}' cannot be executed. There are no active handlers available for the command.${argsMessage}`,
     );
-    err.name = HANDLER_NOT_FOUND;
+    err.name = `${HANDLER_NOT_FOUND}:${commandId}`;
     throw err;
   }
 
@@ -325,6 +354,26 @@ export class CoreCommandRegistryImpl implements CoreCommandRegistry {
     this.unregisterCommands.set(command.id, toDispose);
     toDispose.addDispose(Disposable.create(() => this.unregisterCommands.delete(command.id)));
     return toDispose;
+  }
+
+  /**
+   * 有时候我们需要在命令注册后才更新其描述。
+   *
+   * 比如说我们会为所有的 ContainerId 注册 Toggle Panel 的命令，但我们不想在 QuickOpen 中展示所有 ContainerId 对应的命令
+   * 这个时候我们可以先注册所有命令，然后再更新所有 Command 的描述
+   * @param id 命令 ID
+   * @param command
+   */
+  updateCommandDetailById(id: string, command: Partial<Command>): void {
+    if (!this._commands[id]) {
+      this.logger.warn(`Command ${id} not found.`);
+      return;
+    }
+
+    this._commands[id] = {
+      ...this._commands[id],
+      ...command,
+    };
   }
 
   /**
@@ -497,10 +546,23 @@ export class CoreCommandRegistryImpl implements CoreCommandRegistry {
     return command
       ? {
           ...command,
-          category: replaceLocalizePlaceholder(command.category),
           label: replaceLocalizePlaceholder(command.label),
+          category: replaceLocalizePlaceholder(command.category),
         }
       : undefined;
+  }
+
+  protected localizeCommand(command: Command): Command {
+    if (command.label && !command.labelLocalized) {
+      command.labelLocalized = createLocalizedStr(command.label);
+    }
+    if (command.category && !command.categoryLocalized) {
+      command.categoryLocalized = createLocalizedStr(command.category);
+    }
+    if (command.shortLabel && !command.shortLabelLocalized) {
+      command.shortLabelLocalized = createLocalizedStr(command.shortLabel);
+    }
+    return command;
   }
 
   /**
@@ -508,7 +570,7 @@ export class CoreCommandRegistryImpl implements CoreCommandRegistry {
    * @param command 要添加销毁函数的命令
    */
   protected doRegisterCommand(command: Command): IDisposable {
-    this._commands[command.id] = command;
+    this._commands[command.id] = this.localizeCommand(command);
     return {
       dispose: () => {
         delete this._commands[command.id];
@@ -516,20 +578,46 @@ export class CoreCommandRegistryImpl implements CoreCommandRegistry {
     };
   }
 
-  public beforeExecuteCommand(interceptor: PreCommandInterceptor): IDisposable {
-    this.preCommandInterceptors.push(interceptor);
-    return {
-      dispose: () => {
-        const index = this.preCommandInterceptors.indexOf(interceptor);
-        if (index !== -1) {
-          this.preCommandInterceptors.splice(index, 1);
-        }
-      },
-    };
+  beforeExecuteCommand(commandId: string, interceptorFunc: PreInterceptorFunction): IDisposable;
+  beforeExecuteCommand(interceptor: PreCommandInterceptor): IDisposable;
+  public beforeExecuteCommand(
+    interceptor: string | PreCommandInterceptor,
+    interceptorFunc?: PreInterceptorFunction,
+  ): IDisposable {
+    if (typeof interceptor === 'string') {
+      const commandInterceptor = this.preCommandInterceptorMap.get(interceptor);
+      if (commandInterceptor) {
+        interceptorFunc && commandInterceptor.push(interceptorFunc);
+      } else {
+        interceptorFunc && this.preCommandInterceptorMap.set(interceptor, [interceptorFunc]);
+      }
+      return {
+        dispose: () => {
+          const commandInterceptor = this.preCommandInterceptorMap.get(interceptor);
+          if (commandInterceptor && interceptorFunc) {
+            const index = commandInterceptor.indexOf(interceptorFunc);
+            if (index !== -1) {
+              commandInterceptor.splice(index, 1);
+            }
+          }
+        },
+      };
+    } else {
+      this.preCommandInterceptors.push(interceptor);
+      return {
+        dispose: () => {
+          const index = this.preCommandInterceptors.indexOf(interceptor);
+          if (index !== -1) {
+            this.preCommandInterceptors.splice(index, 1);
+          }
+        },
+      };
+    }
   }
 
-  public afterExecuteCommand(command: string, result: InterceptorFunction);
-  public afterExecuteCommand(interceptor: string | PostCommandInterceptor, result?: InterceptorFunction) {
+  afterExecuteCommand(commandId: string, interceptorFunc: PostInterceptorFunction): IDisposable;
+  afterExecuteCommand(interceptor: PostCommandInterceptor): IDisposable;
+  public afterExecuteCommand(interceptor: string | PostCommandInterceptor, result?: PostInterceptorFunction) {
     if (typeof interceptor === 'string') {
       const commandInterceptor = this.postCommandInterceptor.get(interceptor);
       if (commandInterceptor) {
@@ -618,8 +706,17 @@ export class CommandServiceImpl implements CommandService {
   @Autowired(CommandRegistry)
   private commandRegistry: CommandRegistryImpl;
 
+  private readonly _onWillExecuteCommand = new Emitter<ICommandEvent>();
+  readonly onWillExecuteCommand: Event<ICommandEvent> = this._onWillExecuteCommand.event;
+  private readonly _onDidExecuteCommand = new Emitter<ICommandEvent>();
+  readonly onDidExecuteCommand: Event<ICommandEvent> = this._onDidExecuteCommand.event;
+
   executeCommand<T>(commandId: string, ...args: any[]): Promise<T | undefined> {
-    return this.commandRegistry.executeCommand(commandId, ...args);
+    this._onWillExecuteCommand.fire({ commandId, args });
+    const result = this.commandRegistry.executeCommand<T>(commandId, ...args).finally(() => {
+      this._onDidExecuteCommand.fire({ commandId, args });
+    });
+    return Promise.resolve(result);
   }
 
   async tryExecuteCommand<T>(commandId: string, ...args: any[]): Promise<T | undefined> {

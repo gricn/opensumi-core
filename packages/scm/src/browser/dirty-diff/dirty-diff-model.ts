@@ -1,36 +1,48 @@
 import { Autowired, Injectable, Optional } from '@opensumi/di';
 import {
-  IDisposable,
-  dispose,
   Disposable,
   DisposableStore,
-  toDisposable,
   Emitter,
   Event,
-  arrays,
-  Uri,
-  URI,
+  IContextKey,
+  IContextKeyService,
+  IDisposable,
+  ILineChange,
   ISplice,
   ThrottledDelayer,
+  URI,
+  Uri,
+  arrays,
+  dispose,
   first,
-  IChange,
-  positionToRange,
+  toDisposable,
 } from '@opensumi/ide-core-browser';
+import { RawContextKey } from '@opensumi/ide-core-browser/lib/raw-context-key';
 import { EditorCollectionService } from '@opensumi/ide-editor';
-import { IEditorDocumentModelService, IEditorDocumentModel } from '@opensumi/ide-editor/lib/browser';
-import type { ITextModel } from '@opensumi/monaco-editor-core/esm/vs/editor/common/model';
-import { IEditorWorkerService } from '@opensumi/monaco-editor-core/esm/vs/editor/common/services/editorWorkerService';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
-import { StaticServices } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneServices';
+import { IEditorDocumentModel, IEditorDocumentModelService } from '@opensumi/ide-editor/lib/browser';
+import * as monaco from '@opensumi/ide-monaco';
+import { DetailedLineRangeMapping } from '@opensumi/monaco-editor-core/esm/vs/editor/common/diff/rangeMapping';
+import { IEditorWorkerService } from '@opensumi/monaco-editor-core/esm/vs/editor/common/services/editorWorker';
+import { StandaloneServices } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneServices';
 
-import { SCMService, ISCMRepository, IDirtyDiffModel } from '../../common';
+import { IDirtyDiffModel, ISCMRepository, SCMService } from '../../common';
 
 import { compareChanges, getModifiedEndLineNumber } from './dirty-diff-util';
 import { DirtyDiffWidget } from './dirty-diff-widget';
 
+import type { ITextModel } from '@opensumi/monaco-editor-core/esm/vs/editor/common/model';
+
 const { sortedDiff } = arrays;
+
+export const isDirtyDiffVisible = new RawContextKey<boolean>('dirtyDiffVisible', false);
+
 @Injectable({ multiple: true })
 export class DirtyDiffModel extends Disposable implements IDirtyDiffModel {
+  @Autowired(IContextKeyService)
+  private readonly contextKeyService: IContextKeyService;
+
+  private isDirtyDiffVisible: IContextKey<boolean>;
+
   private _originalModel: IEditorDocumentModel | null;
   get original(): IEditorDocumentModel | null {
     return this._originalModel;
@@ -41,16 +53,16 @@ export class DirtyDiffModel extends Disposable implements IDirtyDiffModel {
     return this._editorModel;
   }
 
-  private diffDelayer: ThrottledDelayer<IChange[] | null> | null;
+  private diffDelayer: ThrottledDelayer<ILineChange[] | null> | null;
   private _originalURIPromise?: Promise<Uri | null>;
   private repositoryDisposables = new Set<IDisposable>();
   private readonly originalModelDisposables: DisposableStore;
 
-  private _onDidChange = new Emitter<ISplice<IChange>[]>();
-  readonly onDidChange: Event<ISplice<IChange>[]> = this._onDidChange.event;
+  private _onDidChange = new Emitter<ISplice<ILineChange>[]>();
+  readonly onDidChange: Event<ISplice<ILineChange>[]> = this._onDidChange.event;
 
-  private _changes: IChange[] = [];
-  get changes(): IChange[] {
+  private _changes: ILineChange[] = [];
+  get changes(): ILineChange[] {
     return this._changes;
   }
 
@@ -65,20 +77,29 @@ export class DirtyDiffModel extends Disposable implements IDirtyDiffModel {
   @Autowired(EditorCollectionService)
   private readonly editorService: EditorCollectionService;
 
-  // TODO: dynamic
-  static heightInLines = 18;
+  static heightInLines = 10;
 
   // TODO: dynamic
   static maxFileSize = 50;
 
   private get editorWorkerService(): IEditorWorkerService {
-    return StaticServices.editorWorkerService.get();
+    return StandaloneServices.get(IEditorWorkerService);
   }
 
   constructor(@Optional() editorModel: IEditorDocumentModel) {
     super();
     this._editorModel = editorModel;
-    this.diffDelayer = new ThrottledDelayer<IChange[]>(200);
+    this.diffDelayer = new ThrottledDelayer<ILineChange[]>(200);
+    this.addDispose(
+      Disposable.create(() => {
+        if (this.diffDelayer) {
+          if (!this.diffDelayer.isTriggered()) {
+            this.diffDelayer.cancel();
+          }
+          this.diffDelayer = null;
+        }
+      }),
+    );
 
     this.addDispose(editorModel.getMonacoModel().onDidChangeContent(() => this.triggerDiff()));
     this.addDispose(
@@ -97,6 +118,8 @@ export class DirtyDiffModel extends Disposable implements IDirtyDiffModel {
 
     this.originalModelDisposables = new DisposableStore();
     this.addDispose(this.originalModelDisposables);
+
+    this.isDirtyDiffVisible = isDirtyDiffVisible.bind(this.contextKeyService);
   }
 
   private onDidAddRepository(repository: ISCMRepository): void {
@@ -154,7 +177,7 @@ export class DirtyDiffModel extends Disposable implements IDirtyDiffModel {
   }
 
   // 计算 diff
-  private async diff(): Promise<IChange[] | null> {
+  private async diff(): Promise<ILineChange[] | null> {
     const originalURI = await this.getOriginalURIPromise();
     if (!this._editorModel || this._editorModel.getMonacoModel().isDisposed() || !originalURI) {
       return []; // disposed
@@ -173,11 +196,34 @@ export class DirtyDiffModel extends Disposable implements IDirtyDiffModel {
     const ret = await this.editorWorkerService.computeDiff(
       originalURI as monaco.Uri,
       this._editorModel.getMonacoModel().uri,
-      false,
-      // 新版本多了一个 maxComputationTime 参数，参考 VS Code 默认值设置为 1000
-      1000,
+      {
+        ignoreTrimWhitespace: false,
+        maxComputationTimeMs: 1000,
+        computeMoves: false,
+      },
+      'advanced',
     );
-    return ret && ret.changes;
+    return ret && this.getLineChanges(ret.changes);
+  }
+
+  // copy by https://github.com/microsoft/vscode/blob/main/src/vs/editor/common/services/editorSimpleWorker.ts#L426
+  private getLineChanges(changes: readonly DetailedLineRangeMapping[]): ILineChange[] {
+    return changes.map((m) => [
+      m.original.startLineNumber,
+      m.original.endLineNumberExclusive,
+      m.modified.startLineNumber,
+      m.modified.endLineNumberExclusive,
+      m.innerChanges?.map((m) => [
+        m.originalRange.startLineNumber,
+        m.originalRange.startColumn,
+        m.originalRange.endLineNumber,
+        m.originalRange.endColumn,
+        m.modifiedRange.startLineNumber,
+        m.modifiedRange.startColumn,
+        m.modifiedRange.endLineNumber,
+        m.modifiedRange.endColumn,
+      ]),
+    ]);
   }
 
   private getOriginalURIPromise(): Promise<Uri | null> {
@@ -234,7 +280,7 @@ export class DirtyDiffModel extends Disposable implements IDirtyDiffModel {
 
     const uri = this._editorModel.getMonacoModel().uri;
     // find the first matched scm repository
-    return first(this.scmService.repositories.map((r) => () => r.provider.getOriginalResource(uri)));
+    return first(this.scmService.repositories.map((r) => () => r.provider.getOriginalResource(uri as Uri)));
   }
 
   // 查找下一个changes
@@ -247,7 +293,7 @@ export class DirtyDiffModel extends Disposable implements IDirtyDiffModel {
           return i;
         }
       } else {
-        if (change.modifiedStartLineNumber > lineNumber) {
+        if (change[2] > lineNumber) {
           return i;
         }
       }
@@ -259,7 +305,7 @@ export class DirtyDiffModel extends Disposable implements IDirtyDiffModel {
   findNextClosestChangeLineNumber(lineNumber: number, inclusive = true) {
     // FIXME: handle changes = []
     const index = this.findNextClosestChange(lineNumber, inclusive);
-    return this.changes[index].modifiedStartLineNumber;
+    return this.changes[index][2];
   }
 
   // 查找上一个changes
@@ -268,7 +314,7 @@ export class DirtyDiffModel extends Disposable implements IDirtyDiffModel {
       const change = this.changes[i];
 
       if (inclusive) {
-        if (change.modifiedStartLineNumber <= lineNumber) {
+        if (change[2] <= lineNumber) {
           return i;
         }
       } else {
@@ -284,7 +330,7 @@ export class DirtyDiffModel extends Disposable implements IDirtyDiffModel {
   findPreviousClosestChangeLineNumber(lineNumber: number, inclusive = true) {
     const index = this.findPreviousClosestChange(lineNumber, inclusive);
     // FIXME: handle changes = []
-    return this.changes[index].modifiedStartLineNumber;
+    return this.changes[index][2];
   }
 
   getChangeFromRange(range: monaco.IRange) {
@@ -311,6 +357,9 @@ export class DirtyDiffModel extends Disposable implements IDirtyDiffModel {
       const editor = this.editorService.createDiffEditor(widget.getContentNode(), {
         automaticLayout: true,
         renderSideBySide: false,
+        hideUnchangedRegions: {
+          enabled: false,
+        },
       });
       const original = await this.documentModelManager.createModelReference(originalUri);
       const edit = await this.documentModelManager.createModelReference(editorUri);
@@ -330,6 +379,9 @@ export class DirtyDiffModel extends Disposable implements IDirtyDiffModel {
         }),
       );
 
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
+      const that = this;
+
       widget.addDispose(
         this.onDidChange(() => {
           const { change, count } = this.getChangeFromRange(range) || {};
@@ -342,16 +394,15 @@ export class DirtyDiffModel extends Disposable implements IDirtyDiffModel {
         refreshWidget(count, change);
       }
 
-      function refreshWidget(current: number, currentChange: IChange) {
+      function refreshWidget(current: number, currentChange: ILineChange) {
         widget.updateCurrent(current);
-        widget.show(
-          positionToRange(currentChange.modifiedEndLineNumber || currentChange.modifiedStartLineNumber),
-          DirtyDiffModel.heightInLines,
-        );
+        widget.show(monaco.positionToRange(currentChange[3] - 1), DirtyDiffModel.heightInLines);
+        that.isDirtyDiffVisible.set(true);
       }
 
       widget.onDispose(() => {
         this._widget = null;
+        that.isDirtyDiffVisible.set(false);
       });
     }
   }
@@ -361,11 +412,6 @@ export class DirtyDiffModel extends Disposable implements IDirtyDiffModel {
 
     this._editorModel = null;
     this._originalModel = null;
-
-    if (this.diffDelayer) {
-      this.diffDelayer.cancel();
-      this.diffDelayer = null;
-    }
 
     this.repositoryDisposables.forEach((d) => dispose(d));
     this.repositoryDisposables.clear();

@@ -1,14 +1,16 @@
-.kt-clickable-icon {
+@import '../style/variable.less';
+
+.@{prefix}-clickable-icon {
   &:hover {
-    transform: scale(1.2);
+    transform: scale(1.1);
   }
 
   &:active {
-    transform: scale(1.2);
+    transform: scale(1.1);
   }
 }
 
-.kt-icon-resource::before {
+.@{prefix}-icon-resource::before {
   display: inherit;
   background-size: 16px;
   background-position: center;
@@ -19,7 +21,7 @@
   flex-shrink: 0;
 }
 
-.kt-button {
+.@{prefix}-button {
   border: none;
   outline: none;
   cursor: pointer;
@@ -34,25 +36,15 @@
   border-radius: 2px;
   color: var(--button-foreground);
   background-color: var(--button-background);
-  transition: all 0.15s;
+  white-space: pre-wrap;
 
   &.block-button {
     width: 100%;
   }
 
-  & > .kt-button-secondary-more {
+  & > .@{prefix}-button-secondary-more {
     color: inherit;
     margin-left: 5px;
-  }
-}
-
-.ghost-button {
-  border-style: solid;
-  border-width: 1px;
-
-  &:disabled {
-    border-color: transparent;
-    border: none;
   }
 }
 
@@ -62,7 +54,7 @@
   }
 }
 
-.kt-button-anticon-spin {
+.@{prefix}-button-anticon-spin {
   animation: loadingCircle 1s infinite linear;
   margin-right: 5px;
 }
@@ -83,6 +75,7 @@
 .primary-button {
   color: var(--kt-primaryButton-foreground);
   background-color: var(--kt-primaryButton-background);
+  border: 1px solid var(--kt-primaryButton-border);
 
   &:hover {
     background-color: var(--kt-primaryButton-hoverBackground);
@@ -113,6 +106,17 @@
   }
 }
 
+.ghost-button {
+  border-style: solid;
+  border-width: 1px;
+
+  &:disabled {
+    border-color: transparent;
+    border: none;
+    cursor: default;
+  }
+}
+
 .ghost-secondary-button {
   color: var(--kt-whiteGhostButton-foreground);
   background-color: var(--kt-whiteGhostButton-background);
@@ -133,6 +137,7 @@
   &:disabled {
     color: var(--kt-whiteGhostButton-disableForeground);
     border-color: transparent;
+    cursor: default;
   }
 }
 
@@ -156,6 +161,7 @@
     color: var(--kt-linkButton-disableForeground);
     border-color: transparent !important;
     background-color: transparent !important;
+    cursor: default;
   }
 }
 
@@ -169,18 +175,27 @@
 .secondary-button:disabled,
 .primary-button:disabled,
 .ghost-danger-button:disabled,
-.kt-danger-button-loading,
-.kt-primary-button-loading,
-.kt-secondary-button-loading {
+.default-button:disabled,
+.@{prefix}-danger-button-loading,
+.@{prefix}-primary-button-loading,
+.@{prefix}-secondary-button-loading {
   color: var(--kt-button-disableForeground) !important;
-  border-color: var(--kt-button-disableBorder) !important;
   background-color: var(--kt-button-disableBackground) !important;
-  border-style: solid;
-  border-width: 1px;
+  // 这里是用 box-shadow 来实现边框的，因为 border 会破坏盒模型
+  box-shadow: var(--kt-button-disableBorder) 0px 0px 0px 1px inset;
+  cursor: not-allowed;
 
-  & > .kt-button-secondary-more {
+  & > .@{prefix}-button-secondary-more {
     color: var(--kt-button-disableForeground);
   }
+}
+
+.secondary-button:disabled {
+  border: none;
+}
+
+.link-button:disabled {
+  cursor: not-allowed;
 }
 
 .ghost-primary-button {

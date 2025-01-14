@@ -1,15 +1,10 @@
 // eslint-disable no-console
-import { Injectable, Optional, Autowired } from '@opensumi/di';
+import { Autowired, Injectable, Optional } from '@opensumi/di';
 import { IRPCProtocol } from '@opensumi/ide-connection';
 import { Logger } from '@opensumi/ide-core-browser';
-import {
-  CancellationToken,
-  Disposable,
-  DisposableStore,
-  IDisposable,
-  URI,
-} from '@opensumi/ide-core-common';
+import { CancellationToken, Disposable, DisposableStore, IDisposable, URI } from '@opensumi/ide-core-common';
 import { ITestController, ITestService, TestServiceToken } from '@opensumi/ide-testing';
+import { ObservableValue } from '@opensumi/ide-testing/lib/common/observableValue';
 import { ITestProfileService, TestProfileServiceToken } from '@opensumi/ide-testing/lib/common/test-profile';
 import {
   ITestResult,
@@ -18,20 +13,20 @@ import {
   TestResultServiceToken,
 } from '@opensumi/ide-testing/lib/common/test-result';
 import {
-  ITestRunProfile,
-  ResolvedTestRunRequest,
-  TestResultState,
-  SerializedTestMessage,
-  ILocationDto,
-  ITestRunTask,
   ExtensionRunTestsRequest,
-  TestsDiff,
+  ILocationDto,
   ITestItem,
+  ITestRunProfile,
+  ITestRunTask,
+  ResolvedTestRunRequest,
+  SerializedTestMessage,
   TestDiffOpType,
+  TestResultState,
+  TestsDiff,
 } from '@opensumi/ide-testing/lib/common/testCollection';
 import { Range } from '@opensumi/monaco-editor-core/esm/vs/editor/common/core/range';
 
-import { ExtHostAPIIdentifier, IExtHostTests, IMainThreadTesting } from '../../../common/vscode';
+import { ExtHostAPIIdentifier, IExtHostTests, IMainThreadTesting, ITestControllerPatch } from '../../../common/vscode';
 
 const reviveDiff = (diff: TestsDiff) => {
   for (const entry of diff) {
@@ -59,6 +54,7 @@ export class MainThreadTestsImpl extends Disposable implements IMainThreadTestin
     {
       instance: ITestController;
       label: string;
+      canRefresh: ObservableValue<boolean>;
       disposable: IDisposable;
     }
   >();
@@ -77,12 +73,16 @@ export class MainThreadTestsImpl extends Disposable implements IMainThreadTestin
     this.proxy = rpcProtocol.getProxy(ExtHostAPIIdentifier.ExtHostTests);
   }
 
-  $registerTestController(controllerId: string, label: string): void {
+  $registerTestController(controllerId: string, label: string, canRefreshValue: boolean): void {
     const disposable = new DisposableStore();
+    const canRefresh = disposable.add(new ObservableValue(canRefreshValue));
+
     const controller: ITestController = {
       id: controllerId,
       label,
+      canRefresh,
       configureRunProfile: (id) => this.proxy.$configureRunProfile(controllerId, id),
+      refreshTests: (token) => this.proxy.$refreshTests(controllerId, token),
       runTests: (req, token) => this.proxy.$runControllerTests(req, token),
       expandTest: (testId, levels) => this.proxy.$expandTest(testId, isFinite(levels) ? levels : -1),
     };
@@ -93,12 +93,24 @@ export class MainThreadTestsImpl extends Disposable implements IMainThreadTestin
     this.testProviderRegistrations.set(controllerId, {
       instance: controller,
       label,
+      canRefresh,
       disposable,
     });
   }
 
-  $updateControllerLabel(controllerId: string, label: string): void {
-    this.logger.warn('test: updateControllerLabel>>', controllerId, label);
+  $updateController(controllerId: string, patch: ITestControllerPatch): void {
+    const controller = this.testProviderRegistrations.get(controllerId);
+    if (!controller) {
+      return;
+    }
+
+    if (patch.label !== undefined) {
+      controller.label = patch.label;
+    }
+
+    if (patch.canRefresh !== undefined) {
+      controller.canRefresh.value = patch.canRefresh;
+    }
   }
 
   $unregisterTestController(controllerId: string): void {
@@ -178,10 +190,6 @@ export class MainThreadTestsImpl extends Disposable implements IMainThreadTestin
     this.withTestResult(runId, (r) => r.appendOutput(output, taskId, location, testId));
   }
 
-  $signalCoverageAvailable(runId: string, taskId: string): void {
-    this.logger.warn('$signalCoverageAvailable', runId, taskId);
-  }
-
   $startedTestRunTask(runId: string, task: ITestRunTask): void {
     this.withTestResult(runId, (r) => r.addTask(task));
   }
@@ -196,6 +204,10 @@ export class MainThreadTestsImpl extends Disposable implements IMainThreadTestin
 
   $finishedExtensionTestRun(runId: string): void {
     this.withTestResult(runId, (r) => r.markComplete());
+  }
+
+  $markTestRetired(testIds: string[] | undefined): void {
+    this.logger.warn('Method not implemented.');
   }
 
   private withTestResult<T>(runId: string, fn: (run: ITestResult) => T): T | undefined {

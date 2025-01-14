@@ -15,17 +15,16 @@
  ********************************************************************************/
 // Some code copied and modified from https://github.com/eclipse-theia/theia/tree/v1.14.0/packages/debug/src/browser/model/debug-source.ts
 
-import { URI, Uri, IRange } from '@opensumi/ide-core-browser';
+import { IRange, URI, Uri } from '@opensumi/ide-core-browser';
 import { LabelService } from '@opensumi/ide-core-browser/lib/services';
-import { WorkbenchEditorService, IResourceOpenOptions } from '@opensumi/ide-editor';
-import { IFileServiceClient, FileStat } from '@opensumi/ide-file-service';
+import { IResourceOpenOptions, WorkbenchEditorService } from '@opensumi/ide-editor';
+import { FileStat, IFileServiceClient } from '@opensumi/ide-file-service';
 import { DebugProtocol } from '@opensumi/vscode-debugprotocol/lib/debugProtocol';
 
+import { IDebugModelManager } from '../../common';
 import { DebugSession } from '../debug-session';
-import { DebugModelManager } from '../editor';
 
 import { DebugStackFrame } from './debug-stack-frame';
-
 
 export class DebugSourceData {
   readonly raw: DebugProtocol.Source;
@@ -35,7 +34,7 @@ export class DebugSource extends DebugSourceData {
   constructor(
     protected readonly session: DebugSession,
     protected readonly labelProvider: LabelService,
-    protected readonly modelManager: DebugModelManager,
+    protected readonly modelManager: IDebugModelManager,
     protected readonly workbenchEditorService: WorkbenchEditorService,
     protected readonly fileSystem: IFileServiceClient,
   ) {
@@ -44,6 +43,14 @@ export class DebugSource extends DebugSourceData {
 
   get uri(): URI {
     return DebugSource.toUri(this.raw);
+  }
+
+  get available(): boolean {
+    return !!this.raw;
+  }
+
+  get presentationHint() {
+    return this.raw.presentationHint;
   }
 
   update(data: Partial<DebugSourceData>): void {

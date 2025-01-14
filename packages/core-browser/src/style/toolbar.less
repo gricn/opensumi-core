@@ -1,4 +1,4 @@
-@import '~@opensumi/ide-components/lib/style/mixins.less';
+@import '@opensumi/ide-components/lib/style/mixins.less';
 
 .kt-toolbar-location {
   position: relative;
@@ -32,6 +32,10 @@
       cursor: pointer;
       position: relative;
     }
+  }
+
+  .kt-toolbar-action-btn-wrapper .kt-button {
+    vertical-align: middle;
   }
 
   // button
@@ -154,6 +158,7 @@
 .kt-toolbar-action-wrapper {
   position: relative;
 }
+
 .kt-toolbar-popover {
   position: absolute;
   --offset-size: 30px;

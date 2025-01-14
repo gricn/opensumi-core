@@ -7,6 +7,16 @@
 import { IDisposable } from './disposable';
 import { ISplice } from './sequence';
 
+export function asStringArray(array: unknown, defaultValue: string[]): string[] {
+  if (!Array.isArray(array)) {
+    return defaultValue;
+  }
+  if (!array.every((e) => typeof e === 'string')) {
+    return defaultValue;
+  }
+  return array;
+}
+
 export function isNonEmptyArray<T>(obj: ReadonlyArray<T> | undefined | null): obj is Array<T> {
   return Array.isArray(obj) && obj.length > 0;
 }
@@ -165,11 +175,11 @@ export function addMapElement<K, T>(map: Map<K, T>, key: K, element: T): IDispos
 type NonFunctional<T> = T extends Function ? never : T;
 
 // 枚举 value 转数组值
-export function enumValueToArray<T>(enumeration: T): NonFunctional<T[keyof T]>[] {
+export function enumValueToArray<T extends object>(enumeration: T): NonFunctional<T[keyof T]>[] {
   return Object.keys(enumeration)
     .filter((key) => isNaN(Number(key)))
     .map((key) => enumeration[key])
-    .filter((val) => typeof val === 'number' || typeof val === 'string');
+    .filter((val: NonFunctional<T[keyof T]>) => typeof val === 'number' || typeof val === 'string');
 }
 
 /**
@@ -301,4 +311,18 @@ export function mapFind<T, R>(array: Iterable<T>, mapFn: (value: T) => R | undef
   }
 
   return undefined;
+}
+
+export function groupBy<T>(data: ReadonlyArray<T>, compare: (a: T, b: T) => number): T[][] {
+  const result: T[][] = [];
+  let currentGroup: T[] | undefined;
+  for (const element of data.slice(0).sort(compare)) {
+    if (!currentGroup || compare(currentGroup[0], element) !== 0) {
+      currentGroup = [element];
+      result.push(currentGroup);
+    } else {
+      currentGroup.push(element);
+    }
+  }
+  return result;
 }

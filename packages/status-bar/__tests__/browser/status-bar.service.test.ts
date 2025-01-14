@@ -1,12 +1,12 @@
-import { CommandRegistry, IContextKeyService, ILoggerManagerClient } from '@opensumi/ide-core-browser';
+import { CommandRegistry, IContextKeyService } from '@opensumi/ide-core-browser';
 import { MockContextKeyService } from '@opensumi/ide-core-browser/__mocks__/context-key';
-import { MockLoggerManageClient } from '@opensumi/ide-core-browser/__mocks__/logger';
 import { LayoutState } from '@opensumi/ide-core-browser/lib/layout/layout-state';
 import { IMenuRegistry, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import { IStatusBarService, StatusBarAlignment, StatusBarEntry } from '@opensumi/ide-core-browser/lib/services';
 import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
 import { MockInjector, mockService } from '@opensumi/ide-dev-tool/src/mock-injector';
-import { StatusBarModule } from '@opensumi/ide-status-bar/lib/browser';
+
+import { StatusBarModule } from '../../src/browser';
 
 describe('template test', () => {
   const EN_CODING_ENTRY_ID = 'encoding';
@@ -24,10 +24,6 @@ describe('template test', () => {
   beforeEach(async () => {
     injector = createBrowserInjector([StatusBarModule]);
     injector.overrideProviders(
-      {
-        token: ILoggerManagerClient,
-        useClass: MockLoggerManageClient,
-      },
       {
         token: IContextKeyService,
         useClass: MockContextKeyService,
@@ -47,32 +43,32 @@ describe('template test', () => {
     statusBarService.addElement(EN_CODING_ENTRY_ID, enCodingEntry);
   });
 
-  afterEach(() => {
-    injector.disposeAll();
+  afterEach(async () => {
+    await injector.disposeAll();
   });
 
-  it('新增 statusBar Item', () => {
-    expect(statusBarService.leftEntries.length).toBe(1);
+  it('new StatusBar elements', () => {
+    expect(statusBarService.leftEntries.get().length).toBe(1);
   });
 
-  it('修改 statusBar Item', () => {
+  it('modify StatusBar elements', () => {
     statusBarService.setElement(EN_CODING_ENTRY_ID, {
       text: 'GBK',
       alignment: StatusBarAlignment.RIGHT,
     });
-    expect(statusBarService.rightEntries[0].text).toBe('GBK');
+    expect(statusBarService.rightEntries.get()[0].text).toBe('GBK');
   });
 
-  it('修改 statusBar Item 未找到时抛异常', () => {
+  it('modify not exists StatusBar elements will throw error', () => {
     expect(() => {
       statusBarService.setElement('encoding1', {
         text: 'GBK',
         alignment: StatusBarAlignment.LEFT,
       });
-    }).toThrowError('not found id is encoding1 element');
+    }).toThrow('not found id is encoding1 element');
   });
 
-  it('执行 onclick 方法', () => {
+  it('execute onclick function', () => {
     const commandRegistry = injector.get<CommandRegistry>(CommandRegistry);
     const $execute = jest.fn();
     commandRegistry.registerCommand(
@@ -87,16 +83,16 @@ describe('template test', () => {
     enCodingEntry.onClick!({});
 
     // 执行到了命令
-    expect($execute).toBeCalled();
+    expect($execute).toHaveBeenCalled();
   });
 
-  it('删除一个 item', () => {
+  it('delete elements', () => {
     statusBarService.removeElement(EN_CODING_ENTRY_ID);
 
-    expect(statusBarService.leftEntries.length).toBe(0);
+    expect(statusBarService.leftEntries.get().length).toBe(0);
   });
 
-  it('权重对比', () => {
+  it('compare elements', () => {
     statusBarService.addElement('git', {
       text: 'UTF-8',
       alignment: StatusBarAlignment.LEFT,
@@ -105,22 +101,22 @@ describe('template test', () => {
     });
 
     // 加上 beforeEach 的应该有两个
-    expect(statusBarService.leftEntries.length).toBe(2);
+    expect(statusBarService.leftEntries.get().length).toBe(2);
     // 权重高的在前面
-    expect(statusBarService.leftEntries[0].id).toBe('git');
+    expect(statusBarService.leftEntries.get()[0].id).toBe('git');
 
     statusBarService.removeElement('git');
   });
 
-  it('设置背景色颜色', () => {
+  it('set background color', () => {
     statusBarService.setColor('red');
     statusBarService.setBackgroundColor('blue');
 
-    expect(statusBarService.leftEntries[0].color).toBe('red');
+    expect(statusBarService.getColor()).toBe('red');
     expect(statusBarService.getBackgroundColor()).toBe('blue');
   });
 
-  it('设置 name 时注册菜单', () => {
+  it('registry menu while setting name', () => {
     const menuRegistry = injector.get(IMenuRegistry);
     const $registerMenu = jest.spyOn(menuRegistry, 'registerMenuItem');
     statusBarService.addElement('status.scm', {
@@ -128,9 +124,9 @@ describe('template test', () => {
       text: 'scm',
       alignment: StatusBarAlignment.RIGHT,
     });
-    expect(statusBarService.rightEntries[0].name).toBe('Source Control');
-    expect($registerMenu).toBeCalledTimes(1);
-    expect($registerMenu).toBeCalledWith('statusbar/context', {
+    expect(statusBarService.rightEntries.get()[0].name).toBe('Source Control');
+    expect($registerMenu).toHaveBeenCalledTimes(1);
+    expect($registerMenu).toHaveBeenCalledWith('statusbar/context', {
       command: { id: 'statusbar.toggleElement', label: 'Source Control' },
       extraTailArgs: ['status.scm'],
       order: 9007199254740991,
@@ -138,7 +134,7 @@ describe('template test', () => {
     });
   });
 
-  it('设置两个 id 一样的状态栏元素时应该只注册一次菜单', () => {
+  it('the menu should only be registered once when setting two StatusBar elements with the same id', () => {
     const menuRegistry = injector.get(IMenuRegistry);
     const $registerMenu = jest.spyOn(menuRegistry, 'registerMenuItem');
     statusBarService.addElement('status.scm', {
@@ -153,13 +149,13 @@ describe('template test', () => {
       text: 'scm-1',
       alignment: StatusBarAlignment.RIGHT,
     });
-    expect(statusBarService.rightEntries.length).toBe(2);
-    expect(statusBarService.rightEntries[0].name).toBe('Source Control');
+    expect(statusBarService.rightEntries.get().length).toBe(2);
+    expect(statusBarService.rightEntries.get()[0].name).toBe('Source Control');
     // 菜单只应该注册一次
-    expect($registerMenu).toBeCalledTimes(1);
+    expect($registerMenu).toHaveBeenCalledTimes(1);
   });
 
-  it('注册状态栏后菜单应该按照左右排序', () => {
+  it('the menu should be sorted left and right', () => {
     const menuRegistry = injector.get<IMenuRegistry>(IMenuRegistry);
     statusBarService.addElement('status.left', {
       name: 'Source Control',
@@ -188,8 +184,8 @@ describe('template test', () => {
     expect(statusBarOrder2).toBeLessThan(statusBarOrder3);
   });
 
-  it('设置隐藏', () => {
-    expect(statusBarService.leftEntries.length).toBe(1);
+  it('setting element tobe hidden', () => {
+    expect(statusBarService.leftEntries.get().length).toBe(1);
 
     statusBarService.addElement('status.scm', {
       text: 'scm',
@@ -197,18 +193,18 @@ describe('template test', () => {
       hidden: true,
     });
     // 设置隐藏后 leftEntries 长度应该还是一个
-    expect(statusBarService.leftEntries.length).toBe(1);
+    expect(statusBarService.leftEntries.get().length).toBe(1);
   });
 
-  it('触发显隐', () => {
+  it('toggle element visible', () => {
     // 默认显示
-    expect(statusBarService.leftEntries[0].hidden).toBeFalsy();
+    expect(statusBarService.leftEntries.get()[0].hidden).toBeFalsy();
     statusBarService.toggleElement(EN_CODING_ENTRY_ID);
     // 隐藏后 leftEntries 应该长度为 0
-    expect(statusBarService.leftEntries.length).toBe(0);
+    expect(statusBarService.leftEntries.get().length).toBe(0);
   });
 
-  it('statusbar id 相同则都触发显隐', () => {
+  it('the same StatusBar elements should be triggered at the same time', () => {
     // 注册两个 id 相同的 scm 状态栏元素
     statusBarService.addElement('status.scm', {
       id: 'status.scm',
@@ -229,10 +225,10 @@ describe('template test', () => {
       text: 'other',
       alignment: StatusBarAlignment.RIGHT,
     });
-    expect(statusBarService.rightEntries.length).toBe(3);
+    expect(statusBarService.rightEntries.get().length).toBe(3);
     // 隐藏 scm 相关状态栏
     statusBarService.toggleElement('status.scm');
     // 隐藏后 leftEntries 应该长度为 1
-    expect(statusBarService.rightEntries.length).toBe(1);
+    expect(statusBarService.rightEntries.get().length).toBe(1);
   });
 });

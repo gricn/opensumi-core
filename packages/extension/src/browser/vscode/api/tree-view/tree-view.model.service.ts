@@ -1,34 +1,63 @@
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { DragEvent, MouseEvent } from 'react';
+
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
-  DecorationsManager,
-  Decoration,
-  IRecycleTreeHandle,
-  TreeNodeType,
-  PromptValidateMessage,
-  TreeNodeEvent,
-  WatchEvent,
-  TreeNode,
   CompositeTreeNode,
+  Decoration,
+  DecorationsManager,
+  IRecycleTreeHandle,
+  PromptValidateMessage,
+  TargetMatchMode,
+  TreeNode,
+  TreeNodeEvent,
+  TreeNodeType,
 } from '@opensumi/ide-components';
 import {
+  CommandService,
+  Deferred,
   DisposableCollection,
   Emitter,
-  PreferenceService,
   IContextKeyService,
-  Deferred,
+  LabelService,
+  PreferenceService,
   ThrottledDelayer,
-  CommandService,
 } from '@opensumi/ide-core-browser';
 import {
   AbstractMenuService,
   ICtxMenuRenderer,
-  generateCtxMenu,
   MenuId,
+  generateCtxMenu,
 } from '@opensumi/ide-core-browser/lib/menu/next';
-import { isUndefinedOrNull, isNumber } from '@opensumi/ide-core-common';
+import {
+  CancellationToken,
+  CancellationTokenSource,
+  Disposable,
+  ILogger,
+  Mimes,
+  Schemes,
+  URI,
+  Uri,
+  isNumber,
+  isUndefinedOrNull,
+  uuid,
+} from '@opensumi/ide-core-common';
 
-import { ITreeViewRevealOptions, TreeViewBaseOptions, TreeViewItem } from '../../../../common/vscode';
-import { TreeViewDataProvider } from '../main.thread.treeview';
+import {
+  ITreeViewRevealOptions,
+  ITreeViewsService as ITreeViewsServiceCommon,
+  TreeViewBaseOptions,
+  TreeViewItem,
+  TreeviewsService,
+} from '../../../../common/vscode';
+import {
+  CodeDataTransfers,
+  DataTransfers,
+  DraggedTreeItemsIdentifier,
+  LocalSelectionTransfer,
+  VSDataTransfer,
+  toVSDataTransfer,
+} from '../../../../common/vscode/data-transfer';
+import { TreeViewDataProvider, TreeViewDragAndDropController } from '../main.thread.treeview';
 
 import styles from './tree-view-node.module.less';
 import { ExtensionTreeModel } from './tree-view.model';
@@ -38,6 +67,30 @@ export const IExtensionTreeViewModel = Symbol('IExtensionTreeViewModel');
 
 export const ITreeViewId = Symbol('ITreeViewId');
 export const ITreeViewBaseOptions = Symbol('TreeViewBaseOptions');
+export const ITreeViewDragAndDropController = Symbol('ITreeViewDragAndDropController');
+
+export interface ITreeViewDragAndDropController {
+  readonly dropMimeTypes: string[];
+  readonly dragMimeTypes: string[];
+  handleDrag(
+    sourceTreeItemHandles: string[],
+    operationUuid: string,
+    token: CancellationToken,
+  ): Promise<VSDataTransfer | undefined>;
+  handleDrop(
+    elements: VSDataTransfer,
+    target: ExtensionTreeNode | ExtensionCompositeTreeNode | undefined,
+    token: CancellationToken,
+    operationUuid?: string,
+    sourceTreeId?: string,
+    sourceTreeItemHandles?: string[],
+  ): Promise<void>;
+}
+
+interface TreeDragSourceInfo {
+  id: string;
+  itemHandles: string[];
+}
 
 export interface IExtensionTreeHandle extends IRecycleTreeHandle {
   hasDirectFocus: () => boolean;
@@ -46,17 +99,20 @@ export interface IExtensionTreeHandle extends IRecycleTreeHandle {
 export interface ExtensionTreeValidateMessage extends PromptValidateMessage {
   value: string;
 }
+export type ITreeViewsService = ITreeViewsServiceCommon<VSDataTransfer, TreeViewItem, HTMLElement>;
+export const ITreeViewsService = Symbol('ITreeViewsService');
 
 const ITreeViewDataProvider = Symbol('ITreeViewDataProvider');
 
 @Injectable()
 export class ExtensionTreeViewModel {
   static DEFAULT_REVEAL_DELAY = 500;
-  static DEFAULT_REFRESH_DELAY = 500;
+  static MS_TILL_DRAGGED_OVER_EXPANDS = 500;
 
   static createContainer(
     injector: Injector,
     tree: TreeViewDataProvider,
+    dndController: TreeViewDragAndDropController,
     treeViewId: string,
     options: TreeViewBaseOptions,
   ): Injector {
@@ -64,6 +120,10 @@ export class ExtensionTreeViewModel {
       {
         token: ITreeViewDataProvider,
         useValue: tree,
+      },
+      {
+        token: ITreeViewDragAndDropController,
+        useValue: dndController,
       },
       {
         token: IExtensionTreeViewModel,
@@ -77,6 +137,10 @@ export class ExtensionTreeViewModel {
         token: ITreeViewBaseOptions,
         useValue: options,
       },
+      {
+        token: ITreeViewsService,
+        useValue: new TreeviewsService(),
+      },
     ]);
     return child;
   }
@@ -84,10 +148,13 @@ export class ExtensionTreeViewModel {
   static createModel(
     injector: Injector,
     tree: TreeViewDataProvider,
+    dndController: TreeViewDragAndDropController,
     treeViewId: string,
     options: TreeViewBaseOptions,
   ): ExtensionTreeViewModel {
-    return ExtensionTreeViewModel.createContainer(injector, tree, treeViewId, options).get(IExtensionTreeViewModel);
+    return ExtensionTreeViewModel.createContainer(injector, tree, dndController, treeViewId, options).get(
+      IExtensionTreeViewModel,
+    );
   }
 
   @Autowired(INJECTOR_TOKEN)
@@ -95,6 +162,9 @@ export class ExtensionTreeViewModel {
 
   @Autowired(ITreeViewDataProvider)
   private readonly treeViewDataProvider: TreeViewDataProvider;
+
+  @Autowired(ITreeViewDragAndDropController)
+  private readonly treeViewDragAndDropController: TreeViewDragAndDropController;
 
   @Autowired(PreferenceService)
   private readonly preferenceService: PreferenceService;
@@ -114,6 +184,15 @@ export class ExtensionTreeViewModel {
   @Autowired(CommandService)
   private readonly commandService: CommandService;
 
+  @Autowired(LabelService)
+  private readonly labelService: LabelService;
+
+  @Autowired(ILogger)
+  private readonly logger: ILogger;
+
+  @Autowired(ITreeViewsService)
+  private readonly treeViewsDragAndDropService: ITreeViewsService;
+
   private _treeModel: ExtensionTreeModel;
 
   private _whenReady: Promise<void>;
@@ -126,6 +205,14 @@ export class ExtensionTreeViewModel {
   private focusedDecoration: Decoration = new Decoration(styles.mod_focused); // 焦点态
   private contextMenuDecoration: Decoration = new Decoration(styles.mod_actived); // 右键菜单激活态
   private loadingDecoration: Decoration = new Decoration(styles.mod_loading); // 加载态
+  private draggingDecoration: Decoration = new Decoration(styles.mod_dragging); // Dragging 态
+  private draggedOverDecoration: Decoration = new Decoration(styles.mod_dragover); // Dragover 态
+
+  // 上一次拖拽进入的目录
+  private potentialParent: ExtensionCompositeTreeNode | null;
+  // 开始拖拽的节点
+  private beingDraggedNodes: (ExtensionTreeNode | ExtensionCompositeTreeNode)[] = [];
+
   // 即使选中态也是焦点态的节点，全局仅会有一个
   private _focusedNode: ExtensionTreeNode | ExtensionCompositeTreeNode | undefined;
   // 选中态的节点，会可能有多个
@@ -145,13 +232,25 @@ export class ExtensionTreeViewModel {
   }> = new Emitter();
 
   private _isMultiSelected = false;
-  private refreshDelayer = new ThrottledDelayer<void>(ExtensionTreeViewModel.DEFAULT_REFRESH_DELAY);
   private revealDelayer = new ThrottledDelayer<void>(ExtensionTreeViewModel.DEFAULT_REVEAL_DELAY);
-  private revealDeferred: Deferred<void> | null;
-  private refreshDeferred: Deferred<void> | null;
+
+  private toCancelNodeExpansion: DisposableCollection = new DisposableCollection();
+  private draggedOverNode: ExtensionTreeNode | ExtensionCompositeTreeNode;
+
+  private dragOverTrigger = new ThrottledDelayer<void>(ExtensionTreeViewModel.MS_TILL_DRAGGED_OVER_EXPANDS);
+  private dragCancellationToken: CancellationTokenSource | undefined;
+  private readonly treeItemsTransfer = LocalSelectionTransfer.getInstance<DraggedTreeItemsIdentifier>();
+
+  private readonly treeMimeType: string;
+  private treeHandlerReadyDeffer = new Deferred<void>();
 
   constructor() {
     this._whenReady = this.initTreeModel();
+    this.treeMimeType = `application/vnd.code.tree.${this.treeViewId.toLowerCase()}`;
+  }
+
+  get draggable() {
+    return this.treeViewDragAndDropController.hasHandleDrag;
   }
 
   get onDidFocusedNodeChange() {
@@ -240,16 +339,6 @@ export class ExtensionTreeViewModel {
         this.reveal(treeItemId);
       }),
     );
-    this.disposableCollection.push(
-      this.treeModel!.onWillUpdate(() => {
-        // 更新树前更新下选中节点
-        if (this.selectedNodes.length !== 0) {
-          // 仅处理一下单选情况
-          const node = this.treeModel?.root.getTreeNodeByPath(this.selectedNodes[0].path);
-          this.selectedDecoration.addTarget(node as ExtensionTreeNode);
-        }
-      }),
-    );
   }
 
   async updateTreeModel() {
@@ -263,6 +352,8 @@ export class ExtensionTreeViewModel {
     this._decorations.addDecoration(this.focusedDecoration);
     this._decorations.addDecoration(this.contextMenuDecoration);
     this._decorations.addDecoration(this.loadingDecoration);
+    this._decorations.addDecoration(this.draggedOverDecoration);
+    this._decorations.addDecoration(this.draggingDecoration);
   }
 
   // 清空所有节点选中态
@@ -443,10 +534,11 @@ export class ExtensionTreeViewModel {
   };
 
   toggleDirectory = async (item: ExtensionCompositeTreeNode) => {
+    await this.treeHandlerReadyDeffer.promise;
     if (item.expanded) {
-      this.extensionTreeHandle.collapseNode(item);
+      await this.extensionTreeHandle?.collapseNode(item);
     } else {
-      this.extensionTreeHandle.expandNode(item);
+      await this.extensionTreeHandle?.expandNode(item);
     }
   };
 
@@ -458,10 +550,13 @@ export class ExtensionTreeViewModel {
     this.decorations.removeDecoration(this.focusedDecoration);
     this.decorations.removeDecoration(this.contextMenuDecoration);
     this.decorations.removeDecoration(this.loadingDecoration);
+    this.decorations.removeDecoration(this.draggedOverDecoration);
+    this.decorations.removeDecoration(this.draggingDecoration);
   }
 
   handleTreeHandler(handle: IExtensionTreeHandle) {
     this._extensionTreeHandle = handle;
+    this.treeHandlerReadyDeffer.resolve();
   }
 
   handleTreeBlur = () => {
@@ -471,6 +566,311 @@ export class ExtensionTreeViewModel {
 
   handleTreeFocus = () => {
     // 激活面板
+  };
+
+  getDragURI(element: ExtensionTreeNode | ExtensionCompositeTreeNode): string | null {
+    if (!this.treeViewDragAndDropController.handleDrag) {
+      return null;
+    }
+    return element.uri ? Uri.revive(element.uri).toString() : element.treeItemId;
+  }
+
+  getDragLabel(elements: (ExtensionTreeNode | ExtensionCompositeTreeNode)[]): string | undefined {
+    if (!this.treeViewDragAndDropController.handleDrag) {
+      return undefined;
+    }
+    if (elements.length > 1) {
+      return String(elements.length);
+    }
+    const element = elements[0];
+    return element.displayName
+      ? element.displayName
+      : element.uri
+      ? this.labelService.getName(URI.from(element.uri))
+      : undefined;
+  }
+
+  private handleDragAndLog(
+    dndController: ITreeViewDragAndDropController,
+    itemHandles: string[],
+    uuid: string,
+    dragCancellationToken: CancellationToken,
+  ): Promise<VSDataTransfer | undefined> {
+    return dndController.handleDrag(itemHandles, uuid, dragCancellationToken).then((additionalDataTransfer) => {
+      if (additionalDataTransfer) {
+        const unlistedTypes: string[] = [];
+        for (const item of additionalDataTransfer.entries()) {
+          if (
+            item[0] !== this.treeMimeType &&
+            dndController.dragMimeTypes.findIndex((value) => value === item[0]) < 0
+          ) {
+            unlistedTypes.push(item[0]);
+          }
+        }
+        if (unlistedTypes.length) {
+          this.logger.warn(
+            `Drag and drop controller for tree ${
+              this.treeViewId
+            } adds the following data transfer types but does not declare them in dragMimeTypes: ${unlistedTypes.join(
+              ', ',
+            )}`,
+          );
+        }
+      }
+      return additionalDataTransfer;
+    });
+  }
+
+  private addExtensionProvidedTransferTypes(event: DragEvent, itemHandles: string[]) {
+    if (!event.dataTransfer || !this.treeViewDragAndDropController) {
+      return;
+    }
+    const uid = uuid();
+
+    this.dragCancellationToken = new CancellationTokenSource();
+    this.treeViewsDragAndDropService.addDragOperationTransfer(
+      uid,
+      this.handleDragAndLog(this.treeViewDragAndDropController, itemHandles, uid, this.dragCancellationToken.token),
+    );
+    this.treeItemsTransfer.setData([new DraggedTreeItemsIdentifier(uid)], DraggedTreeItemsIdentifier.prototype);
+    if (this.treeViewDragAndDropController.dragMimeTypes.find((element) => element === Mimes.uriList)) {
+      // Add the type that the editor knows
+      event.dataTransfer?.setData(DataTransfers.RESOURCES, '');
+    }
+    this.treeViewDragAndDropController.dragMimeTypes.forEach((supportedType) => {
+      event.dataTransfer?.setData(supportedType, '');
+    });
+  }
+
+  private addResourceInfoToTransfer(event: DragEvent, resources: Uri[]) {
+    if (resources.length && event.dataTransfer) {
+      // TODO: Apply some datatransfer types to allow for dragging the element outside of the application
+
+      // The only custom data transfer we set from the explorer is a file transfer
+      // to be able to DND between multiple code file explorers across windows
+      const fileResources = resources.filter((s) => s.scheme === Schemes.file).map((r) => r.fsPath);
+      if (fileResources.length) {
+        event.dataTransfer.setData(CodeDataTransfers.FILES, JSON.stringify(fileResources));
+      }
+    }
+  }
+
+  handleDragStart = (event: DragEvent, node: ExtensionTreeNode | ExtensionCompositeTreeNode) => {
+    event.stopPropagation();
+    // React DragEnd Event maybe not fired for the last renderred element.
+    // ref: https://stackoverflow.com/a/24543568
+    const handleDragEnd = (ev) => {
+      this.handleDragEnd(ev, node);
+    };
+    event.currentTarget.addEventListener('dragend', handleDragEnd, false);
+
+    let draggedNodes = this.selectedNodes;
+    let isDragWithSelectedNode = false;
+    for (const selected of draggedNodes) {
+      if (selected && selected.id === node.id) {
+        isDragWithSelectedNode = true;
+      }
+    }
+    if (!isDragWithSelectedNode) {
+      draggedNodes = [node];
+    }
+    const resources: Uri[] = [];
+    const sourceInfo: TreeDragSourceInfo = {
+      id: this.treeViewId,
+      itemHandles: [] as string[],
+    };
+    draggedNodes.forEach((item: ExtensionTreeNode | ExtensionCompositeTreeNode) => {
+      sourceInfo.itemHandles.push(item.treeItemId);
+      if (item.uri) {
+        resources.push(URI.revive(item.uri));
+      }
+    });
+    this.addResourceInfoToTransfer(event, resources);
+    this.addExtensionProvidedTransferTypes(event, sourceInfo.itemHandles);
+    event.dataTransfer.setData(this.treeMimeType, JSON.stringify(sourceInfo));
+
+    draggedNodes.forEach((node) => {
+      // 添加拖拽样式
+      this.draggingDecoration.addTarget(node, TargetMatchMode.Self);
+    });
+
+    if (event.dataTransfer) {
+      const label = this.getDragLabel(draggedNodes) || '';
+      const dragImage = document.createElement('div');
+      dragImage.className = styles.tree_view_drag_image;
+      dragImage.textContent = label;
+      document.body.appendChild(dragImage);
+      event.dataTransfer.setDragImage(dragImage, -10, -10);
+      setTimeout(() => document.body.removeChild(dragImage), 0);
+    }
+  };
+
+  handleDragEnter = (event: DragEvent, _node: ExtensionTreeNode | ExtensionCompositeTreeNode) => {
+    event.stopPropagation();
+    event.preventDefault();
+  };
+
+  handleDrop = async (event: DragEvent, node: ExtensionTreeNode | ExtensionCompositeTreeNode) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'copy';
+    if (node) {
+      this.draggingDecoration.removeTarget(node);
+    }
+    if (this.potentialParent) {
+      this.draggedOverDecoration.removeTarget(this.potentialParent);
+    }
+    // Remove all dragging decoration
+    this.beingDraggedNodes.forEach((node) => {
+      this.draggingDecoration.removeTarget(node);
+    });
+    this.beingDraggedNodes = [];
+    this.potentialParent = null;
+    this.treeModel.dispatchChange();
+    if (!this.toCancelNodeExpansion.disposed) {
+      this.toCancelNodeExpansion.dispose();
+    }
+
+    const dndController = this.treeViewDragAndDropController;
+    if (!event.dataTransfer || !dndController) {
+      return;
+    }
+    const originalDataTransfer = toVSDataTransfer(event.dataTransfer);
+
+    let treeSourceInfo: TreeDragSourceInfo | undefined;
+    let willDropUuid: string | undefined;
+    if (this.treeItemsTransfer.hasData(DraggedTreeItemsIdentifier.prototype)) {
+      willDropUuid = this.treeItemsTransfer.getData(DraggedTreeItemsIdentifier.prototype)![0].identifier;
+    }
+
+    // TODO: Handle Editor Drop Data
+
+    const outDataTransfer = new VSDataTransfer();
+    for (const [type, item] of originalDataTransfer.entries()) {
+      if (
+        type === this.treeMimeType ||
+        dndController.dropMimeTypes.includes(type) ||
+        (item.asFile() && dndController.dropMimeTypes.includes(DataTransfers.FILES.toLowerCase()))
+      ) {
+        outDataTransfer.append(type, item);
+        if (type === this.treeMimeType) {
+          try {
+            treeSourceInfo = JSON.parse(await item.asString());
+          } catch {
+            // noop
+          }
+        }
+      }
+    }
+
+    const additionalDataTransfer = await this.treeViewsDragAndDropService.removeDragOperationTransfer(willDropUuid);
+    if (additionalDataTransfer) {
+      for (const [type, item] of additionalDataTransfer.entries()) {
+        outDataTransfer.append(type, item);
+      }
+    }
+    return dndController.handleDrop(
+      outDataTransfer,
+      node,
+      CancellationToken.None,
+      willDropUuid,
+      treeSourceInfo?.id,
+      treeSourceInfo?.itemHandles,
+    );
+  };
+
+  handleDragOver = (event: DragEvent, node: ExtensionTreeNode | ExtensionCompositeTreeNode) => {
+    event.preventDefault();
+    event.stopPropagation();
+    // TODO: Handle Editor Drop Data
+    if (!this.toCancelNodeExpansion.disposed) {
+      return;
+    }
+    if (this.beingDraggedNodes.indexOf(node) >= 0) {
+      return;
+    }
+
+    this.draggedOverNode = node;
+
+    const newPotentialParent: ExtensionCompositeTreeNode =
+      ExtensionCompositeTreeNode.is(node) && (node as ExtensionCompositeTreeNode).expanded
+        ? (node as ExtensionCompositeTreeNode)
+        : (node.parent as ExtensionCompositeTreeNode);
+
+    if (this.potentialParent !== newPotentialParent || !this.draggedOverDecoration.hasTarget(newPotentialParent)) {
+      if (this.potentialParent) {
+        this.draggedOverDecoration.removeTarget(this.potentialParent);
+      }
+      this.potentialParent = newPotentialParent;
+      this.draggedOverDecoration.addTarget(this.potentialParent, TargetMatchMode.SelfAndChildren);
+      // 通知视图更新
+      this.treeModel.dispatchChange();
+    }
+
+    if (this.potentialParent !== node && ExtensionCompositeTreeNode.is(node)) {
+      this.dragOverTrigger.trigger(async () => {
+        if (!node.expanded) {
+          await (node as ExtensionCompositeTreeNode).setExpanded(true);
+          // 确保当前仍在当前拖区域节点中
+          if (this.draggedOverNode === node) {
+            if (this.potentialParent) {
+              this.draggedOverDecoration.removeTarget(this.potentialParent);
+            }
+            this.potentialParent = node as ExtensionCompositeTreeNode;
+            this.draggedOverDecoration.addTarget(this.potentialParent, TargetMatchMode.SelfAndChildren);
+          }
+        } else {
+          if (this.potentialParent) {
+            this.draggedOverDecoration.removeTarget(this.potentialParent);
+          }
+          this.potentialParent = node as ExtensionCompositeTreeNode;
+          this.draggedOverDecoration.addTarget(this.potentialParent, TargetMatchMode.SelfAndChildren);
+        }
+        // 通知视图更新
+        this.treeModel.dispatchChange();
+      });
+      this.toCancelNodeExpansion.push(
+        Disposable.create(() => {
+          if (!this.dragOverTrigger.isTriggered()) {
+            this.dragOverTrigger.cancel();
+          }
+        }),
+      );
+    }
+  };
+
+  handleDragLeave = (event: DragEvent, _node: ExtensionTreeNode | ExtensionCompositeTreeNode) => {
+    event.preventDefault();
+    event.stopPropagation();
+    this.toCancelNodeExpansion.dispose();
+    // Clear draggedOver decoration after leave
+    if (this.potentialParent) {
+      this.draggedOverDecoration.removeTarget(this.potentialParent);
+      // Update view
+      this.treeModel.dispatchChange();
+    }
+  };
+
+  handleDragEnd = (event: DragEvent, node: ExtensionTreeNode | ExtensionCompositeTreeNode) => {
+    // Check if the drag was cancelled.
+    if (event.dataTransfer?.dropEffect === 'none') {
+      this.dragCancellationToken?.cancel();
+    }
+    this.draggingDecoration.removeTarget(node);
+    if (this.potentialParent) {
+      this.draggedOverDecoration.removeTarget(this.potentialParent);
+    }
+    this.beingDraggedNodes.forEach((node) => {
+      // Remove dragging decoration
+      this.draggingDecoration.removeTarget(node);
+    });
+    this.beingDraggedNodes = [];
+    this.potentialParent = null;
+    // Update view
+    this.treeModel.dispatchChange();
+    if (!this.toCancelNodeExpansion.disposed) {
+      this.toCancelNodeExpansion.dispose();
+    }
   };
 
   handleItemRangeClick = (item: ExtensionTreeNode | ExtensionCompositeTreeNode, type: TreeNodeType) => {
@@ -542,7 +942,7 @@ export class ExtensionTreeViewModel {
     }
   };
 
-  handleContextMenu = (ev: React.MouseEvent, item?: ExtensionCompositeTreeNode | ExtensionTreeNode) => {
+  handleContextMenu = (ev: MouseEvent, item?: ExtensionCompositeTreeNode | ExtensionTreeNode) => {
     ev.stopPropagation();
     ev.preventDefault();
 
@@ -613,57 +1013,44 @@ export class ExtensionTreeViewModel {
     this.treeModel.root.collapsedAll();
   }
 
+  async refreshById(treeItemId: string) {
+    const id = this.treeViewDataProvider.getTreeNodeIdByTreeItemId(treeItemId);
+    if (!id) {
+      return;
+    }
+    const treeNode = (this.treeModel.root as ExtensionTreeRoot).getTreeNodeById(id);
+    if (!treeNode) {
+      return;
+    }
+    if (ExtensionCompositeTreeNode.is(treeNode)) {
+      await (treeNode as ExtensionCompositeTreeNode).refresh();
+    } else if (treeNode.parent) {
+      await (treeNode.parent as ExtensionCompositeTreeNode).refresh();
+    }
+  }
+
   async refresh(item?: TreeViewItem) {
     await this.whenReady;
-    if (!this.refreshDelayer.isTriggered()) {
-      this.refreshDelayer.cancel();
+    if (!item) {
+      await this.treeModel.root?.refresh();
     } else {
-      if (this.refreshDeferred) {
-        await this.refreshDeferred.promise;
-      }
+      await this.refreshById(item.id);
     }
-    return this.refreshDelayer.trigger(async () => {
-      this.refreshDeferred = new Deferred();
-      if (!item) {
-        this.treeModel.root?.refresh();
-      } else {
-        const id = this.treeViewDataProvider.getTreeNodeIdByTreeItemId(item.id);
-        if (!id) {
-          return;
-        }
-        const cache = (this.treeModel.root as ExtensionTreeRoot).getTreeNodeById(id);
-        if (!cache) {
-          return;
-        }
-        let path;
-        if (ExtensionCompositeTreeNode.is(cache)) {
-          path = (cache as ExtensionCompositeTreeNode).path;
-        } else if (cache.parent) {
-          path = (cache.parent as ExtensionCompositeTreeNode).path;
-        }
-        const watcher = this.treeModel.root?.watchEvents.get(path);
-        if (watcher && typeof watcher.callback === 'function') {
-          await watcher.callback({ type: WatchEvent.Changed, path });
-        }
-      }
-      this.refreshDeferred.resolve();
-      this.refreshDeferred = null;
-    });
   }
 
   async reveal(treeItemId: string, options: ITreeViewRevealOptions = {}) {
     await this.whenReady;
     if (!this.revealDelayer.isTriggered()) {
       this.revealDelayer.cancel();
-    } else if (this.revealDeferred) {
-      await this.revealDeferred.promise;
     }
+
     return this.revealDelayer.trigger(async () => {
-      this.revealDeferred = new Deferred();
+      await this.treeHandlerReadyDeffer.promise;
       if (this.treeModel.root.branchSize === 0) {
         // 当Tree为空时，刷新一次Tree
         await this.refresh();
       }
+
       const id = this.treeViewDataProvider.getTreeNodeIdByTreeItemId(treeItemId);
       if (!id) {
         return;
@@ -678,7 +1065,7 @@ export class ExtensionTreeViewModel {
       // 递归展开几层节点，最多三层
       let expand = Math.min(isNumber(options.expand) ? options.expand : options.expand === true ? 1 : 0, 3);
 
-      let itemsToExpand = await this.extensionTreeHandle.ensureVisible(cache.path);
+      let itemsToExpand = await this.extensionTreeHandle?.ensureVisible(cache.path);
       if (itemsToExpand) {
         if (select) {
           // 更新节点选中态，不会改变焦点态节点
@@ -689,18 +1076,21 @@ export class ExtensionTreeViewModel {
           this.activeNodeFocusedDecoration(itemsToExpand as ExtensionTreeNode, false, true);
         }
       }
-      for (
-        ;
-        ExtensionCompositeTreeNode.is(itemsToExpand) &&
-        (itemsToExpand as ExtensionCompositeTreeNode).branchSize > 0 &&
-        expand > 0;
-        expand--
-      ) {
+
+      for (; ExtensionCompositeTreeNode.is(itemsToExpand) && expand > 0; expand--) {
         await this.extensionTreeHandle.expandNode(itemsToExpand as CompositeTreeNode);
         itemsToExpand = itemsToExpand?.children ? (itemsToExpand?.children[0] as TreeNode) : undefined;
       }
-      this.revealDeferred.resolve();
-      this.revealDeferred = null;
     });
   }
+
+  handleCheckBoxChange = async (item: ExtensionCompositeTreeNode | ExtensionTreeNode) => {
+    if (item) {
+      this.treeViewDataProvider.markAsChecked(
+        item,
+        !item.checkboxInfo!.checked,
+        this.treeViewOptions.manageCheckboxStateManually,
+      );
+    }
+  };
 }

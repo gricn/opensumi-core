@@ -13,9 +13,9 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
-import { Event, Emitter } from './event';
+import { MaybePromise } from './async';
+import { Emitter, Event } from './event';
 
-// DisposableStore 是从 vscode lifecycle 中复制而来
 export class DisposableStore implements IDisposable {
   private toDispose = new Set<IDisposable>();
   private _isDisposed = false;
@@ -61,6 +61,12 @@ export class DisposableStore implements IDisposable {
     }
 
     return t;
+  }
+
+  public addAll(disposables: IDisposable[]) {
+    for (const item of disposables) {
+      this.add(item);
+    }
   }
 }
 
@@ -147,6 +153,7 @@ export class Disposable implements IDisposable {
   }
 
   private disposingElements = false;
+
   dispose(): void {
     if (this.disposed || this.disposingElements) {
       return;
@@ -230,17 +237,22 @@ export class DisposableCollection implements IDisposable {
     if (this.disposed || this.disposingElements) {
       return;
     }
+    const toPromise = [] as any[];
     this.disposingElements = true;
     while (!this.disposed) {
       try {
-        this.disposables.pop()!.dispose();
+        const maybePromise = this.disposables.pop()!.dispose() as MaybePromise<void>;
+        if (maybePromise) {
+          toPromise.push(maybePromise);
+        }
       } catch (e) {
         // eslint-disable-next-line no-console
-        console.error(e);
+        console.error('DisposableCollection.dispose error', e);
       }
     }
     this.disposingElements = false;
     this.checkDisposed();
+    return Promise.all(toPromise) as unknown as MaybePromise<void> as void;
   }
 
   push(disposable: IDisposable): IDisposable {
@@ -285,7 +297,7 @@ function markTracked<T extends IDisposable>(x: T): void {
   if (x && x !== Disposable.None) {
     try {
       (x as any)[__is_disposable_tracked__] = true;
-    } catch {
+    } catch (_e) {
       // noop
     }
   }
@@ -357,6 +369,10 @@ export class RefCountedDisposable {
 
   constructor(private readonly _disposable: IDisposable) {}
 
+  get disposed() {
+    return this._counter <= 0;
+  }
+
   acquire() {
     this._counter++;
     return this;
@@ -367,5 +383,22 @@ export class RefCountedDisposable {
       this._disposable.dispose();
     }
     return this;
+  }
+}
+
+export class DisposableMap<K, V extends IDisposable = IDisposable> extends Map<K, V> implements IDisposable {
+  disposeKey(key: K): void {
+    const disposable = this.get(key);
+    if (disposable) {
+      disposable.dispose();
+    }
+    this.delete(key);
+  }
+
+  dispose(): void {
+    for (const disposable of this.values()) {
+      disposable.dispose();
+    }
+    this.clear();
   }
 }

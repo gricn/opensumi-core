@@ -1,54 +1,56 @@
 import { Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
 import {
-  IApplicationService,
-  URI,
+  AppConfig,
   ClientAppContribution,
-  localize,
   CommandContribution,
-  KeybindingContribution,
-  TabBarToolbarContribution,
-  FILE_COMMANDS,
   CommandRegistry,
   CommandService,
-  SEARCH_COMMANDS,
-  IElectronNativeDialogService,
-  ToolbarRegistry,
-  KeybindingRegistry,
-  IWindowService,
+  DisposableStore,
+  FILE_COMMANDS,
+  IApplicationService,
   IClipboardService,
-  PreferenceService,
-  formatLocalize,
-  QuickOpenService,
+  IElectronNativeDialogService,
+  IWindowService,
+  KeybindingContribution,
+  KeybindingRegistry,
   Mode,
+  OperatingSystem,
+  PreferenceService,
   QuickOpenItem,
   QuickOpenItemOptions,
-  OperatingSystem,
-  WORKSPACE_COMMANDS,
-  AppConfig,
-  Throttler,
-  match,
+  QuickOpenService,
+  SEARCH_COMMANDS,
   Schemes,
+  TERMINAL_COMMANDS,
+  TabBarToolbarContribution,
+  Throttler,
+  ToolbarRegistry,
+  URI,
+  WORKSPACE_COMMANDS,
+  formatLocalize,
+  localize,
+  match,
 } from '@opensumi/ide-core-browser';
-import { FilesExplorerFilteredContext } from '@opensumi/ide-core-browser/lib/contextkey/explorer';
 import {
+  FilesExplorerFilteredContext,
   FilesExplorerFocusedContext,
   FilesExplorerInputFocusedContext,
 } from '@opensumi/ide-core-browser/lib/contextkey/explorer';
 import {
-  MenuContribution,
-  IMenuRegistry,
-  MenuId,
   ExplorerContextCallback,
+  IMenuRegistry,
+  MenuContribution,
+  MenuId,
 } from '@opensumi/ide-core-browser/lib/menu/next';
+import { IProgressService } from '@opensumi/ide-core-browser/lib/progress';
 import { Domain } from '@opensumi/ide-core-common/lib/di-helper';
 import { IDecorationsService } from '@opensumi/ide-decoration';
-import { IEditorOpenType, WorkbenchEditorService } from '@opensumi/ide-editor';
+import { DIFF_SCHEME, EditorOpenType, IEditorOpenType, WorkbenchEditorService } from '@opensumi/ide-editor';
 import { EXPLORER_CONTAINER_ID } from '@opensumi/ide-explorer/lib/browser/explorer-contribution';
 import { IMainLayoutService, IViewsRegistry, MainLayoutContribution } from '@opensumi/ide-main-layout';
 import { ViewContentGroups } from '@opensumi/ide-main-layout/lib/browser/views-registry';
-import { IOpenDialogOptions, IWindowDialogService, ISaveDialogOptions } from '@opensumi/ide-overlay';
-import { TERMINAL_COMMANDS } from '@opensumi/ide-terminal-next';
-import { DEFAULT_WORKSPACE_SUFFIX_NAME, IWorkspaceService, UNTITLED_WORKSPACE } from '@opensumi/ide-workspace';
+import { IOpenDialogOptions, ISaveDialogOptions, IWindowDialogService } from '@opensumi/ide-overlay';
+import { IWorkspaceService, UNTITLED_WORKSPACE } from '@opensumi/ide-workspace';
 
 import { IFileTreeService, PasteTypes, RESOURCE_VIEW_ID } from '../common';
 import { Directory } from '../common/file-tree-node.define';
@@ -75,6 +77,8 @@ export class FileTreeContribution
     ClientAppContribution,
     MainLayoutContribution
 {
+  private _disposables = new DisposableStore();
+
   @Autowired(INJECTOR_TOKEN)
   private readonly injector: Injector;
 
@@ -83,6 +87,9 @@ export class FileTreeContribution
 
   @Autowired(IMainLayoutService)
   private readonly mainLayoutService: IMainLayoutService;
+
+  @Autowired(IProgressService)
+  private progressService: IProgressService;
 
   @Autowired(IWorkspaceService)
   private readonly workspaceService: IWorkspaceService;
@@ -125,16 +132,13 @@ export class FileTreeContribution
   private deleteThrottler: Throttler = new Throttler();
   private willDeleteUris: URI[] = [];
 
-  get workspaceSuffixName() {
-    return this.appConfig.workspaceSuffixName || DEFAULT_WORKSPACE_SUFFIX_NAME;
-  }
-
   initialize() {
     // 等待排除配置初始化结束后再初始化文件树
     this.workspaceService.initFileServiceExclude().then(async () => {
       await this.fileTreeService.init();
       this.fileTreeModelService.initTreeModel();
     });
+    this.progressService.registerProgressIndicator(EXPLORER_CONTAINER_ID);
   }
 
   async onStart() {
@@ -155,12 +159,14 @@ export class FileTreeContribution
       EXPLORER_CONTAINER_ID,
     );
     // 监听工作区变化更新标题
-    this.workspaceService.onWorkspaceLocationChanged(() => {
-      const handler = this.mainLayoutService.getTabbarHandler(EXPLORER_CONTAINER_ID);
-      if (handler) {
-        handler.updateViewTitle(RESOURCE_VIEW_ID, this.getWorkspaceTitle());
-      }
-    });
+    this._disposables.add(
+      this.workspaceService.onWorkspaceLocationChanged(() => {
+        const handler = this.mainLayoutService.getTabbarHandler(EXPLORER_CONTAINER_ID);
+        if (handler) {
+          handler.updateViewTitle(RESOURCE_VIEW_ID, this.getWorkspaceTitle());
+        }
+      }),
+    );
   }
 
   onDidStart() {
@@ -172,9 +178,13 @@ export class FileTreeContribution
     this.isRendered = true;
     const handler = this.mainLayoutService.getTabbarHandler(EXPLORER_CONTAINER_ID);
     if (handler) {
+      // 初始化时根据状态来设置 contextKey
+      this.fileTreeModelService.whenReady.then(() => {
+        this.fileTreeModelService.contextKey.explorerViewletVisibleContext.set(handler.isActivated());
+      });
       handler.onActivate(() => {
-        this.fileTreeModelService.contextKey.explorerViewletVisibleContext.set(true);
         this.fileTreeModelService.performLocationOnHandleShow();
+        this.fileTreeModelService.contextKey.explorerViewletVisibleContext.set(true);
       });
       handler.onInActivate(() => {
         this.fileTreeModelService.handleTreeBlur();
@@ -189,7 +199,7 @@ export class FileTreeContribution
     if (workspace) {
       const uri = new URI(workspace.uri);
       resourceTitle = uri.displayName;
-      if (!workspace.isDirectory && resourceTitle.endsWith(`.${this.workspaceSuffixName}`)) {
+      if (!workspace.isDirectory && resourceTitle.endsWith(`.${this.workspaceService.workspaceSuffixName}`)) {
         resourceTitle = resourceTitle.slice(0, resourceTitle.lastIndexOf('.'));
         if (resourceTitle === UNTITLED_WORKSPACE) {
           return localize('file.workspace.defaultTip');
@@ -235,6 +245,25 @@ export class FileTreeContribution
       },
       order: 2,
       group: '0_new',
+    });
+
+    menuRegistry.registerMenuItem(MenuId.ExplorerContext, {
+      command: {
+        id: WORKSPACE_COMMANDS.ADD_WORKSPACE_FOLDER.id,
+        label: localize('workspace.addFolderToWorkspace'),
+      },
+      order: 1,
+      group: '0_workspace',
+      when: 'config.workspace.supportMultiRootWorkspace',
+    });
+    menuRegistry.registerMenuItem(MenuId.ExplorerContext, {
+      command: {
+        id: WORKSPACE_COMMANDS.REMOVE_WORKSPACE_FOLDER.id,
+        label: localize('workspace.removeFolderFromWorkspace'),
+      },
+      order: 1,
+      group: '0_workspace',
+      when: 'config.workspace.supportMultiRootWorkspace',
     });
 
     menuRegistry.registerMenuItem(MenuId.ExplorerContext, {
@@ -289,8 +318,7 @@ export class FileTreeContribution
         label: localize('file.delete'),
       },
       order: 1,
-      group: '2_operator',
-      when: FilesExplorerFilteredContext.not,
+      group: '7_modification',
     });
 
     menuRegistry.registerMenuItem(MenuId.ExplorerContext, {
@@ -299,8 +327,7 @@ export class FileTreeContribution
         label: localize('file.rename'),
       },
       order: 3,
-      group: '2_operator',
-      when: FilesExplorerFilteredContext.not,
+      group: '7_modification',
     });
 
     menuRegistry.registerMenuItem(MenuId.ExplorerContext, {
@@ -309,7 +336,7 @@ export class FileTreeContribution
         label: localize('file.compare'),
       },
       order: 2,
-      group: '2_operator',
+      group: '3_compare',
     });
 
     menuRegistry.registerMenuItem(MenuId.ExplorerContext, {
@@ -318,7 +345,7 @@ export class FileTreeContribution
         label: localize('file.copy.file'),
       },
       order: 1,
-      group: '3_copy',
+      group: '5_cutcopypaste',
     });
 
     menuRegistry.registerMenuItem(MenuId.ExplorerContext, {
@@ -327,7 +354,7 @@ export class FileTreeContribution
         label: localize('file.cut.file'),
       },
       order: 2,
-      group: '3_copy',
+      group: '5_cutcopypaste',
     });
 
     menuRegistry.registerMenuItem(MenuId.ExplorerContext, {
@@ -336,8 +363,7 @@ export class FileTreeContribution
         label: localize('file.paste.file'),
       },
       order: 3,
-      group: '3_copy',
-      when: FilesExplorerFilteredContext.not,
+      group: '5_cutcopypaste',
     });
 
     menuRegistry.registerMenuItem(MenuId.ExplorerContext, {
@@ -345,7 +371,7 @@ export class FileTreeContribution
         id: FILE_COMMANDS.COPY_PATH.id,
         label: localize('file.copy.path'),
       },
-      group: '4_path',
+      group: '6_copypath',
     });
 
     menuRegistry.registerMenuItem(MenuId.ExplorerContext, {
@@ -353,11 +379,16 @@ export class FileTreeContribution
         id: FILE_COMMANDS.COPY_RELATIVE_PATH.id,
         label: localize('file.copy.relativepath'),
       },
-      group: '4_path',
+      group: '6_copypath',
     });
   }
 
   registerCommands(commands: CommandRegistry) {
+    const exitFilterMode = () => {
+      if (this.fileTreeService.filterMode) {
+        this.fileTreeService.toggleFilterMode();
+      }
+    };
     commands.registerCommand(FILE_COMMANDS.OPEN_TERMINAL_WITH_PATH, {
       execute: (uri?: URI) => {
         let directory = uri;
@@ -450,18 +481,21 @@ export class FileTreeContribution
 
     commands.registerCommand<ExplorerContextCallback>(FILE_COMMANDS.DELETE_FILE, {
       execute: (_, uris) => {
+        exitFilterMode();
+        // if there are uris, use them. Otherwise use the selected files
         if (!uris) {
-          if (this.fileTreeModelService.focusedFile) {
-            this.willDeleteUris.push(this.fileTreeModelService.focusedFile.uri);
-          } else if (this.fileTreeModelService.selectedFiles && this.fileTreeModelService.selectedFiles.length > 0) {
+          if (this.fileTreeModelService.selectedFiles && this.fileTreeModelService.selectedFiles.length > 0) {
             this.willDeleteUris = this.willDeleteUris.concat(
               this.fileTreeModelService.selectedFiles.map((file) => file.uri),
             );
-          } else {
-            return;
+          } else if (this.fileTreeModelService.focusedFile) {
+            this.willDeleteUris.push(this.fileTreeModelService.focusedFile.uri);
           }
         } else {
           this.willDeleteUris = this.willDeleteUris.concat(uris);
+        }
+        if (this.willDeleteUris.length === 0) {
+          return;
         }
         return this.deleteThrottler.queue<void>(this.doDelete.bind(this));
       },
@@ -474,6 +508,7 @@ export class FileTreeContribution
 
     commands.registerCommand<ExplorerContextCallback>(FILE_COMMANDS.RENAME_FILE, {
       execute: (uri) => {
+        exitFilterMode();
         if (!uri) {
           if (this.fileTreeModelService.contextMenuFile) {
             uri = this.fileTreeModelService.contextMenuFile.uri;
@@ -494,9 +529,7 @@ export class FileTreeContribution
 
     commands.registerCommand<ExplorerContextCallback>(FILE_COMMANDS.NEW_FILE, {
       execute: async (uri) => {
-        if (this.fileTreeService.filterMode) {
-          this.fileTreeService.toggleFilterMode();
-        }
+        exitFilterMode();
         if (uri) {
           this.fileTreeModelService.newFilePrompt(uri);
         } else {
@@ -519,9 +552,7 @@ export class FileTreeContribution
 
     commands.registerCommand<ExplorerContextCallback>(FILE_COMMANDS.NEW_FOLDER, {
       execute: async (uri) => {
-        if (this.fileTreeService.filterMode) {
-          this.fileTreeService.toggleFilterMode();
-        }
+        exitFilterMode();
         if (uri) {
           this.fileTreeModelService.newDirectoryPrompt(uri);
         } else {
@@ -589,10 +620,10 @@ export class FileTreeContribution
       const items: QuickOpenItem[] = [];
 
       const compareType = (o: IEditorOpenType, t: IEditorOpenType) => {
-        if (t.type === 'code') {
-          return o.type === 'code';
+        if (t.type === EditorOpenType.code) {
+          return o.type === EditorOpenType.code;
         }
-        if (t.type === 'component' && o.type === 'component') {
+        if (t.type === EditorOpenType.component && o.type === EditorOpenType.component) {
           return o.componentId === t.componentId;
         }
         return false;
@@ -721,8 +752,16 @@ export class FileTreeContribution
 
     commands.registerCommand<ExplorerContextCallback>(FILE_COMMANDS.COPY_PATH, {
       execute: async (uri) => {
+        if (!uri) {
+          return;
+        }
         const copyUri: URI = uri;
-        let pathStr: string = decodeURIComponent(copyUri.path.toString());
+        let uriPath = copyUri.path.toString();
+        if (uri.scheme === DIFF_SCHEME) {
+          const query = uri.getParsedQuery();
+          uriPath = new URI(query.modified).path.toString();
+        }
+        let pathStr: string = decodeURIComponent(uriPath);
         // windows下移除路径前的 /
         if ((await this.appService.backendOS) === OperatingSystem.Windows) {
           pathStr = pathStr.slice(1);
@@ -734,6 +773,14 @@ export class FileTreeContribution
 
     commands.registerCommand<ExplorerContextCallback>(FILE_COMMANDS.COPY_RELATIVE_PATH, {
       execute: async (uri) => {
+        if (!uri) {
+          return;
+        }
+        if (uri.scheme === DIFF_SCHEME) {
+          const query = uri.getParsedQuery();
+          // 需要file scheme才能与工作区计算相对路径
+          uri = new URI(query.modified).withScheme('file');
+        }
         let rootUri: URI;
         if (this.fileTreeService.isMultipleWorkspace) {
           // 多工作区额外处理
@@ -827,6 +874,7 @@ export class FileTreeContribution
 
     commands.registerCommand<ExplorerContextCallback>(FILE_COMMANDS.PASTE_FILE, {
       execute: (uri) => {
+        exitFilterMode();
         if (uri) {
           this.fileTreeModelService.pasteFile(uri);
         } else if (this.fileTreeModelService.focusedFile) {
@@ -840,32 +888,37 @@ export class FileTreeContribution
         }
       },
       isEnabled: () =>
-        this.fileTreeModelService.pasteStore && this.fileTreeModelService.pasteStore.type !== PasteTypes.NONE,
+        (this.fileTreeModelService.pasteStore && this.fileTreeModelService.pasteStore.type !== PasteTypes.NONE) ||
+        this.appConfig.isElectronRenderer,
     });
 
-    if (this.appConfig.isElectronRenderer) {
-      commands.registerCommand(FILE_COMMANDS.VSCODE_OPEN_FOLDER, {
-        execute: (uri?: URI, arg?: boolean | { forceNewWindow?: boolean }) => {
-          const windowService: IWindowService = this.injector.get(IWindowService);
-          const options = { newWindow: true };
-          if (typeof arg === 'boolean') {
-            options.newWindow = arg;
-          } else {
-            options.newWindow = typeof arg?.forceNewWindow === 'boolean' ? arg.forceNewWindow : true;
-          }
+    commands.registerCommand(FILE_COMMANDS.VSCODE_OPEN_FOLDER, {
+      execute: (uri?: URI, arg?: boolean | { forceNewWindow?: boolean }) => {
+        const windowService: IWindowService = this.injector.get(IWindowService);
+        const options = { newWindow: true };
+        if (typeof arg === 'boolean') {
+          options.newWindow = arg;
+        } else {
+          options.newWindow = typeof arg?.forceNewWindow === 'boolean' ? arg.forceNewWindow : true;
+        }
 
-          if (uri) {
-            return windowService.openWorkspace(uri, options);
-          }
+        if (uri) {
+          return windowService.openWorkspace(uri, options);
+        }
 
-          return this.commandService.executeCommand(FILE_COMMANDS.OPEN_FOLDER.id, options);
-        },
-      });
+        return this.commandService.executeCommand(FILE_COMMANDS.OPEN_FOLDER.id, options);
+      },
+      isVisible: () => {
+        const supportsOpenWorkspace = this.preferenceService.get<boolean>('application.supportsOpenFolder');
+        return supportsOpenWorkspace ?? false;
+      },
+    });
 
-      commands.registerCommand(FILE_COMMANDS.OPEN_FOLDER, {
-        execute: (options: { newWindow: boolean }) => {
+    commands.registerCommand(FILE_COMMANDS.OPEN_FOLDER, {
+      execute: (options: { newWindow: boolean }) => {
+        const windowService: IWindowService = this.injector.get(IWindowService);
+        if (this.appConfig.isElectronRenderer) {
           const dialogService: IElectronNativeDialogService = this.injector.get(IElectronNativeDialogService);
-          const windowService: IWindowService = this.injector.get(IWindowService);
           dialogService
             .showOpenDialog({
               title: localize('workspace.openDirectory'),
@@ -876,17 +929,37 @@ export class FileTreeContribution
                 windowService.openWorkspace(URI.file(paths[0]), options || { newWindow: true });
               }
             });
-        },
-      });
+        } else {
+          const dialogService: IWindowDialogService = this.injector.get(IWindowDialogService);
+          dialogService
+            .showOpenDialog({
+              title: localize('workspace.openDirectory'),
+              canSelectFiles: false,
+              canSelectFolders: true,
+            })
+            .then((uris) => {
+              if (uris && uris.length > 0) {
+                const workspaceService: IWorkspaceService = this.injector.get(IWorkspaceService);
+                workspaceService.open(uris[0], { preserveWindow: options?.newWindow ?? false });
+              }
+            });
+        }
+      },
+      isVisible: () => {
+        const supportsOpenWorkspace = this.preferenceService.get<boolean>('application.supportsOpenFolder');
+        return supportsOpenWorkspace ?? false;
+      },
+    });
 
-      commands.registerCommand(FILE_COMMANDS.OPEN_WORKSPACE, {
-        execute: (options: { newWindow: boolean }) => {
-          const supportsOpenWorkspace = this.preferenceService.get('application.supportsOpenWorkspace');
-          if (!supportsOpenWorkspace) {
-            return;
-          }
+    commands.registerCommand(FILE_COMMANDS.OPEN_WORKSPACE, {
+      execute: (options?: { newWindow: boolean }) => {
+        const supportsOpenWorkspace = this.preferenceService.get('application.supportsOpenWorkspace');
+        if (!supportsOpenWorkspace) {
+          return;
+        }
+        const windowService: IWindowService = this.injector.get(IWindowService);
+        if (this.appConfig.isElectronRenderer) {
           const dialogService: IElectronNativeDialogService = this.injector.get(IElectronNativeDialogService);
-          const windowService: IWindowService = this.injector.get(IWindowService);
           dialogService
             .showOpenDialog({
               title: localize('workspace.openWorkspace'),
@@ -894,7 +967,7 @@ export class FileTreeContribution
               filters: [
                 {
                   name: localize('workspace.openWorkspaceTitle'),
-                  extensions: [this.workspaceSuffixName],
+                  extensions: [this.workspaceService.workspaceSuffixName],
                 },
               ],
             })
@@ -903,12 +976,36 @@ export class FileTreeContribution
                 windowService.openWorkspace(URI.file(paths[0]), options || { newWindow: true });
               }
             });
-        },
-      });
-    }
+        } else {
+          const dialogService: IWindowDialogService = this.injector.get(IWindowDialogService);
+          dialogService
+            .showOpenDialog({
+              title: localize('workspace.openWorkspace'),
+              canSelectFiles: true,
+              canSelectFolders: false,
+              canSelectMany: false,
+              filters: {
+                workspace: [this.workspaceService.workspaceSuffixName],
+              },
+            })
+            .then((uris) => {
+              if (uris && uris.length > 0) {
+                const workspaceService: IWorkspaceService = this.injector.get(IWorkspaceService);
+                workspaceService.open(uris[0], { preserveWindow: options?.newWindow ?? false });
+              }
+            });
+        }
+      },
+      isVisible: () => {
+        const supportsOpenWorkspace = this.preferenceService.get<boolean>('application.supportsOpenWorkspace');
+        return supportsOpenWorkspace ?? false;
+      },
+    });
 
     commands.registerCommand(FILE_COMMANDS.REVEAL_IN_EXPLORER, {
-      execute: (uri?: URI) => {
+      execute: (uriOrResource?: URI | { uri?: URI }) => {
+        let uri = uriOrResource instanceof URI ? uriOrResource : uriOrResource?.uri;
+
         const handler = this.mainLayoutService.getTabbarHandler(EXPLORER_CONTAINER_ID);
         if (handler && !handler.isVisible) {
           handler.activate();
@@ -920,7 +1017,7 @@ export class FileTreeContribution
           uri = this.workbenchEditorService.currentEditor.currentUri;
         }
         if (uri) {
-          this.fileTreeModelService.location(uri);
+          this.revealFile(URI.parse(uri.toString()));
         }
       },
     });
@@ -989,8 +1086,15 @@ export class FileTreeContribution
       },
     });
 
+    commands.registerCommand(FILE_COMMANDS.TOGGLE_OR_OPEN, {
+      execute: () => {
+        this.fileTreeModelService.toggleOrOpenCurrentFile();
+      },
+    });
+
     commands.registerCommand(WORKSPACE_COMMANDS.REMOVE_WORKSPACE_FOLDER, {
       execute: async (_: URI, uris: URI[]) => {
+        exitFilterMode();
         if (!uris.length || !this.workspaceService.isMultiRootWorkspaceOpened) {
           return;
         }
@@ -1013,7 +1117,7 @@ export class FileTreeContribution
     bindings.registerKeybinding({
       command: FILE_COMMANDS.COPY_FILE.id,
       keybinding: 'ctrlcmd+c',
-      when: `${FilesExplorerFocusedContext.raw} && !${FilesExplorerInputFocusedContext.raw}`,
+      when: `${FilesExplorerFocusedContext.raw} && !${FilesExplorerInputFocusedContext.raw} && !${FilesExplorerFilteredContext.raw}`,
     });
 
     bindings.registerKeybinding({
@@ -1025,12 +1129,12 @@ export class FileTreeContribution
     bindings.registerKeybinding({
       command: FILE_COMMANDS.CUT_FILE.id,
       keybinding: 'ctrlcmd+x',
-      when: `${FilesExplorerFocusedContext.raw} && !${FilesExplorerInputFocusedContext.raw}`,
+      when: `${FilesExplorerFocusedContext.raw} && !${FilesExplorerInputFocusedContext.raw} && !${FilesExplorerFilteredContext.raw}`,
     });
     bindings.registerKeybinding({
       command: FILE_COMMANDS.SELECT_CURRENT_NODE.id,
       keybinding: 'ctrlcmd+a',
-      when: `${FilesExplorerFocusedContext.raw} && !${FilesExplorerInputFocusedContext.raw}`,
+      when: `${FilesExplorerFocusedContext.raw} && !${FilesExplorerInputFocusedContext.raw} && !${FilesExplorerFilteredContext.raw}`,
     });
 
     bindings.registerKeybinding({
@@ -1060,35 +1164,36 @@ export class FileTreeContribution
     bindings.registerKeybinding({
       command: FILE_COMMANDS.NEXT.id,
       keybinding: 'down',
-      when: `${FilesExplorerFocusedContext.raw} && !${FilesExplorerInputFocusedContext.raw}`,
+      when: `${FilesExplorerFocusedContext.raw} && !${FilesExplorerInputFocusedContext.raw} && !${FilesExplorerFilteredContext.raw}`,
     });
 
     bindings.registerKeybinding({
       command: FILE_COMMANDS.PREV.id,
       keybinding: 'up',
-      when: `${FilesExplorerFocusedContext.raw} && !${FilesExplorerInputFocusedContext.raw}`,
+      when: `${FilesExplorerFocusedContext.raw} && !${FilesExplorerInputFocusedContext.raw} && !${FilesExplorerFilteredContext.raw}`,
     });
 
     bindings.registerKeybinding({
       command: FILE_COMMANDS.EXPAND.id,
       keybinding: 'right',
-      when: `${FilesExplorerFocusedContext.raw} && !${FilesExplorerInputFocusedContext.raw}`,
+      when: `${FilesExplorerFocusedContext.raw} && !${FilesExplorerInputFocusedContext.raw} && !${FilesExplorerFilteredContext.raw}`,
     });
 
     bindings.registerKeybinding({
       command: FILE_COMMANDS.COLLAPSE.id,
       keybinding: 'left',
-      when: `${FilesExplorerFocusedContext.raw} && !${FilesExplorerInputFocusedContext.raw}`,
+      when: `${FilesExplorerFocusedContext.raw} && !${FilesExplorerInputFocusedContext.raw} && !${FilesExplorerFilteredContext.raw}`,
     });
 
     bindings.registerKeybinding({
-      command: FILE_COMMANDS.REVEAL_IN_EXPLORER.id,
-      keybinding: 'ctrlcmd+shift+e',
+      command: FILE_COMMANDS.TOGGLE_OR_OPEN.id,
+      keybinding: 'space',
+      when: `${FilesExplorerFocusedContext.raw} && !${FilesExplorerInputFocusedContext.raw} && !${FilesExplorerFilteredContext.raw}`,
     });
   }
 
   registerToolbarItems(registry: ToolbarRegistry) {
-    // 点击聚焦当前编辑器 focus 的文件
+    // 点击聚焦当前编辑器 focused 的文件
     registry.registerItem({
       id: FILE_COMMANDS.LOCATION_WITH_EDITOR.id,
       command: FILE_COMMANDS.LOCATION_WITH_EDITOR.id,
@@ -1139,11 +1244,24 @@ export class FileTreeContribution
       viewId: RESOURCE_VIEW_ID,
       order: 5,
     });
+    registry.registerItem({
+      id: WORKSPACE_COMMANDS.ADD_WORKSPACE_FOLDER.id,
+      command: WORKSPACE_COMMANDS.ADD_WORKSPACE_FOLDER.id,
+      label: localize('workspace.addFolderToWorkspace'),
+      viewId: RESOURCE_VIEW_ID,
+      order: 0,
+      group: 'file_explore_workspace',
+      when: 'config.workspace.supportMultiRootWorkspace',
+    });
   }
 
   private doDelete() {
     const uris = this.willDeleteUris.slice();
     this.willDeleteUris = [];
     return this.fileTreeModelService.deleteFileByUris(uris);
+  }
+
+  dispose() {
+    this._disposables.dispose();
   }
 }

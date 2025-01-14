@@ -1,20 +1,11 @@
-@import '~@opensumi/ide-components/lib/style/mixins.less';
-@import '~@opensumi/ide-core-browser/lib/style/variable.less';
-@TAB_HEIGHT: var(--tabBar-height);
-
-:global {
-  :root {
-    --tab-fontSize: 12px;
-    --tab-min-size: 112px;
-    --tab-max-size: 800px;
-  }
-}
+@import '@opensumi/ide-components/lib/style/mixins.less';
+@import '@opensumi/ide-core-browser/lib/style/variable.less';
 
 .kt_workbench_editor {
   height: 100%;
   background-color: var(--editor-background);
-  border-top: 1px solid var(--tab-border);
   display: flex;
+  border-top: 1px solid var(--tab-border);
 }
 .kt_editor_main_wrapper {
   flex-grow: 1;
@@ -57,19 +48,45 @@
     position: absolute;
     width: 100%;
     height: 100%;
+    pointer-events: none;
   }
   .kt_editor_tabs {
     display: flex;
+    .editor_actions_no_actions {
+      padding: 0 !important;
+    }
     .editor_actions {
       flex-shrink: 0;
-      height: @TAB_HEIGHT;
+      height: 100%;
       box-sizing: border-box;
       display: flex;
       justify-content: center;
       align-items: center;
       padding: 0 5px 0 10px;
+      position: relative;
       background: var(--editorGroupHeader-tabsBackground);
-      border-bottom: 1px solid var(--tab-border);
+      &::before {
+        content: '';
+        height: 1px;
+        background: var(--tab-border);
+        top: -1px;
+        width: 100%;
+        left: 0;
+        position: absolute;
+        display: block;
+        z-index: var(--stacking-level-background, 0);
+      }
+      &::after {
+        content: '';
+        height: 1px;
+        background: var(--tab-border);
+        bottom: 0;
+        width: 100%;
+        left: 0;
+        position: absolute;
+        display: block;
+        z-index: var(--stacking-level-background, 0);
+      }
       .editor_action_wrapper {
         margin-left: 8px;
         position: relative;
@@ -82,7 +99,7 @@
         }
         &:hover {
           > .editor-action {
-            transform: scale(1.2);
+            transform: scale(1.1);
           }
         }
         &:global {
@@ -97,28 +114,28 @@
   }
 
   .kt_editor_tabs_scroll_wrapper {
-    flex-grow: 1;
-    width: 10px;
-    :global(.thumb-vertical) {
-      opacity: 0 !important;
+    flex: 1;
+    overflow: hidden;
+    width: 100%;
+    position: relative;
+    background-color: var(--editorGroupHeader-tabsBackground);
+    &::after {
+      position: absolute;
+      content: '';
+      height: 1px;
+      width: 100%;
+      bottom: 0;
+      left: 0;
+      z-index: 10;
+      background-color: var(--tab-border);
+    }
+    &.kt_on_drag_over {
+      background-color: var(--editorGroup-dropBackground);
     }
   }
 
   .kt_editor_tabs_scroll {
     overflow-y: hidden;
-    background: var(--editorGroupHeader-tabsBackground);
-    &::before {
-      content: '';
-      height: 1px;
-      background: var(--tab-border);
-      bottom: 0;
-      width: 100%;
-      left: 0;
-      position: absolute;
-      display: block;
-      z-index: 0;
-    }
-
     :global(.loading_indicator) {
       width: 16px;
       height: 22px;
@@ -137,11 +154,21 @@
     bottom: 0;
   }
 
+  .kt_editor_tabs_content_empty {
+    display: flex !important;
+  }
+
   .kt_editor_wrap_container {
+    display: flex;
+    flex-direction: column;
+
     .kt_editor_tabs_content {
       flex-wrap: wrap;
       width: 100%;
       background: var(--editorGroupHeader-tabsBackground);
+      &.kt_editor_tabs_current_last {
+        display: flex;
+      }
       &::before {
         content: '';
         height: 1px;
@@ -151,7 +178,7 @@
         left: 0;
         position: absolute;
         display: block;
-        z-index: 0;
+        z-index: var(--stacking-level-background, 0);
       }
     }
   }
@@ -162,6 +189,7 @@
     overflow-y: hidden;
     display: inline-flex;
     position: relative;
+    height: 100%;
     &.kt_on_drag_over {
       background-color: var(--editorGroup-dropBackground);
     }
@@ -172,22 +200,29 @@
       display: flex;
       position: relative;
       align-items: center;
-      flex-shrink: 0;
-      flex-grow: 0.5;
       padding: 0 12px;
       border-right: 1px solid var(--tab-border);
-      height: @TAB_HEIGHT;
-      line-height: @TAB_HEIGHT;
-      font-size: var(--tab-fontSize);
-      min-width: var(--tab-min-size);
+      height: 100%;
+      line-height: 100%;
+      font-size: 12px;
+      min-width: 112px;
       cursor: pointer;
       color: var(--tab-inactiveForeground);
       background: var(--tab-inactiveBackground);
-      border-bottom: 1px solid var(--tab-border);
       border-top: 1px solid transparent;
-      box-sizing: border-box;
       z-index: 1;
-
+      word-break: keep-all;
+      white-space: nowrap;
+      &::after {
+        position: absolute;
+        content: '';
+        height: 1px;
+        width: 100%;
+        bottom: 0;
+        left: 0;
+        z-index: 10;
+        background-color: var(--tab-border);
+      }
       .tab_loading {
         display: block;
         position: absolute;
@@ -202,6 +237,7 @@
         transform: scale(0.8);
       }
       &:hover {
+        color: var(--tab-hoverForeground);
         background-color: var(--tab-hoverBackground);
       }
       div:first-child {
@@ -213,17 +249,26 @@
           background-position: 2px;
         }
       }
+
+      &:last-child {
+        margin-right: 10px;
+      }
+
+      .editor_readonly_icon {
+        margin-left: 8px;
+      }
       .kt_editor_close_icon {
+        margin-right: 0 !important;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         &::before {
           font-size: 14px;
         }
       }
       div:nth-child(2) {
-        white-space: nowrap;
         flex-grow: 1;
         text-align: left;
-        text-overflow: ellipsis;
-        overflow: hidden;
       }
       .subname {
         color: var(--descriptionForeground);
@@ -244,8 +289,8 @@
         border-radius: 4px;
         padding: 1px;
         &:hover {
-          transform: scale(1.2);
-          background-color: var(--kt-defaultButton-hoverBackground);
+          transform: scale(1.1);
+          background-color: var(--kt-icon-hoverBackground);
         }
       }
       .dirty {
@@ -261,17 +306,34 @@
         }
       }
       &.kt_editor_tab_current {
+        position: relative;
         background: var(--tab-activeBackground);
         color: var(--tab-activeForeground);
-        border-bottom: 1px solid var(--tab-activeBackground);
-        border-bottom-color: var(--tab-activeBorder);
-        border-top: 1px solid var(--tab-activeBackground);
-        border-top-color: var(--tab-activeBorderTop);
+        z-index: var(--stacking-level-editor-tabbar-current, 11);
+        &::before {
+          position: absolute;
+          content: '';
+          height: 1px;
+          width: 100%;
+          top: -1px;
+          left: 0;
+          z-index: var(--stacking-level-overlay, 800);
+          background-color: var(--tab-activeBorderTop);
+        }
         .dirty {
           &::before {
             background-color: var(--kt-dirtyDot-foreground);
           }
         }
+      }
+      &.kt_editor_tab_current_prev {
+        display: flex;
+      }
+      &.kt_editor_tab_current_next {
+        display: flex;
+      }
+      &.kt_editor_tab_dirty {
+        display: flex;
       }
       &.kt_on_drag_over {
         background-color: var(--editorGroup-dropBackground);
@@ -291,12 +353,13 @@
   }
 
   .editorGroupHeader {
-    z-index: 0;
+    z-index: var(--stacking-level-workbench, 1);
     position: relative;
+    background-color: var(--editorGroupHeader-tabsBackground);
   }
 
   .kt_editor_body {
-    height: calc(~'100% - @{TAB_HEIGHT}');
+    flex: 1;
     position: relative;
     background-repeat: no-repeat;
     background-position: center;
@@ -432,7 +495,7 @@
   .overlay-shadow();
   border-radius: 2px;
   padding: 5px 10px;
-  z-index: 10001;
+  z-index: var(--stacking-level-overlay-top, 1000);
   white-space: nowrap;
   .editor_action_tip_close {
     cursor: pointer;
@@ -485,6 +548,10 @@
 
 .kt_editor_side_widgets {
   &.kt_editor_side_widgets_bottom {
+    display: block;
+    flex-shrink: 0;
+  }
+  &.kt_editor_side_widgets_top {
     display: block;
     flex-shrink: 0;
   }

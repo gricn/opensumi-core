@@ -1,13 +1,14 @@
-import { Terminal, ILink } from 'xterm';
+import { ILink, Terminal } from '@xterm/xterm';
 
-import { createBrowserInjector } from '../../../../../tools/dev-tool/src/injector-helper';
+import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
+
 import { TerminalProtocolLinkProvider } from '../../../src/browser/links/protocol-link-provider';
 
 describe('Workbench - TerminalWebLinkProvider', () => {
   const injector = createBrowserInjector([]);
 
   async function assertLink(text: string, expected: { text: string; range: [number, number][] }[]) {
-    const xterm = new Terminal();
+    const xterm = new Terminal({ allowProposedApi: true });
     const provider = injector.get(TerminalProtocolLinkProvider, [
       xterm,
       () => {},

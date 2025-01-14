@@ -1,5 +1,5 @@
-import { Injectable, Autowired } from '@opensumi/di';
-import { IDisposable, MaybePromise, Event, URI } from '@opensumi/ide-utils';
+import { Autowired, Injectable } from '@opensumi/di';
+import { Event, IDisposable, MaybePromise, URI } from '@opensumi/ide-utils';
 
 import { ContributionProvider } from './contribution-provider';
 
@@ -42,6 +42,8 @@ export const STORAGE_SCHEMA = {
   GLOBAL: 'gldb',
 };
 
+// 在该对象定义的存储对象在初始化阶段时将默认通过 LocalStorage 缓存
+// ref: https://github.com/opensumi/core/blob/f512897d691f1aa0d89ff6469ff2251ab2124f71/packages/storage/src/browser/storage.contribution.ts#L49
 export const STORAGE_NAMESPACE = {
   // workspace database
   WORKBENCH: new URI('workbench').withScheme(STORAGE_SCHEMA.SCOPE),
@@ -72,14 +74,15 @@ export class DefaultStorageProvider {
       return this.storageCacheMap.get(storageId.toString());
     }
     const resolvers = this.resolversProvider.getContributions();
-    for (const resolver of resolvers) {
-      const storageResolver = await resolver.resolve(storageId);
-      if (storageResolver) {
-        this.storageCacheMap.set(storageId.toString(), storageResolver);
-        return storageResolver;
-      }
-    }
-    return;
+    return Promise.race(
+      resolvers.map(async (resolver) => {
+        const storageResolver = await resolver.resolve(storageId);
+        if (storageResolver) {
+          this.storageCacheMap.set(storageId.toString(), storageResolver);
+          return storageResolver;
+        }
+      }),
+    );
   }
 }
 

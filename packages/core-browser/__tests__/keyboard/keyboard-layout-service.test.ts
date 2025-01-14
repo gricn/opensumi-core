@@ -1,17 +1,15 @@
 import {
-  ILogger,
   GlobalBrowserStorageService,
-  KeyboardNativeLayoutService,
-  Key,
-  KeyboardLayoutService,
-  KeyCode,
   ILinuxKeyboardLayoutInfo,
+  Key,
+  KeyCode,
+  KeyboardLayoutService,
+  KeyboardNativeLayoutService,
   isOSX,
 } from '@opensumi/ide-core-browser';
 
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
-import { MockLogger } from '../../__mocks__/logger';
 import { KeyboardLayoutContribution } from '../../src/keyboard/layouts/_.contribution';
 
 describe('KeyboardLayoutService should be work', () => {
@@ -34,10 +32,6 @@ describe('KeyboardLayoutService should be work', () => {
           token: GlobalBrowserStorageService,
           useValue: mockGlobalBrowserStorageService,
         },
-        {
-          token: ILogger,
-          useClass: MockLogger,
-        },
       ]),
     );
 
@@ -46,8 +40,8 @@ describe('KeyboardLayoutService should be work', () => {
     await keyboardLayoutService.initialize();
   });
 
-  afterAll(() => {
-    injector.disposeAll();
+  afterAll(async () => {
+    await injector.disposeAll();
   });
 
   describe('#init', () => {
@@ -78,10 +72,10 @@ describe('KeyboardLayoutService should be work', () => {
       );
       const disposable = keyboardLayoutService.onKeyboardLayoutChanged(() => {
         const toggleComment = keyboardLayoutService.resolveKeyCode(KeyCode.createKeyCode('Slash+M1'));
-        expect(toggleComment.toString()).toBe(`${isOSX ? '⌘' : 'Ctrl'}+/`);
+        expect(toggleComment.toString()).toBe(`${isOSX ? 'Cmd' : 'Ctrl'}+/`);
         expect(keyboardLayoutService.getKeyboardCharacter(toggleComment.key!)).toBe('/');
         const indentLine = keyboardLayoutService.resolveKeyCode(KeyCode.createKeyCode('BracketRight+M1'));
-        expect(indentLine.toString()).toBe(`${isOSX ? '⌘' : 'Ctrl'}+]`);
+        expect(indentLine.toString()).toBe(`${isOSX ? 'Cmd' : 'Ctrl'}+]`);
         expect(keyboardLayoutService.getKeyboardCharacter(indentLine.key!)).toBe(']');
         disposable.dispose();
         done();

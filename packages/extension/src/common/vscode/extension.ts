@@ -3,7 +3,10 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { strings, IExtensionProps } from '@opensumi/ide-core-common';
+import { IExtensionProps, strings } from '@opensumi/ide-core-common';
+
+import { IExtensionWalkthrough } from './walkthrough';
+
 import type { Uri } from '@opensumi/ide-core-common';
 
 const { equalsIgnoreCase } = strings;
@@ -88,7 +91,7 @@ export interface IView {
 export interface IColor {
   id: string;
   description: string;
-  defaults: { light: string; dark: string; highContrast: string };
+  defaults: { light: string; dark: string; highContrast: string; highContrastLight: string };
 }
 
 export interface IExtensionContributions {
@@ -103,8 +106,10 @@ export interface IExtensionContributions {
   snippets?: ISnippet[];
   themes?: ITheme[];
   iconThemes?: ITheme[];
+  productIconThemes?: ITheme[];
   viewsContainers?: { [location: string]: IViewContainer[] };
   views?: { [location: string]: IView[] };
+  walkthroughs?: IExtensionWalkthrough[];
   colors?: IColor[];
   localizations?: any[]; // ILocalization[];
 }
@@ -125,6 +130,7 @@ export interface IExtensionManifest {
   readonly description?: string;
   readonly main?: string;
   readonly browser?: string;
+  readonly l10n?: string;
   readonly icon?: string;
   readonly categories?: string[];
   readonly keywords?: string[];
@@ -210,15 +216,27 @@ export interface IExtensionDescription extends IExtensionManifest, IExtensionPro
   enableProposedApi: boolean;
 }
 
-export function isLanguagePackExtension(manifest: { [key: string]: any }): boolean {
-  return manifest.contributes && manifest.contributes.localizations
-    ? manifest.contributes.localizations.length > 0
-    : false;
-}
-
-export function throwProposedApiError(extension: IExtensionDescription): never {
-  // do we support `--enable-proposed-api`
+export function throwProposedApiError(extension: IExtensionDescription): void {
+  // eslint-disable-next-line no-console
   throw new Error(
     `[${extension.name}]: Proposed API is only available when running out of dev or with the following command line switch: --enable-proposed-api ${extension.id}`,
   );
+}
+
+export interface IExtensionLanguagePackMetadata {
+  [languageId: string]: IExtensionLanguagePack;
+}
+
+export interface IExtensionLanguagePack {
+  hash: string;
+  extensions: {
+    version: string;
+    extensionIdentifier: {
+      id: string;
+      uuid: string;
+    };
+  }[];
+  translations: {
+    [key: string]: string;
+  };
 }

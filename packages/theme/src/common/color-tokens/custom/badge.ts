@@ -1,6 +1,7 @@
 import { localize } from '@opensumi/ide-core-common';
 
-import { registerColor } from '../../color-registry';
+import { registerColor } from '../../utils';
+import { badgeBackground } from '../badge';
 import { contrastBorder } from '../base';
 
 export const ActivityBarBadgeBorder = registerColor(
@@ -8,7 +9,8 @@ export const ActivityBarBadgeBorder = registerColor(
   {
     dark: null,
     light: null,
-    hc: contrastBorder,
+    hcDark: contrastBorder,
+    hcLight: contrastBorder,
   },
   localize(
     'activityBarBadgeBorder',
@@ -19,9 +21,10 @@ export const ActivityBarBadgeBorder = registerColor(
 export const BadgeBorder = registerColor(
   'kt.badge.border',
   {
-    dark: null,
-    light: null,
-    hc: contrastBorder,
+    dark: badgeBackground,
+    light: badgeBackground,
+    hcDark: contrastBorder,
+    hcLight: contrastBorder,
   },
   localize('badgeBorder', 'Badge border color. Badges are small information labels, e.g. for search results count.'),
 );

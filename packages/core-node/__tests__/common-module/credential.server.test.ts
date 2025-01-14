@@ -1,7 +1,6 @@
 import { AppConfig, ILogServiceManager, INativeCredentialService, isLinux } from '@opensumi/ide-core-node';
 
-import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
-import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
+import { MockInjector, createNodeInjector } from '../../../../tools/dev-tool/src/mock-injector';
 import { CredentialService } from '../../src/common-module/credential.server';
 
 describe('test for core-browser/src/services/credentials-service.ts', () => {
@@ -11,8 +10,16 @@ describe('test for core-browser/src/services/credentials-service.ts', () => {
     service: 'test',
     account: 'test',
   };
+
+  const mockKeytar = {
+    setPassword: jest.fn(),
+    deletePassword: jest.fn(() => true),
+    getPassword: jest.fn(),
+    findPassword: jest.fn(),
+    findCredentials: jest.fn(() => []),
+  };
   beforeAll(() => {
-    injector = createBrowserInjector([]);
+    injector = createNodeInjector([]);
     injector.addProviders(
       {
         token: AppConfig,
@@ -29,11 +36,12 @@ describe('test for core-browser/src/services/credentials-service.ts', () => {
         },
       },
     );
+    injector.mock(INativeCredentialService, 'withKeytar', () => Promise.resolve(mockKeytar));
     credentialsService = injector.get<INativeCredentialService>(INativeCredentialService);
   });
 
-  afterAll(() => {
-    injector.disposeAll();
+  afterAll(async () => {
+    await injector.disposeAll();
   });
 
   (isLinux ? it.skip : it)('setPassword', async () => {

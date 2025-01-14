@@ -1,13 +1,13 @@
-import React, { useCallback, useState } from 'react';
+import React, { ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Icon, getIcon, Button, Tabs } from '@opensumi/ide-components';
-import { ProgressBar } from '@opensumi/ide-core-browser/lib/components/progressbar';
+import { Button, Icon, Tabs, getIcon } from '@opensumi/ide-components';
+import { Progress } from '@opensumi/ide-core-browser/lib/progress/progress-bar';
 import { useInjectable } from '@opensumi/ide-core-browser/lib/react-hooks/injectable-hooks';
 import { localize, replaceLocalizePlaceholder } from '@opensumi/ide-core-common';
 import { ReactEditorComponent } from '@opensumi/ide-editor/lib/browser';
 import { Markdown } from '@opensumi/ide-markdown';
 
-import { InstallState, IVSXExtensionService, VSXExtension, VSXExtensionServiceToken } from '../../common';
+import { IVSXExtensionService, InstallState, VSXExtension, VSXExtensionServiceToken } from '../../common';
 import { VSXExtensionRaw } from '../../common/vsx-registry-types';
 
 import styles from './overview.module.less';
@@ -28,12 +28,23 @@ interface IExtensionMetadata {
   installed?: boolean;
 }
 
+const enum ExtensionStatus {
+  CAN_INSTALL,
+  INSTALLING,
+  UNINSTALLING,
+  UNINSTALLED,
+  INSTALLED,
+  ENABLING,
+}
+
 export const ExtensionOverview: ReactEditorComponent<
   VSXExtensionRaw & VSXExtension & { state: string; extensionId: string; openVSXRegistry: string }
 > = ({ resource }) => {
   const vsxExtensionService = useInjectable<IVSXExtensionService>(VSXExtensionServiceToken);
   const [loading, setLoading] = useState(true);
-  const [installing, setInstalling] = useState<boolean>(false);
+  const [extensionStatus, setExtensionStatus] = useState<ExtensionStatus>(
+    resource.metadata?.state === InstallState.INSTALLED ? ExtensionStatus.INSTALLED : ExtensionStatus.CAN_INSTALL,
+  );
   const [activateKey, setActivateKey] = useState(TabActiveKey.details);
   const [metadata, setMetadata] = useState<IExtensionMetadata>({});
 
@@ -44,51 +55,143 @@ export const ExtensionOverview: ReactEditorComponent<
     }
   }, []);
 
-  const getExtensionMetadata = useCallback(
-    ({ readme, changelog }: { [prop: string]: string | undefined }) =>
-      [
-        readme && fetch(readme).then((res) => res.text()),
-        changelog && fetch(changelog).then((res) => res.text()),
-      ].filter(Boolean),
-    [],
-  );
-
   const initExtensionMetadata = useCallback(async () => {
-    const extension = await vsxExtensionService.getRemoteRawExtension(resource.metadata!.extensionId);
+    const extension = await vsxExtensionService.getRemoteRawExtension(resource.metadata?.extensionId);
+
     if (extension) {
-      const tasks = getExtensionMetadata({ readme: extension.files.readme, changelog: extension.files.changelog });
+      const tasks = ['readme', 'changelog'].map((key) => {
+        const file = extension.files?.[key];
+
+        return file ? fetch(file).then((res) => res.text()) : extension[key] ?? '';
+      });
+
       const [readme, changelog] = await Promise.all(tasks);
       setMetadata({ readme, changelog, downloadCount: extension.downloadCount });
     }
     setLoading(false);
   }, [resource]);
 
-  const onInstallCallback = useCallback(
-    async (e: React.MouseEvent) => {
-      e.stopPropagation();
-      const extension = await vsxExtensionService.getLocalExtension(resource.metadata!.extensionId);
-      if (extension) {
-        setInstalling(true);
-        vsxExtensionService.install(extension).finally(() => {
-          setInstalling(false);
-        });
-      }
-    },
-    [resource],
-  );
+  const install = useCallback(async () => {
+    const extension = await vsxExtensionService.getLocalExtension(resource.metadata?.extensionId);
+    if (extension) {
+      setExtensionStatus(ExtensionStatus.INSTALLING);
+      vsxExtensionService.install(extension).finally(() => {
+        setExtensionStatus(ExtensionStatus.INSTALLED);
+      });
+    }
+  }, [resource]);
 
-  React.useEffect(() => {
+  const uninstall = useCallback(async () => {
+    const extension = await vsxExtensionService.getLocalExtension(resource.metadata?.extensionId);
+    if (extension) {
+      setExtensionStatus(ExtensionStatus.UNINSTALLING);
+      vsxExtensionService.uninstall(extension).finally(() => {
+        setExtensionStatus(ExtensionStatus.UNINSTALLED);
+      });
+    }
+  }, [resource]);
+
+  useEffect(() => {
     initExtensionMetadata();
   }, [resource]);
 
+  const operatorButtons = useMemo(() => {
+    const buttons: ReactNode[] = [];
+    if (resource.metadata?.state !== InstallState.NOT_INSTALLED) {
+      if (extensionStatus !== ExtensionStatus.UNINSTALLED) {
+        buttons.push(
+          <Button
+            size='small'
+            key={'uninstall'}
+            onClick={uninstall}
+            disabled={extensionStatus === ExtensionStatus.UNINSTALLING}
+          >
+            {localize(
+              extensionStatus === ExtensionStatus.UNINSTALLING
+                ? 'marketplace.extension.uninstalling'
+                : 'marketplace.extension.uninstall',
+            )}
+          </Button>,
+        );
+      } else {
+        buttons.push(
+          <Button size='small' key={'uninstalled'} disabled>
+            {localize('marketplace.extension.uninstalled')}
+          </Button>,
+        );
+        return buttons;
+      }
+    }
+    if (resource.metadata?.state === InstallState.NOT_INSTALLED) {
+      if (extensionStatus === ExtensionStatus.INSTALLED) {
+        buttons.push(
+          <Button size='small' key={'installed'} disabled>
+            {localize('marketplace.extension.installed')}
+          </Button>,
+        );
+      } else {
+        buttons.push(
+          <Button
+            size='small'
+            key={'install'}
+            onClick={install}
+            disabled={extensionStatus !== ExtensionStatus.CAN_INSTALL}
+          >
+            {localize(
+              extensionStatus === ExtensionStatus.INSTALLING
+                ? 'marketplace.extension.installing'
+                : 'marketplace.extension.install',
+            )}
+          </Button>,
+        );
+      }
+    } else if (resource.metadata?.state === InstallState.SHOULD_UPDATE) {
+      if (extensionStatus === ExtensionStatus.INSTALLED) {
+        buttons.push(
+          <Button size='small' key={'installed'} disabled>
+            {localize('marketplace.extension.installed')}
+          </Button>,
+        );
+      } else {
+        buttons.push(
+          <Button
+            size='small'
+            key={'update'}
+            onClick={install}
+            disabled={extensionStatus !== ExtensionStatus.CAN_INSTALL}
+          >
+            {localize(
+              extensionStatus === ExtensionStatus.INSTALLING
+                ? 'marketplace.extension.updating'
+                : 'marketplace.extension.update',
+            )}
+          </Button>,
+        );
+      }
+    } else {
+      buttons.push(
+        <Button size='small' key={'installed'} disabled>
+          {localize('marketplace.extension.installed')}
+        </Button>,
+      );
+    }
+    return buttons;
+  }, [resource, extensionStatus]);
+
   return (
     <div className={styles.extension_overview_container}>
-      <ProgressBar loading={loading} />
+      <Progress loading={loading} />
       <div className={styles.extension_overview_header}>
-        <img
-          src={resource.metadata?.iconUrl || `${resource.metadata?.openVSXRegistry}/default-icon.png`}
-          alt={replaceLocalizePlaceholder(resource.metadata?.displayName, resource.metadata?.extensionId)}
-        />
+        {resource.metadata?.iconUrl ? (
+          <img
+            src={resource.metadata?.iconUrl}
+            alt={replaceLocalizePlaceholder(resource.metadata?.displayName, resource.metadata?.extensionId)}
+          />
+        ) : (
+          <div className={styles.default_icon}>
+            <Icon iconClass={getIcon('extension')} />
+          </div>
+        )}
         <div className={styles.extension_detail}>
           <div className={styles.extension_name}>
             <h1>
@@ -137,21 +240,7 @@ export const ExtensionOverview: ReactEditorComponent<
           <div className={styles.description}>
             {replaceLocalizePlaceholder(resource.metadata?.description, resource.metadata?.extensionId)}
           </div>
-          <div className={styles.button}>
-            {resource.metadata?.state === InstallState.NOT_INSTALLED && (
-              <Button size='small' onClick={onInstallCallback} disabled={installing}>
-                {localize(installing ? 'marketplace.extension.installing' : 'marketplace.extension.install')}
-              </Button>
-            )}
-            {resource.metadata?.state === InstallState.SHOULD_UPDATE && (
-              <Button size='small' onClick={onInstallCallback} disabled={installing}>
-                {localize(installing ? 'marketplace.extension.updating' : 'marketplace.extension.update')}
-              </Button>
-            )}
-            {resource.metadata?.state === InstallState.INSTALLED && (
-              <span>{localize('marketplace.extension.installed')}</span>
-            )}
-          </div>
+          <div className={styles.buttons}>{operatorButtons}</div>
         </div>
       </div>
       <div className={styles.extension_overview_body}>

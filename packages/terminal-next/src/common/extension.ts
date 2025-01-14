@@ -1,6 +1,6 @@
-import type vscode from 'vscode';
-
 import { Event, IDisposable, URI } from '@opensumi/ide-core-common';
+
+import type vscode from 'vscode';
 
 export interface IProcessDataEvent {
   data: string;
@@ -139,6 +139,9 @@ export interface ITerminalChildProcess {
 }
 
 export interface ITerminalProcessExtHostProxy extends IDisposable {
+  /**
+   * 这个 id 是由 clientId 和 shortId 拼接而成的
+   */
   readonly terminalId: string;
 
   emitData(data: string): void;

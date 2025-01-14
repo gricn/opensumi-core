@@ -11,11 +11,11 @@ const getExtensionDir = () => {
   if (appPath.indexOf('app.asar') > -1) {
     return join(appPath, './../extensions');
   }
-  return join(appPath, './extensions');
+  return join(appPath, '../extensions');
 };
 
 const electronApp = new ElectronMainApp({
-  browserNodeIntegrated: false,
+  browserNodeIntegrated: true,
   browserUrl: URI.file(join(__dirname, '../browser/index.html')).toString(),
   modules: [WebviewElectronMainModule],
   nodeEntry: join(__dirname, '../node/index.js'),

@@ -1,5 +1,5 @@
-import { TreeNode, CompositeTreeNode, ITree } from '@opensumi/ide-components';
-import { formatLocalize, URI } from '@opensumi/ide-core-browser';
+import { CompositeTreeNode, ITree, TreeNode } from '@opensumi/ide-components';
+import { URI, formatLocalize } from '@opensumi/ide-core-browser';
 import { IEditorGroup, IResource } from '@opensumi/ide-editor';
 
 import { OpenedEditorService } from './services/opened-editor-tree.service';
@@ -11,18 +11,12 @@ export class EditorFileRoot extends CompositeTreeNode {
     return !!node && !node.parent;
   }
 
-  constructor(tree: OpenedEditorService, id?: number) {
+  constructor(tree: OpenedEditorService) {
     super(tree as ITree, undefined);
-    // 根节点默认展开节点
-    this.id = id || this.id;
   }
 
   get expanded() {
     return true;
-  }
-
-  dispose() {
-    super.dispose();
   }
 }
 
@@ -38,10 +32,9 @@ export class EditorFileGroup extends CompositeTreeNode {
 
   private groupIndex: number;
 
-  constructor(tree: OpenedEditorService, public readonly group: IEditorGroup, parent: EditorFileRoot, id?: number) {
+  constructor(tree: OpenedEditorService, public readonly group: IEditorGroup, parent: EditorFileRoot) {
     super(tree as ITree, parent);
     this.groupIndex = this.group.index;
-    this.id = id || this.id;
   }
 
   get expanded() {
@@ -66,15 +59,18 @@ export class EditorFileGroup extends CompositeTreeNode {
 }
 
 export class EditorFile extends TreeNode {
+  public static is(node: any): node is EditorFile {
+    return TreeNode.is(node) && 'uri' in node;
+  }
+
   constructor(
     tree: OpenedEditorService,
     public readonly resource: IResource,
     public tooltip: string,
+    public dirty: boolean = false,
     parent: EditorFileGroup | undefined,
-    id?: number,
   ) {
-    super(tree as ITree, parent, undefined, { name: `${resource.uri.path.toString()}` });
-    this.id = id || this.id;
+    super(tree as ITree, parent, undefined, { name: `${resource.uri.toString()}` });
   }
 
   get displayName() {
@@ -83,9 +79,5 @@ export class EditorFile extends TreeNode {
 
   get uri() {
     return this.resource ? this.resource.uri : new URI();
-  }
-
-  dispose() {
-    super.dispose();
   }
 }

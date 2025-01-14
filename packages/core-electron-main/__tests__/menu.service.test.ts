@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 
 import { Injector } from '@opensumi/di';
+import { isWindows } from '@opensumi/ide-core-common';
 
 import { mockService } from '../../../tools/dev-tool/src/mock-injector';
 
@@ -32,7 +33,6 @@ jest.mock('electron', () => ({
 // eslint-disable-next-line import/order
 import { BrowserWindow, Menu } from 'electron';
 
-import { isWindows } from '../../core-node/lib';
 import { ElectronMainMenuService } from '../src/bootstrap/services/menu';
 
 async function delay(ms: number) {
@@ -72,7 +72,7 @@ describe('electron main menu tests', () => {
     emitter.emit('focus');
 
     await delay(1);
-    expect(Menu.setApplicationMenu).toBeCalledWith(
+    expect(Menu.setApplicationMenu).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
           label: 'test1',
@@ -97,7 +97,7 @@ describe('electron main menu tests', () => {
     (Menu.setApplicationMenu as jest.Mock).mockClear();
     emitter.emit('focus');
     await delay(1);
-    expect(Menu.setApplicationMenu).toBeCalledWith(
+    expect(Menu.setApplicationMenu).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
           label: 'test2',

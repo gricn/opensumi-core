@@ -1,13 +1,13 @@
-import * as jest from 'jest';
 import { Config } from '@jest/types';
-import { argv } from 'yargs';
+import * as jest from 'jest';
 
-export async function runTest(target: string, project?: string) {
-  console.log(argv);
+import { argv } from '../../packages/core-common/src/node/cli';
 
+export async function runTest(target: string, options: { project?: string; runInBand?: boolean } = {}) {
+  const { project, runInBand } = options;
   return await jest.runCLI(
     {
-      runInBand: true,
+      runInBand,
       bail: true,
       passWithNoTests: true,
       testPathPattern: [`packages\/${target}\/__tests?__\/.*\\.(test|spec)\\.[jt]sx?$`],
@@ -15,7 +15,7 @@ export async function runTest(target: string, project?: string) {
       detectOpenHandles: true,
       forceExit: true,
       ...argv,
-    } as Config.Argv,
+    } as unknown as Config.Argv,
     [process.cwd()],
   );
 }

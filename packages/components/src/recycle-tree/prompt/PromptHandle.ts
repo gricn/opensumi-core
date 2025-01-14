@@ -1,6 +1,7 @@
 import { DisposableCollection, Emitter, Event, IAsyncResult } from '@opensumi/ide-utils';
 
-import { bindInputElement, ProxiedInputProp } from '../../input';
+import { ProxiedInputProp, bindInputElement } from '../../input';
+import { createMarkedRenderer, toMarkdownHtml } from '../../utils';
 
 const delay = (ms) => new Promise((res) => setTimeout(res, ms));
 
@@ -16,7 +17,7 @@ export interface PromptValidateMessage {
 }
 
 export enum VALIDATE_CLASS_NAME {
-  INFO = 'validate-error',
+  INFO = 'validate-info',
   ERROR = 'validate-error',
   WARNING = 'validate-warning',
 }
@@ -36,6 +37,7 @@ export abstract class PromptHandle {
   private _hasValidateElement = false;
   private _hasAddonAfter = false;
   private _validateClassName: string;
+  private _inComposition = false;
 
   // event
   private onChangeEmitter: Emitter<string> = new Emitter();
@@ -44,6 +46,7 @@ export abstract class PromptHandle {
   private onFocusEmitter: Emitter<string> = new Emitter();
   private onBlurEmitter: Emitter<string> = new Emitter();
   private onDestroyEmitter: Emitter<string> = new Emitter();
+  private markdownRenderer = createMarkedRenderer();
 
   constructor() {
     this.$ = document.createElement('input');
@@ -56,12 +59,15 @@ export abstract class PromptHandle {
     this.$.setAttribute('autoComplete', 'off');
     this.ProxiedInput = bindInputElement(this.$);
     this.$.addEventListener('click', this.handleClick);
+    this.$.addEventListener('dblclick', this.handleDBClick);
     this.$.addEventListener('keyup', this.handleKeyup);
     this.$.addEventListener('keydown', this.handleKeydown);
     this.$.addEventListener('focus', this.handleFocus);
     this.$.addEventListener('blur', this.handleBlur);
+    this.$.addEventListener('compositionstart', this.handleCompositionstart);
+    this.$.addEventListener('compositionend', this.handleCompositionend);
     this.$validate = document.createElement('div');
-    this.$validate.setAttribute('style', 'top: calc(100% - 1px);');
+    this.$validate.setAttribute('style', 'top: 100%;');
     this.$addonAfter = document.createElement('div');
     this.$addonAfter.setAttribute('class', 'kt-input-addon-after');
     // 可能存在PromptHandle创建后没被使用的情况
@@ -150,7 +156,7 @@ export abstract class PromptHandle {
     validateBoxClassName += this._validateClassName;
 
     this.$validate.classList.value = validateBoxClassName;
-    this.$validate.innerText = validateMessage.message || '';
+    this.$validate.innerHTML = toMarkdownHtml(validateMessage.message || '', { renderer: this.markdownRenderer });
     this.$.parentElement?.parentElement?.classList.remove(
       VALIDATE_CLASS_NAME.INFO,
       VALIDATE_CLASS_NAME.ERROR,
@@ -204,11 +210,29 @@ export abstract class PromptHandle {
     ev.stopPropagation();
   };
 
-  private handleKeyup = (ev) => {
+  private handleDBClick = (ev) => {
+    ev.stopPropagation();
+  };
+
+  private handleCompositionstart = () => {
+    this._inComposition = true;
+  };
+
+  private handleCompositionend = () => {
+    this._inComposition = false;
+  };
+
+  private handleKeyup = () => {
+    if (this._inComposition) {
+      return;
+    }
     this.onChangeEmitter.fire(this.$.value);
   };
 
   private handleKeydown = async (ev) => {
+    if (this._inComposition) {
+      return;
+    }
     if (ev.key === 'Escape') {
       const res: IAsyncResult<boolean>[] = await this.onCancelEmitter.fireAndAwait(this.$.value);
       // 当有回调函数报错或返回结果为false时，终止后续操作

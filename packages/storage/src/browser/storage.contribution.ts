@@ -1,22 +1,23 @@
 import { Autowired } from '@opensumi/di';
 import {
+  AppConfig,
   Domain,
+  GlobalBrowserStorageService,
+  IStorage,
+  STORAGE_NAMESPACE,
+  STORAGE_SCHEMA,
+  ScopedBrowserStorageService,
   StorageResolverContribution,
   URI,
-  IStorage,
-  ClientAppContribution,
-  STORAGE_SCHEMA,
-  AppConfig,
 } from '@opensumi/ide-core-browser';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
 
-import { IStorageServer, IWorkspaceStorageServer, IGlobalStorageServer } from '../common';
+import { IGlobalStorageServer, IStorageServer, IWorkspaceStorageServer } from '../common';
 
 import { Storage } from './storage';
 
-
-@Domain(StorageResolverContribution, ClientAppContribution)
-export class DatabaseStorageContribution implements StorageResolverContribution, ClientAppContribution {
+@Domain(StorageResolverContribution)
+export class DatabaseStorageContribution implements StorageResolverContribution {
   @Autowired(IWorkspaceStorageServer)
   private workspaceStorage: IStorageServer;
 
@@ -29,29 +30,67 @@ export class DatabaseStorageContribution implements StorageResolverContribution,
   @Autowired(IWorkspaceService)
   private workspaceService: IWorkspaceService;
 
-  storage: IStorage;
+  @Autowired(GlobalBrowserStorageService)
+  private globalLocalStorage: GlobalBrowserStorageService;
+
+  @Autowired(ScopedBrowserStorageService)
+  private scopedLocalStorage: ScopedBrowserStorageService;
+
+  private cache: Map<string, IStorage> = new Map();
 
   async resolve(storageId: URI) {
     const storageName = storageId.path.toString();
     let storage: IStorage;
-    if (storageId.scheme === STORAGE_SCHEMA.SCOPE) {
-      storage = new Storage(this.workspaceStorage, this.workspaceService, this.appConfig, storageName);
-    } else if (storageId.scheme === STORAGE_SCHEMA.GLOBAL) {
-      storage = new Storage(this.globalStorage, this.workspaceService, this.appConfig, storageName);
+    const cache = this.cache.get(storageId.toString());
+    if (cache) {
+      storage = cache;
     } else {
-      return;
+      if (storageId.scheme === STORAGE_SCHEMA.SCOPE) {
+        // 如果是内置的 Storage，在初始化过程中采用 ScopedBrowserStorageService 代理
+        if (this.isBuiltinStorage(storageId)) {
+          storage = new Storage(
+            this.workspaceStorage,
+            this.workspaceService,
+            this.appConfig,
+            storageName,
+            false,
+            this.scopedLocalStorage,
+          );
+        } else {
+          storage = new Storage(this.workspaceStorage, this.workspaceService, this.appConfig, storageName, false);
+        }
+      } else if (storageId.scheme === STORAGE_SCHEMA.GLOBAL) {
+        if (this.isBuiltinStorage(storageId)) {
+          // 如果是内置的 Storage，在初始化过程中采用 GlobalBrowserStorageService 代理
+          storage = new Storage(
+            this.globalStorage,
+            this.workspaceService,
+            this.appConfig,
+            storageName,
+            true,
+            this.globalLocalStorage,
+          );
+        } else {
+          storage = new Storage(this.globalStorage, this.workspaceService, this.appConfig, storageName, true);
+        }
+      } else {
+        return;
+      }
+      this.cache.set(storageId.toString(), storage);
     }
+
     // 等待后台存储模块初始化数据
     await storage.whenReady;
-
-    this.storage = storage;
-
     return storage;
   }
 
-  onReconnect() {
-    if (this.storage) {
-      this.storage.reConnectInit();
+  isBuiltinStorage(storageId: URI) {
+    const keys = Object.keys(STORAGE_NAMESPACE);
+    for (const key of keys) {
+      if (storageId.isEqual(STORAGE_NAMESPACE[key])) {
+        return true;
+      }
     }
+    return false;
   }
 }

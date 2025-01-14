@@ -1,44 +1,44 @@
 import * as jsoncparser from 'jsonc-parser';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  Deferred,
-  ILogger,
-  PreferenceService,
-  PreferenceSchemaProvider,
-  Event,
-  Emitter,
-  DisposableCollection,
-  PreferenceScope,
-  IDisposable,
-  Disposable,
   AppConfig,
+  Deferred,
+  Disposable,
+  DisposableCollection,
+  Emitter,
+  Event,
   IClientApp,
+  IDisposable,
+  ILogger,
   IWindowService,
+  PreferenceSchemaProvider,
+  PreferenceScope,
+  PreferenceService,
   path,
 } from '@opensumi/ide-core-browser';
 import {
-  URI,
-  StorageProvider,
   IStorage,
   STORAGE_NAMESPACE,
-  localize,
-  formatLocalize,
   Schemes,
+  StorageProvider,
+  URI,
+  formatLocalize,
+  localize,
 } from '@opensumi/ide-core-common';
+import { flattenExcludes } from '@opensumi/ide-core-common/lib/preferences/file-watch';
 import { FileStat } from '@opensumi/ide-file-service';
-import { FileChangeEvent } from '@opensumi/ide-file-service/lib/common';
-import { IFileServiceClient } from '@opensumi/ide-file-service/lib/common';
+import { FileChangeEvent, IFileServiceClient } from '@opensumi/ide-file-service/lib/common';
 
 import {
   DEFAULT_WORKSPACE_SUFFIX_NAME,
   IWorkspaceService,
-  WorkspaceData,
-  WorkspaceInput,
-  WORKSPACE_USER_STORAGE_FOLDER_NAME,
   UNTITLED_WORKSPACE,
+  WORKSPACE_USER_STORAGE_FOLDER_NAME,
+  WorkspaceInput,
 } from '../common';
 
+import { WorkspaceData } from './workspace-data';
 import { WorkspacePreferences } from './workspace-preferences';
 
 const { Path } = path;
@@ -177,14 +177,10 @@ export class WorkspaceService implements IWorkspaceService {
   }
 
   protected getFlattenExcludes(name: string): string[] {
-    const excludes: string[] = [];
+    let excludes: string[] = [];
     const fileExcludes = this.preferenceService.get<any>(name);
     if (fileExcludes) {
-      for (const key of Object.keys(fileExcludes)) {
-        if (fileExcludes[key]) {
-          excludes.push(key);
-        }
-      }
+      excludes = flattenExcludes(fileExcludes);
     }
     return excludes;
   }
@@ -248,7 +244,9 @@ export class WorkspaceService implements IWorkspaceService {
     this._workspace = workspaceStat;
     if (this._workspace) {
       const uri = new URI(this._workspace.uri);
-      this.toDisposeOnWorkspace.push(await this.fileServiceClient.watchFileChanges(uri));
+      this.fileServiceClient.watchFileChanges(uri).then((watcher) => {
+        this.toDisposeOnWorkspace.push(watcher);
+      });
     }
     this.updateTitle();
     await this.updateWorkspace();
@@ -760,13 +758,17 @@ export class WorkspaceService implements IWorkspaceService {
   async asRelativePath(pathOrUri: string | URI, includeWorkspaceFolder?: boolean) {
     // path 为 uri.path 非 uri.toString()
     let path: string | undefined;
+    let root: string | undefined;
     if (typeof pathOrUri === 'string') {
       path = pathOrUri;
     } else if (typeof pathOrUri !== 'undefined') {
       path = pathOrUri.codeUri.fsPath;
     }
     if (!path) {
-      return path;
+      return {
+        path,
+        root,
+      };
     }
     const roots = await this.roots;
     if (includeWorkspaceFolder && this.isMultiRootWorkspaceOpened) {
@@ -775,20 +777,26 @@ export class WorkspaceService implements IWorkspaceService {
         roots.push(workspace);
       }
     }
-    for (const root of roots) {
-      const rootPath = new URI(root.uri).codeUri.fsPath;
+    for (const r of roots) {
+      const rootPath = new URI(r.uri).codeUri.fsPath;
       const isRelative = path && path.indexOf(rootPath) >= 0;
       if (isRelative) {
+        root = rootPath;
         if (path === rootPath) {
-          return '';
+          path = '';
         }
-        if (rootPath.slice(-1) === '/') {
-          return decodeURI(path.replace(rootPath, ''));
+        if (rootPath.slice(-1) === Path.nativeSeparator) {
+          path = path.replace(rootPath, '');
+        } else {
+          path = path.replace(rootPath + Path.nativeSeparator, '');
         }
-        return decodeURI(path.replace(rootPath + '/', ''));
+        break;
       }
     }
-    return decodeURI(path);
+    return {
+      path: decodeURI(path),
+      root,
+    };
   }
 
   dispose() {

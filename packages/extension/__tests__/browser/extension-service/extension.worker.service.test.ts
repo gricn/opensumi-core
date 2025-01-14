@@ -1,7 +1,7 @@
 import { URI } from '@opensumi/ide-core-browser';
+import { MockInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
 import { WorkerExtProcessService } from '@opensumi/ide-extension/lib/browser/extension-worker.service';
 
-import { MockInjector } from '../../../../../tools/dev-tool/src/mock-injector';
 import { IExtensionWorkerHost, WorkerHostAPIIdentifier } from '../../../src/common';
 
 import { MOCK_EXTENSIONS, setupExtensionServiceInjector } from './extension-service-mock-helper';
@@ -20,7 +20,7 @@ describe('Extension service', () => {
   it('initExtension should be work', async () => {
     await workerService.updateExtensionData(MOCK_EXTENSIONS);
     expect(workerService.getExtension(MOCK_EXTENSIONS[0].id)).toBeDefined();
-    expect(workerService.getExtension(MOCK_EXTENSIONS[0].id)!.id).toBe(MOCK_EXTENSIONS[0].id);
+    expect(workerService.getExtension(MOCK_EXTENSIONS[0].id)?.id).toBe(MOCK_EXTENSIONS[0].id);
   });
 
   it('activate worker host should be work', async () => {

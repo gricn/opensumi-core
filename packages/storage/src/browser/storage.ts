@@ -1,12 +1,14 @@
-import { AppConfig } from '@opensumi/ide-core-browser';
+import { AppConfig, StorageService } from '@opensumi/ide-core-browser';
 import {
-  getDebugLogger,
-  IStorage,
-  ThrottledDelayer,
-  isUndefinedOrNull,
+  Deferred,
+  DisposableCollection,
   Emitter,
   Event,
-  DisposableCollection,
+  IStorage,
+  ThrottledDelayer,
+  URI,
+  getDebugLogger,
+  isUndefinedOrNull,
 } from '@opensumi/ide-core-common';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
 
@@ -19,7 +21,7 @@ enum StorageState {
 }
 
 export class Storage implements IStorage {
-  private static readonly DEFAULT_FLUSH_DELAY = 100;
+  private static readonly DEFAULT_FLUSH_DELAY = 200;
 
   private _onDidChangeStorage = new Emitter<string>();
   readonly onDidChangeStorage: Event<string> = this._onDidChangeStorage.event;
@@ -34,31 +36,37 @@ export class Storage implements IStorage {
   private pendingInserts: Map<string, string> = new Map();
 
   private toDisposableCollection: DisposableCollection = new DisposableCollection();
+  private readonly logger = getDebugLogger();
 
-  private storageName: string;
-
-  private _whenReady: Promise<void>;
+  private readyDeferred = new Deferred<void>();
+  private whenReadyToWriteDeferred = new Deferred<void>();
 
   constructor(
     private readonly database: IStorageServer,
     private readonly workspace: IWorkspaceService,
     private readonly appConfig: AppConfig,
-    storageName: string,
-    private readonly logger = getDebugLogger(),
+    private readonly storageName: string,
+    private readonly isGlobal: boolean = true,
+    private readonly browserLocalStorage?: StorageService,
   ) {
-    this.storageName = storageName;
     this.toDisposableCollection.push(this._onDidChangeStorage);
-    this.toDisposableCollection.push(
-      this.workspace.onWorkspaceChanged(() => {
-        this.setup(storageName);
-      }),
-    );
+
     this.flushDelayer = new ThrottledDelayer(Storage.DEFAULT_FLUSH_DELAY);
-    this.setup(storageName);
+    this.init(storageName).then(() => {
+      this.toDisposableCollection.push(
+        this.workspace.onWorkspaceChanged(() => {
+          this.init(storageName);
+        }),
+      );
+    });
   }
 
   get whenReady() {
-    return this._whenReady;
+    return this.readyDeferred.promise;
+  }
+
+  get whenReadyToWrite() {
+    return this.whenReadyToWriteDeferred.promise;
   }
 
   get items(): Map<string, string> {
@@ -70,28 +78,39 @@ export class Storage implements IStorage {
   }
 
   async init(storageName: string) {
-    await this.workspace.whenReady;
-    const workspace = this.workspace.workspace;
-    await this.database.init(this.appConfig.storageDirName, workspace && workspace.uri);
-    const cache = await this.database.getItems(storageName);
+    // 首次加载情况下，由于 Storage 不依赖 WorkspaceService 初始化逻辑
+    // 在 `workspace` 不存在时，默认采用 `AppConfig` 内的 `workspaceDir` 配置值作为工作区路径
+    const workspace = this.workspace.workspace?.uri || URI.file(this.appConfig.workspaceDir).toString();
+    let cache;
+    if (this.browserLocalStorage) {
+      cache = await this.browserLocalStorage.getData(storageName);
+    }
+    if (!cache) {
+      await this.database.init(this.appConfig.storageDirName, this.isGlobal ? undefined : workspace);
+      cache = await this.database.getItems(storageName);
+      if (this.browserLocalStorage) {
+        this.browserLocalStorage.setData(storageName, cache);
+      }
+      this.whenReadyToWriteDeferred.resolve();
+    } else {
+      // 初始化服务端缓存
+      this.database.init(this.appConfig.storageDirName, this.isGlobal ? undefined : workspace).then(() => {
+        this.database.getItems(storageName).then(async (data) => {
+          // 后续以服务端数据为准更新前端缓存数据，防止后续数据存取异常
+          this.cache = this.jsonToMap(data);
+          this.browserLocalStorage?.setData(storageName, data);
+          this.whenReadyToWriteDeferred.resolve();
+        });
+      });
+    }
     this.cache = this.jsonToMap(cache);
     this.state = StorageState.Initialized;
-  }
-
-  setup(storageName: string) {
-    this._whenReady = this.init(storageName);
+    this.readyDeferred.resolve();
   }
 
   async reConnectInit() {
-    this.setup(this.storageName);
-  }
-
-  private jsonToMap(json) {
-    const itemsMap: Map<string, string> = new Map();
-    for (const key of Object.keys(json)) {
-      itemsMap.set(key, json[key]);
-    }
-    return itemsMap;
+    this.readyDeferred = new Deferred();
+    this.init(this.storageName);
   }
 
   dispose() {
@@ -213,7 +232,8 @@ export class Storage implements IStorage {
     await this.database.close(() => this.cache);
   }
 
-  private flushPending(): Promise<void> {
+  private async flushPending(): Promise<void> {
+    await this.whenReadyToWrite;
     if (this.pendingInserts.size === 0 && this.pendingDeletes.size === 0) {
       return Promise.resolve();
     }
@@ -223,6 +243,18 @@ export class Storage implements IStorage {
       insert: this.mapToJson(this.pendingInserts),
       delete: Array.from(this.pendingDeletes),
     };
+    // 同时在 LocalStorage 中同步缓存变化
+    if (this.browserLocalStorage) {
+      let cache = this.mapToJson(this.cache);
+      for (const del of updateRequest?.delete || []) {
+        delete cache[del];
+      }
+      cache = {
+        ...cache,
+        ...updateRequest.insert,
+      };
+      this.browserLocalStorage.setData(this.storageName, cache);
+    }
 
     // 重置等待队列用于下次存储
     this.pendingDeletes = new Set<string>();
@@ -232,11 +264,27 @@ export class Storage implements IStorage {
     return this.database.updateItems(this.storageName, updateRequest);
   }
 
-  mapToJson(map: Map<string, string>) {
+  private mapToJson(map: Map<string, string>) {
     const obj = Object.create(null);
     for (const [k, v] of map) {
       obj[k] = v;
     }
     return obj;
+  }
+
+  private jsonToMap(json: string | any) {
+    if (typeof json === 'string') {
+      try {
+        json = JSON.parse(json);
+      } catch (e) {
+        this.logger.debug(e);
+        return json;
+      }
+    }
+    const itemsMap: Map<string, string> = new Map();
+    for (const key of Object.keys(json)) {
+      itemsMap.set(key, json[key]);
+    }
+    return itemsMap;
   }
 }

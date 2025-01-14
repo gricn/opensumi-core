@@ -1,23 +1,30 @@
+import { BasicEvent, Event, IDisposable, IJSONSchema } from '@opensumi/ide-core-common';
+import { EditorContributionInstantiation } from '@opensumi/monaco-editor-core/esm/vs/editor/browser/editorExtensions';
+import { SyncDescriptor } from '@opensumi/monaco-editor-core/esm/vs/platform/instantiation/common/descriptors';
+
+import { IMergeEditorEditor } from './merge-editor-widget';
+
 import type {
   ICodeEditor,
   IDiffEditor,
-  IEditorConstructionOptions,
+  IDiffEditorConstructionOptions,
 } from '@opensumi/monaco-editor-core/esm/vs/editor/browser/editorBrowser';
-import type { IDiffEditorConstructionOptions } from '@opensumi/monaco-editor-core/esm/vs/editor/browser/editorBrowser';
 import type { IEditorContribution } from '@opensumi/monaco-editor-core/esm/vs/editor/common/editorCommon';
-import type { ITextModel } from '@opensumi/monaco-editor-core/esm/vs/editor/common/model';
 import type {
   DocumentFormattingEditProvider,
   DocumentRangeFormattingEditProvider,
-} from '@opensumi/monaco-editor-core/esm/vs/editor/common/modes';
-import type { IFormattingEditProviderSelector } from '@opensumi/monaco-editor-core/esm/vs/editor/contrib/format/format';
+} from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
+import type { ITextModel } from '@opensumi/monaco-editor-core/esm/vs/editor/common/model';
+import type { IFormattingEditProviderSelector } from '@opensumi/monaco-editor-core/esm/vs/editor/contrib/format/browser/format';
 import type {
   ISelectedSuggestion,
   SuggestWidget,
-} from '@opensumi/monaco-editor-core/esm/vs/editor/contrib/suggest/suggestWidget';
+} from '@opensumi/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestWidget';
+import type { IStandaloneEditorConstructionOptions } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneCodeEditor';
 import type { BrandedService } from '@opensumi/monaco-editor-core/esm/vs/platform/instantiation/common/instantiation';
 
-import { Event, IJSONSchema, IDisposable, BasicEvent } from '..';
+export * from './event';
+
 export enum ServiceNames {
   CODE_EDITOR_SERVICE = 'codeEditorService',
   TEXT_MODEL_SERVICE = 'textModelService',
@@ -26,12 +33,13 @@ export enum ServiceNames {
   CONTEXT_KEY_SERVICE = 'contextKeyService',
   BULK_EDIT_SERVICE = 'IWorkspaceEditService',
   OPENER_SERVICE = 'openerService',
+  TELEMETRY_SERVICE = 'telemetryService',
 }
 
 export abstract class MonacoService {
   public abstract createCodeEditor(
     monacoContainer: HTMLElement,
-    options?: IEditorConstructionOptions,
+    options?: IStandaloneEditorConstructionOptions,
     overrides?: { [key: string]: any },
   ): ICodeEditor;
 
@@ -40,6 +48,12 @@ export abstract class MonacoService {
     options?: IDiffEditorConstructionOptions,
     overrides?: { [key: string]: any },
   ): IDiffEditor;
+
+  public abstract createMergeEditor(
+    monacoContainer: HTMLElement,
+    options?: IDiffEditorConstructionOptions,
+    overrides?: { [key: string]: any },
+  ): IMergeEditorEditor;
 
   public abstract registerOverride(serviceName: ServiceNames, service: any): void;
 
@@ -63,17 +77,26 @@ export type FormattingSelectorType = (
   document: ITextModel,
 ) => DocumentFormattingEditProvider | DocumentRangeFormattingEditProvider;
 
+export type IEditorExtensionContribution<T extends BrandedService[]> = (
+  id: string,
+  contribCtor: (new (editor: ICodeEditor, ...services: T) => IEditorContribution) | SyncDescriptor<IEditorContribution>,
+  instantiation?: EditorContributionInstantiation,
+) => void;
+
 export interface MonacoContribution {
   registerOverrideService?(registry: MonacoOverrideServiceRegistry): void;
 
-  registerMonacoDefaultFormattingSelector?(registry: (selector: IFormattingEditProviderSelector) => void): void;
+  registerMonacoDefaultFormattingSelector?(registry: (selector: IFormattingEditProviderSelector) => IDisposable): void;
 
   registerEditorExtensionContribution?<Services extends BrandedService[]>(
-    register: (
-      id: string,
-      contribCtor: new (editor: ICodeEditor, ...services: Services) => IEditorContribution,
-    ) => void,
+    register: IEditorExtensionContribution<Services>,
   ): void;
+
+  /**
+   * [{ id: association.id, mime: mimetype, filepattern: association.filePattern }]
+   * @param register
+   */
+  registerPlatformLanguageAssociations?(register: (mime: MimeAssociation[]) => void): void;
 }
 
 export const Extensions = {
@@ -114,15 +137,8 @@ export const ISchemaStore = Symbol('ISchemaStore');
 
 export interface MimeAssociation {
   readonly id: string;
-  readonly filePattern: string;
-}
-
-export const IMimeService = Symbol('IMimeService');
-export interface IMimeService {
-  /**
-   * 更新 mime
-   */
-  updateMime(): void;
+  readonly filepattern: string;
+  readonly mime: string;
 }
 
 export interface SuggestEventPayload {

@@ -1,4 +1,4 @@
-import { strings, CaseInsensitiveMap } from '@opensumi/ide-utils';
+import { CaseInsensitiveMap, strings } from '@opensumi/ide-utils';
 
 const { format, mnemonicButtonLabel } = strings;
 
@@ -6,11 +6,16 @@ export type ILocalizationKey = string; // ts不支持symbol作为key
 
 let _currentLanguageId = 'zh-CN';
 
-const localizationRegistryMap = new CaseInsensitiveMap<string, LocalizationRegistry>();
+export const localizationRegistryMap = new CaseInsensitiveMap<string, LocalizationRegistry>();
 
-export function localize(symbol: ILocalizationKey, defaultMessage?: string | undefined, scope = 'host'): string {
+export function localize(
+  symbol: ILocalizationKey,
+  defaultMessage?: string | undefined,
+  scope = 'host',
+  language = _currentLanguageId,
+): string {
   const localizationRegistry = getLocalizationRegistry(scope);
-  return localizationRegistry.getLocalizeString(symbol, defaultMessage);
+  return localizationRegistry.getLocalizeString(symbol, defaultMessage, language);
 }
 
 export function formatLocalize(symbol: ILocalizationKey, ...args: any) {
@@ -47,7 +52,7 @@ export interface ILocalizationContents {
 interface ILocalizationRegistry {
   registerLocalizationBundle(bundle: ILocalizationBundle): void;
 
-  getLocalizeString(symbol: ILocalizationKey, defaultLabel?: string): string;
+  getLocalizeString(symbol: ILocalizationKey, defaultLabel?: string, languageId?: string): string;
 
   getAllLanguages(): ILocalizationInfo[];
 }
@@ -82,8 +87,8 @@ class LocalizationRegistry implements ILocalizationRegistry {
     }
   }
 
-  getLocalizeString(key: ILocalizationKey, defaultLabel?: string | null): string {
-    return this.getContents(_currentLanguageId)[key] || this.getContents('default')[key] || defaultLabel || '';
+  getLocalizeString(key: ILocalizationKey, defaultValue?: string | null, languageId = _currentLanguageId): string {
+    return this.getContents(languageId)[key] || this.getContents('default')[key] || defaultValue || '';
   }
 
   private getContents(languageId: string | undefined = 'zh-CN'): ILocalizationContents {
@@ -102,11 +107,10 @@ class LocalizationRegistry implements ILocalizationRegistry {
 }
 
 /**
- * 获取当前语言别名，默认为中文
- * TODO 临时通过 href 获取
- * @returns 当前语言别名
+ * 获取当前语言 ID，默认为中文
+ * @returns 当前语言 ID
  */
-export function getLanguageId(scope = 'host'): string {
+export function getLanguageId(): string {
   return _currentLanguageId;
 }
 
@@ -174,17 +178,65 @@ export function replaceLocalizePlaceholder(label?: string, scope?: string): stri
  * @param scope 默认为 host
  * @param fallback 默认为 undefined
  */
+export function replaceNlsField(label: string, scope: string, fallback: string, language?: string): string;
+export function replaceNlsField(
+  label?: string,
+  scope?: string,
+  fallback?: string,
+  language?: string,
+): string | undefined;
 export function replaceNlsField(
   label?: string,
   scope?: string,
   fallback: string | undefined = undefined,
+  language = _currentLanguageId,
 ): string | undefined {
   if (label) {
     const nlsRegex = /^%([\w\d.-]+)%$/i;
     const result = nlsRegex.exec(label);
     if (result) {
-      return localize(result[1], fallback, scope);
+      return localize(result[1], fallback, scope, language);
     }
   }
   return label;
+}
+
+export interface ILocalizedStr {
+  raw: string;
+  localized: string;
+  /**
+   * The value is usually in English.
+   * which is used so that users can search for commands in English even in non-English environments.
+   *
+   * Alert: before using this value, you should check if `alias === localized`.
+   */
+  alias: string;
+}
+
+export function createLocalizedStr(
+  raw: string,
+  scope?: string,
+  fallback?: string,
+  language?: string,
+  defaultLanguageId = 'en-US',
+): ILocalizedStr {
+  const localized = replaceNlsField(raw, scope, fallback, language) || raw;
+  const alias = replaceNlsField(raw, scope, undefined, defaultLanguageId);
+  return {
+    raw,
+    localized,
+    alias: alias || localized,
+  };
+}
+
+export function createFormatLocalizedStr(raw: ILocalizationKey, ...args: any): ILocalizedStr {
+  const defaultLanguageId = 'en-US';
+  const localized = format(localize(raw, raw, undefined), ...args) || raw;
+  const alias = format(localize(raw, raw, undefined, defaultLanguageId), ...args);
+
+  return {
+    raw,
+    localized,
+    alias: alias || localized,
+  };
 }

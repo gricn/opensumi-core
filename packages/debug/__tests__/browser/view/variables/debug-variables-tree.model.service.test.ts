@@ -1,5 +1,5 @@
 import { IContextKeyService } from '@opensumi/ide-core-browser';
-import { ICtxMenuRenderer, AbstractContextMenuService } from '@opensumi/ide-core-browser/lib/menu/next';
+import { AbstractContextMenuService, ICtxMenuRenderer } from '@opensumi/ide-core-browser/lib/menu/next';
 import { Disposable } from '@opensumi/ide-core-common';
 import { IDebugSessionManager } from '@opensumi/ide-debug';
 import { DebugHoverSource } from '@opensumi/ide-debug/lib/browser/editor/debug-hover-source';
@@ -30,6 +30,7 @@ describe('Debug Variables Tree Model', () => {
       get: jest.fn(() => mockWatcher),
     },
     path: 'testRoot',
+    ensureLoaded: jest.fn(),
   } as any;
 
   const mockDebugSessionManager = {
@@ -94,6 +95,9 @@ describe('Debug Variables Tree Model', () => {
         contextDebugProtocolVariableMenu: {
           set: jest.fn(),
         },
+        contextCanViewMemory: {
+          set: jest.fn(),
+        },
       },
     });
 
@@ -127,7 +131,7 @@ describe('Debug Variables Tree Model', () => {
   });
 
   it('should init success', () => {
-    expect(mockDebugViewModel.onDidChange).toBeCalledTimes(1);
+    expect(mockDebugViewModel.onDidChange).toHaveBeenCalledTimes(1);
   });
 
   it('initTreeModel method should be work', () => {
@@ -143,7 +147,7 @@ describe('Debug Variables Tree Model', () => {
       on: jest.fn(),
     } as any;
     debugVariablesModelService.initDecorations(mockRoot);
-    const node = new DebugConsoleNode(mockSession, 'test', mockRoot);
+    const node = new DebugConsoleNode({ session: mockSession }, 'test', mockRoot);
     debugVariablesModelService.activeNodeDecoration(node);
     const decoration = debugVariablesModelService.decorations.getDecorations(node);
     expect(decoration).toBeDefined();
@@ -155,7 +159,7 @@ describe('Debug Variables Tree Model', () => {
       on: jest.fn(),
     } as any;
     debugVariablesModelService.initDecorations(mockRoot);
-    const node = new DebugConsoleNode(mockSession, 'test', mockRoot);
+    const node = new DebugConsoleNode({ session: mockSession }, 'test', mockRoot);
     debugVariablesModelService.activeNodeDecoration(node);
     let decoration = debugVariablesModelService.decorations.getDecorations(node);
     expect(decoration).toBeDefined();
@@ -171,7 +175,7 @@ describe('Debug Variables Tree Model', () => {
       on: jest.fn(),
     } as any;
     debugVariablesModelService.initDecorations(mockRoot);
-    const node = new DebugConsoleNode(mockSession, 'test', mockRoot);
+    const node = new DebugConsoleNode({ session: mockSession }, 'test', mockRoot);
     debugVariablesModelService.activeNodeDecoration(node);
     let decoration = debugVariablesModelService.decorations.getDecorations(node);
     debugVariablesModelService.removeNodeDecoration();
@@ -191,7 +195,7 @@ describe('Debug Variables Tree Model', () => {
       on: jest.fn(),
     } as any;
     debugVariablesModelService.initDecorations(mockRoot);
-    const node = new DebugConsoleNode(mockSession, 'test', mockRoot);
+    const node = new DebugConsoleNode({ session: mockSession }, 'test', mockRoot);
     debugVariablesModelService.initDecorations(mockRoot);
     debugVariablesModelService.activeNodeDecoration(node);
     let decoration = debugVariablesModelService.decorations.getDecorations(node);
@@ -208,10 +212,10 @@ describe('Debug Variables Tree Model', () => {
     let mockNode = { expanded: false, setExpanded: () => {}, setCollapsed: () => {}, getRawScope: () => {} };
     debugVariablesModelService.handleTreeHandler(treeHandle);
     debugVariablesModelService.toggleDirectory(mockNode as any);
-    expect(treeHandle.expandNode).toBeCalledTimes(0);
+    expect(treeHandle.expandNode).toHaveBeenCalledTimes(0);
     mockNode = { expanded: true, setExpanded: () => {}, setCollapsed: () => {}, getRawScope: () => {} };
     debugVariablesModelService.toggleDirectory(mockNode as any);
-    expect(treeHandle.collapseNode).toBeCalledTimes(0);
+    expect(treeHandle.collapseNode).toHaveBeenCalledTimes(0);
   });
 
   it('handleContextMenu method should be work', () => {
@@ -225,8 +229,8 @@ describe('Debug Variables Tree Model', () => {
       },
     } as any;
     debugVariablesModelService.handleContextMenu(mockEvent, mockNode);
-    expect(mockCtxMenuRenderer.show).toBeCalledTimes(1);
-    expect(mockEvent.stopPropagation).toBeCalledTimes(1);
-    expect(mockEvent.preventDefault).toBeCalledTimes(1);
+    expect(mockCtxMenuRenderer.show).toHaveBeenCalledTimes(1);
+    expect(mockEvent.stopPropagation).toHaveBeenCalledTimes(1);
+    expect(mockEvent.preventDefault).toHaveBeenCalledTimes(1);
   });
 });

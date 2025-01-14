@@ -1,35 +1,30 @@
-import { Injector } from '@opensumi/di';
-import { Deferred, IReporter } from '@opensumi/ide-core-common';
+import { ProxyIdentifier } from '@opensumi/ide-connection';
+import { Deferred, ILoggerManagerClient, IReporter } from '@opensumi/ide-core-common';
 import { REPORT_NAME } from '@opensumi/ide-core-common';
 import { AppConfig, DefaultReporter } from '@opensumi/ide-core-node';
 
+import { createBrowserInjector } from '../../../../../../tools/dev-tool/src/injector-helper';
+import { MockInjector } from '../../../../../../tools/dev-tool/src/mock-injector';
 import { MainThreadExtensionLog } from '../../../../__mocks__/api/mainthread.extension.log';
 import { MainThreadExtensionService } from '../../../../__mocks__/api/mainthread.extension.service';
 import { MainThreadStorage } from '../../../../__mocks__/api/mathread.storage';
 import { mockExtensionProps, mockExtensionProps2 } from '../../../../__mocks__/extensions';
-import { initMockRPCProtocol } from '../../../../__mocks__/initRPCProtocol';
-import { MockLoggerManagerClient } from '../../../../__mocks__/loggermanager';
+import { createMockPairRPCProtocol } from '../../../../__mocks__/initRPCProtocol';
+import { ExtHostAppConfig } from '../../../../src/common/ext.process';
+import { ExtHostAPIIdentifier, IExtHostLocalization } from '../../../../src/common/vscode';
 import ExtensionHostServiceImpl from '../../../../src/hosted/ext.host';
-
-const enum MessageType {
-  Request = 1,
-  Reply = 2,
-  ReplyErr = 3,
-  Cancel = 4,
-}
-const mockLoggger = new MockLoggerManagerClient().getLogger();
 
 describe('Extension process test', () => {
   describe('RPCProtocol', () => {
     const proxyMaps = new Map();
     let extHostImpl: ExtensionHostServiceImpl;
-    let injector: Injector;
+    let injector: MockInjector;
 
     beforeEach(async () => {
-      injector = new Injector();
+      injector = createBrowserInjector([]);
       injector.addProviders(
         {
-          token: AppConfig,
+          token: ExtHostAppConfig,
           useValue: {
             builtinCommands: [
               {
@@ -45,39 +40,25 @@ describe('Extension process test', () => {
         },
       );
 
-      proxyMaps.set('MainThreadExtensionService', new MainThreadExtensionService());
-      proxyMaps.set('MainThreadStorage', new MainThreadStorage());
-      proxyMaps.set('MainThreadExtensionLog', new MainThreadExtensionLog());
+      const { rpcProtocolExt, rpcProtocolMain } = createMockPairRPCProtocol();
+      rpcProtocolExt.set(ProxyIdentifier.for('MainThreadExtensionService'), new MainThreadExtensionService());
+      rpcProtocolExt.set(ProxyIdentifier.for('MainThreadStorage'), new MainThreadStorage());
+      rpcProtocolExt.set(ProxyIdentifier.for('MainThreadExtensionLog'), new MainThreadExtensionLog());
 
-      const handler = new Deferred<(msg) => any>();
-      const fn = handler.promise;
-      const mockClient = {
-        send: async (msg) => {
-          const message = JSON.parse(msg);
-          const proxy = proxyMaps.get(message.proxyId);
-          if (proxy) {
-            const result = await proxy[message.method](...message.args);
-            if (await fn) {
-              const raw = `{"type": ${MessageType.Reply}, "id": "${message.id}", "res": ${JSON.stringify(
-                result || '',
-              )}}`;
-              (await fn)(raw);
-            }
-          } else {
-            // eslint-disable-next-line no-console
-            console.log(`lost proxy ${message.proxyId} - ${message.method}`);
-          }
-        },
-        onMessage: (fn) => handler.resolve(fn),
-      };
-      const rpcProtocol = await initMockRPCProtocol(mockClient);
-      extHostImpl = new ExtensionHostServiceImpl(rpcProtocol, mockLoggger, injector);
+      extHostImpl = new ExtensionHostServiceImpl(
+        rpcProtocolMain,
+        injector.get(ILoggerManagerClient).getLogger(),
+        injector,
+      );
+
+      const localization = rpcProtocolMain.get<IExtHostLocalization>(ExtHostAPIIdentifier.ExtHostLocalization);
+      localization.$setCurrentLanguage('en');
       await extHostImpl.init();
       await extHostImpl.$updateExtHostData();
     });
 
-    afterEach(() => {
-      injector.disposeAll();
+    afterEach(async () => {
+      await injector.disposeAll();
       proxyMaps.clear();
     });
 

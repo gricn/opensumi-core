@@ -1,7 +1,7 @@
-import { Injectable, Autowired } from '@opensumi/di';
-import { URI, Schemes, isElectronRenderer } from '@opensumi/ide-core-common';
+import { Autowired, Injectable } from '@opensumi/di';
+import { Schemes, URI } from '@opensumi/ide-core-common';
 
-import { AppConfig } from '../react-providers';
+import { AppConfig } from '../react-providers/config-provider';
 import { IWindowService } from '../window';
 
 import { IOpener } from '.';

@@ -12,10 +12,11 @@ export enum ProgressLocation {
 export interface IAction extends IDisposable {
   readonly id: string;
   label: string;
-  tooltip: string;
-  class: string | undefined;
-  enabled: boolean;
-  checked: boolean;
+  tooltip?: string;
+  class?: string;
+  enabled?: boolean;
+  checked?: boolean;
+  primary?: boolean;
   run(event?: any): Promise<any>;
 }
 
@@ -25,8 +26,8 @@ export interface IProgressOptions {
   readonly source?: string;
   readonly total?: number;
   readonly cancellable?: boolean;
-  // 暂不支持
-  readonly buttons?: string[];
+  readonly closeable?: boolean;
+  readonly buttons?: Array<string | IAction>;
 }
 
 export interface IProgressNotificationOptions extends IProgressOptions {

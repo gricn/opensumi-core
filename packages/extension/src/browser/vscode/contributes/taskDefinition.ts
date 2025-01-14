@@ -1,8 +1,8 @@
-import { Injectable, Autowired } from '@opensumi/di';
-import { IJSONSchema, IJSONSchemaMap, localize, ILogger } from '@opensumi/ide-core-browser';
-import { ITaskDefinitionRegistry } from '@opensumi/ide-core-common';
+import { Autowired, Injectable } from '@opensumi/di';
+import { IJSONSchema, IJSONSchemaMap, ILogger, localize } from '@opensumi/ide-core-browser';
+import { ITaskDefinitionRegistry, LifeCyclePhase } from '@opensumi/ide-core-common';
 
-import { VSCodeContributePoint, Contributes } from '../../../common';
+import { Contributes, LifeCycle, VSCodeContributePoint } from '../../../common';
 
 export const taskDefinitionSchema: IJSONSchema = {
   type: 'object',
@@ -41,7 +41,10 @@ export type ITaskDefinitionSchema = Array<TaskDefinition>;
 
 @Injectable()
 @Contributes('taskDefinitions')
+@LifeCycle(LifeCyclePhase.Ready)
 export class TaskDefinitionContributionPoint extends VSCodeContributePoint<ITaskDefinitionSchema> {
+  phase: LifeCyclePhase = LifeCyclePhase.Starting;
+
   @Autowired(ITaskDefinitionRegistry)
   taskDefinitionRegistry: ITaskDefinitionRegistry;
 
@@ -49,15 +52,18 @@ export class TaskDefinitionContributionPoint extends VSCodeContributePoint<ITask
   logger: ILogger;
 
   contribute() {
-    for (const definition of this.json) {
-      this.logger.verbose(`${this.extension.id} register taskDefinition ${JSON.stringify(definition)}`);
-      this.addDispose(
-        this.taskDefinitionRegistry.register(definition.type, {
-          ...definition,
-          taskType: definition.type,
-          extensionId: this.extension.id,
-        }),
-      );
+    for (const contrib of this.contributesMap) {
+      const { extensionId, contributes } = contrib;
+      for (const definition of contributes) {
+        this.logger.verbose(`${extensionId} register taskDefinition ${JSON.stringify(definition)}`);
+        this.addDispose(
+          this.taskDefinitionRegistry.register(definition.type, {
+            ...definition,
+            taskType: definition.type,
+            extensionId,
+          }),
+        );
+      }
     }
   }
 }

@@ -1,22 +1,23 @@
 import { Autowired, Injectable } from '@opensumi/di';
 import {
-  URI,
-  IDisposable,
   Disposable,
-  MarkerManager,
+  IDisposable,
   IMarkerData,
   IRelatedInformation,
+  MarkerManager,
   MarkerSeverity,
+  URI,
 } from '@opensumi/ide-core-common';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import * as monaco from '@opensumi/ide-monaco';
+import { ITextmateTokenizer, ITextmateTokenizerService } from '@opensumi/ide-monaco/lib/browser/contrib/tokenizer';
 
 import {
-  DiagnosticSeverity,
-  DiagnosticRelatedInformation,
   Diagnostic,
+  DiagnosticRelatedInformation,
+  DiagnosticSeverity,
+  ILanguageService,
   Language,
   WorkspaceSymbolProvider,
-  ILanguageService,
 } from '../../common';
 
 import { MonacoDiagnosticCollection } from './diagnostic-collection';
@@ -60,9 +61,15 @@ function reviveRelated(related: IRelatedInformation): DiagnosticRelatedInformati
   };
 }
 
-function reviveMarker(marker: IMarkerData): Diagnostic {
+export function reviveMarker(marker: IMarkerData): Diagnostic {
   const monacoMarker: Diagnostic = {
-    code: marker.code,
+    code:
+      typeof marker.codeHref !== 'undefined'
+        ? {
+            value: String(marker.code),
+            target: marker.codeHref,
+          }
+        : marker.code,
     severity: reviveSeverity(marker.severity) as any,
     range: reviveRange(marker.startLineNumber, marker.startColumn, marker.endLineNumber, marker.endColumn),
     message: marker.message,
@@ -83,6 +90,9 @@ export class LanguageService implements ILanguageService {
   @Autowired()
   private markerManager: MarkerManager;
 
+  @Autowired(ITextmateTokenizer)
+  private textmateService: ITextmateTokenizerService;
+
   protected readonly markers = new Map<string, MonacoDiagnosticCollection>();
 
   readonly workspaceSymbolProviders: WorkspaceSymbolProvider[] = [];
@@ -99,13 +109,13 @@ export class LanguageService implements ILanguageService {
   }
 
   get languages(): Language[] {
-    return [...this.mergeLanguages(monaco.languages.getLanguages()).values()];
+    return [...this.mergeLanguages(this.textmateService.getLanguages()).values()];
   }
 
   getLanguage(languageId: string): Language | undefined {
-    return this.mergeLanguages(monaco.languages.getLanguages().filter((language) => language.id === languageId)).get(
-      languageId,
-    );
+    return this.mergeLanguages(
+      this.textmateService.getLanguages().filter((language) => language.id === languageId),
+    ).get(languageId);
   }
 
   protected mergeLanguages(registered: monaco.languages.ILanguageExtensionPoint[]): Map<string, Mutable<Language>> {

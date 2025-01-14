@@ -1,32 +1,29 @@
-import { Injectable, Autowired, Injector, INJECTOR_TOKEN } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
   IContextKeyService,
   MonacoOverrideServiceRegistry,
   ServiceNames,
-  localize,
   StorageProvider,
+  localize,
 } from '@opensumi/ide-core-browser';
-import { Schemes, URI, CommandRegistry, Emitter, Event, STORAGE_NAMESPACE } from '@opensumi/ide-core-common';
+import { CommandRegistry, Emitter, Event, STORAGE_NAMESPACE, Schemes, URI } from '@opensumi/ide-core-common';
 import { EditorCollectionService, IDecorationApplyOptions } from '@opensumi/ide-editor';
-import {
-  IEditorDocumentModelService,
-  IEditorDocumentModelContentProvider,
-  ICodeEditor,
-  getSimpleEditorOptions,
-} from '@opensumi/ide-editor/lib/browser';
+import { ICodeEditor, IEditorDocumentModelService, getSimpleEditorOptions } from '@opensumi/ide-editor/lib/browser';
 import { MonacoCodeService } from '@opensumi/ide-editor/lib/browser/editor.override';
 import { IMainLayoutService } from '@opensumi/ide-main-layout';
-import { transparent, editorForeground, IThemeService } from '@opensumi/ide-theme';
+import * as monaco from '@opensumi/ide-monaco';
+import { monaco as monacoApi } from '@opensumi/ide-monaco/lib/browser/monaco-api';
+import { IThemeService, editorForeground, transparent } from '@opensumi/ide-theme';
 import { IHistoryNavigationWidget } from '@opensumi/monaco-editor-core/esm/vs/base/browser/history';
 import { HistoryNavigator } from '@opensumi/monaco-editor-core/esm/vs/base/common/history';
 import { ITextModel } from '@opensumi/monaco-editor-core/esm/vs/editor/common/model';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
 
 import {
-  DEBUG_CONSOLE_CONTAINER_ID,
-  IDebugSessionManager,
   CONTEXT_IN_DEBUG_MODE_KEY,
+  DEBUG_CONSOLE_CONTAINER_ID,
   DebugState,
+  IDebugConsoleModelService,
+  IDebugSessionManager,
 } from '../../../common';
 import { DebugSessionManager } from '../../debug-session-manager';
 
@@ -35,6 +32,7 @@ import { DebugConsoleModelService } from './debug-console-tree.model.service';
 
 const DECORATION_KEY = 'consoleinputdecoration';
 const HISTORY_STORAGE_KEY = 'debug.console.history';
+const DEBUG_CONSOLE_DEFAULT_HEIGHT = 18;
 
 const firstUpperCase = (str: string) => str.replace(/^\S/, (s) => s.toUpperCase());
 
@@ -45,14 +43,12 @@ const consoleInputMonacoOptions: monaco.editor.IEditorOptions = {
     vertical: 'hidden',
     handleMouseWheel: true,
   },
-  lineHeight: 26,
   acceptSuggestionOnEnter: 'on',
-  readOnly: true,
 };
 
 @Injectable()
 export class DebugConsoleService implements IHistoryNavigationWidget {
-  @Autowired(DebugConsoleModelService)
+  @Autowired(IDebugConsoleModelService)
   protected readonly debugConsoleModelService: DebugConsoleModelService;
 
   @Autowired(IMainLayoutService)
@@ -104,23 +100,10 @@ export class DebugConsoleService implements IHistoryNavigationWidget {
 
   public static keySet = new Set([CONTEXT_IN_DEBUG_MODE_KEY]);
 
-  constructor() {
-    this.contextKeyService.onDidChangeContext((e) => {
-      if (e.payload.affectsSome(DebugConsoleService.keySet)) {
-        const inDebugMode = this.contextKeyService.match(CONTEXT_IN_DEBUG_MODE_KEY);
-        if (inDebugMode) {
-          this.updateReadOnly(false);
-          this.updateInputDecoration();
-          this.debugContextKey.contextInDdebugMode.set(true);
-        } else {
-          this.updateReadOnly(true);
-          if (this.debugContextKey) {
-            this.debugContextKey.contextInDdebugMode.set(false);
-          }
-        }
-      }
-    });
-  }
+  // FIXME: 需要实现新增的属性及事件
+  element: HTMLElement;
+  onDidFocus: Event<void>;
+  onDidBlur: Event<void>;
 
   private _onConsoleInputValueChange = new Emitter<URI>();
   public onConsoleInputValueChange: Event<URI> = this._onConsoleInputValueChange.event;
@@ -133,7 +116,7 @@ export class DebugConsoleService implements IHistoryNavigationWidget {
     return bottomPanelHandler && bottomPanelHandler.isVisible;
   }
 
-  public get consoleModel(): DebugConsoleModelService {
+  public get consoleModel() {
     return this.debugConsoleModelService;
   }
 
@@ -158,14 +141,41 @@ export class DebugConsoleService implements IHistoryNavigationWidget {
     const storage = await this.storageProvider(STORAGE_NAMESPACE.DEBUG);
     this.history = new HistoryNavigator(storage.get(HISTORY_STORAGE_KEY, []), 50);
 
+    if (this.inputEditor?.monacoEditor) {
+      return;
+    }
+
     this._consoleInputElement = e;
     this.inputEditor = this.editorService.createCodeEditor(this._consoleInputElement!, {
       ...consoleInputMonacoOptions,
+      readOnly: !this.contextKeyService.getContextValue(CONTEXT_IN_DEBUG_MODE_KEY),
     });
 
-    this.debugContextKey = this.injector.get(DebugContextKey, [
-      (this.inputEditor.monacoEditor as any)._contextKeyService,
-    ]);
+    this.debugContextKey = this.injector.get(DebugContextKey, [this.inputEditor.monacoEditor.contextKeyService]);
+
+    const inDebugMode = this.contextKeyService.match(CONTEXT_IN_DEBUG_MODE_KEY);
+
+    if (inDebugMode) {
+      this.debugContextKey.contextInDebugMode.set(true);
+    } else {
+      this.debugContextKey.contextInDebugMode.set(false);
+    }
+
+    this.contextKeyService.onDidChangeContext((e) => {
+      if (e.payload.affectsSome(DebugConsoleService.keySet)) {
+        const inDebugMode = this.contextKeyService.match(CONTEXT_IN_DEBUG_MODE_KEY);
+        if (inDebugMode) {
+          this.updateReadOnly(false);
+          this.updateInputDecoration();
+          this.debugContextKey.contextInDebugMode.set(true);
+        } else {
+          this.updateReadOnly(true);
+          if (this.debugContextKey) {
+            this.debugContextKey.contextInDebugMode.set(false);
+          }
+        }
+      }
+    });
 
     this.registerDecorationType();
     await this.createConsoleInput();
@@ -262,7 +272,7 @@ export class DebugConsoleService implements IHistoryNavigationWidget {
 
     const { monacoEditor } = this.inputEditor;
 
-    const h = Math.max(height || 26, monacoEditor.getContentHeight());
+    const h = Math.max(height || DEBUG_CONSOLE_DEFAULT_HEIGHT, monacoEditor.getContentHeight());
 
     monacoEditor.layout({
       width: width || this._consoleInputElement?.offsetWidth!,
@@ -302,7 +312,7 @@ export class DebugConsoleService implements IHistoryNavigationWidget {
       });
     }
 
-    this.inputEditor.monacoEditor.setDecorations('debug-console-input', DECORATION_KEY, decorations as any[]);
+    this.inputEditor.monacoEditor.setDecorationsByType('debug-console-input', DECORATION_KEY, decorations as any[]);
   }
 
   private setMode(): void {
@@ -318,7 +328,7 @@ export class DebugConsoleService implements IHistoryNavigationWidget {
     const model = session.currentEditor();
 
     if (model) {
-      this.inputEditor.monacoEditor.getModel()!.setMode(model.getModel()?.getLanguageIdentifier()!);
+      this.inputEditor.monacoEditor.getModel()!.setLanguage(model.getModel()?.getLanguageId()!);
     }
   }
 
@@ -345,84 +355,82 @@ export class DebugConsoleService implements IHistoryNavigationWidget {
       return;
     }
 
-    this._updateDisposable = monaco.languages.registerCompletionItemProvider(
-      model.getModel()?.getLanguageIdentifier().language!,
-      {
-        triggerCharacters: ['.'],
-        provideCompletionItems: async (model, position, ctx) => {
-          //  仅在支持自动补全查询的调试器中启用补全逻辑
-          if (!this.manager.currentSession?.capabilities.supportsCompletionsRequest) {
-            return;
-          }
-          if (model.uri.toString() !== this.consoleInputUri.toString()) {
-            return null;
-          }
-
-          const session = this.manager.currentSession;
-          const { triggerCharacter } = ctx;
-
-          /**
-           * 代码字符串处理
-           */
-          let value = model.getWordAtPosition(position);
-          if (value && session) {
-            const { word, startColumn, endColumn } = value;
-            const res = await session.sendRequest('completions', {
-              text: word,
-              column: endColumn,
-              frameId: session.currentFrame && session.currentFrame.raw.id,
-            });
-            return {
-              suggestions: res.body.targets.map((item) => ({
-                label: item.label,
-                insertText: item.text || item.label,
-                sortText: item.sortText,
-                kind: monaco.languages.CompletionItemKind[firstUpperCase(item.type || 'property')],
-                range: {
-                  startLineNumber: position.lineNumber,
-                  endLineNumber: position.lineNumber,
-                  startColumn,
-                  endColumn,
-                },
-              })),
-            } as monaco.languages.CompletionList;
-          }
-
-          /**
-           * 特殊字符处理
-           */
-          value = model.getWordAtPosition({
-            lineNumber: position.lineNumber,
-            column: position.column - 1,
-          });
-          if (value && session && triggerCharacter) {
-            const { word, endColumn } = value;
-
-            const res = await session.sendRequest('completions', {
-              text: word + triggerCharacter,
-              column: endColumn + 1,
-              frameId: session.currentFrame && session.currentFrame.raw.id,
-            });
-            return {
-              suggestions: res.body.targets.map((item) => ({
-                label: item.label,
-                insertText: item.text || item.label,
-                sortText: item.sortText,
-                kind: monaco.languages.CompletionItemKind[firstUpperCase(item.type || 'property')],
-                range: {
-                  startLineNumber: position.lineNumber,
-                  endLineNumber: position.lineNumber,
-                  startColumn: endColumn + 1,
-                  endColumn: endColumn + 1,
-                },
-              })),
-            } as monaco.languages.CompletionList;
-          }
-
+    this._updateDisposable = monacoApi.languages.registerCompletionItemProvider(model.getModel()?.getLanguageId()!, {
+      _debugDisplayName: 'DebugConsoleCompletionProvider',
+      triggerCharacters: ['.'],
+      provideCompletionItems: async (model, position, ctx) => {
+        //  仅在支持自动补全查询的调试器中启用补全逻辑
+        if (!this.manager.currentSession?.capabilities.supportsCompletionsRequest) {
+          return;
+        }
+        if (model.uri.toString() !== this.consoleInputUri.toString()) {
           return null;
-        },
+        }
+
+        const session = this.manager.currentSession;
+        const { triggerCharacter } = ctx;
+
+        /**
+         * 代码字符串处理
+         */
+        let value = model.getWordAtPosition(position);
+        if (value && session) {
+          const { word, startColumn, endColumn } = value;
+          const res = await session.sendRequest('completions', {
+            text: word,
+            column: endColumn,
+            frameId: session.currentFrame && session.currentFrame.raw.id,
+          });
+          return {
+            suggestions: res.body.targets.map((item) => ({
+              label: item.label,
+              insertText: item.text || item.label,
+              sortText: item.sortText,
+              kind: monaco.languages.CompletionItemKind[firstUpperCase(item.type || 'property')],
+              range: {
+                startLineNumber: position.lineNumber,
+                endLineNumber: position.lineNumber,
+                startColumn,
+                endColumn,
+              },
+            })),
+          } as monaco.languages.CompletionList;
+        }
+
+        /**
+         * 特殊字符处理
+         */
+        value = model.getWordAtPosition({
+          lineNumber: position.lineNumber,
+          column: position.column - 1,
+        });
+        if (value && session && triggerCharacter) {
+          const { word, endColumn } = value;
+
+          const res = await session.sendRequest('completions', {
+            text: word + triggerCharacter,
+            column: endColumn + 1,
+            frameId: session.currentFrame && session.currentFrame.raw.id,
+          });
+          return {
+            suggestions: res.body.targets.map((item) => ({
+              label: item.label,
+              insertText: item.text || item.label,
+              sortText: item.sortText,
+              kind: monaco.languages.CompletionItemKind[firstUpperCase(item.type || 'property')],
+              range: {
+                startLineNumber: position.lineNumber,
+                endLineNumber: position.lineNumber,
+                startColumn: endColumn + 1,
+                endColumn: endColumn + 1,
+              },
+            })),
+          } as monaco.languages.CompletionList;
+        }
+
+        return null;
       },
-    );
+    });
   }
 
   disable() {
@@ -432,32 +440,5 @@ export class DebugConsoleService implements IHistoryNavigationWidget {
     }
     this.inputEditor?.monacoEditor.setValue('');
     this.inputEditor?.monacoEditor.setModel(null);
-  }
-}
-
-// 不可保存，因此不需要设置 saveDocumentModel
-@Injectable()
-export class DebugConsoleInputDocumentProvider implements IEditorDocumentModelContentProvider {
-  @Autowired(DebugConsoleService)
-  private readonly debugConsole: DebugConsoleService;
-
-  handlesScheme(scheme: string) {
-    return scheme === Schemes.walkThroughSnippet;
-  }
-
-  async provideEditorDocumentModelContent() {
-    return this.debugConsole.consoleInputValue;
-  }
-
-  isReadonly(): boolean {
-    return false;
-  }
-
-  get onDidChangeContent() {
-    return this.debugConsole.onConsoleInputValueChange;
-  }
-
-  preferLanguageForUri() {
-    return 'plaintext';
   }
 }

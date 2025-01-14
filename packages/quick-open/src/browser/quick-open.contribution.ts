@@ -1,18 +1,18 @@
 import { Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
 import {
-  Domain,
+  ClientAppContribution,
   CommandContribution,
-  ContributionProvider,
-  KeybindingContribution,
   CommandRegistry,
+  ContributionProvider,
+  Domain,
+  KeybindingContribution,
   KeybindingRegistry,
+  LAYOUT_COMMANDS,
+  QUICK_OPEN_COMMANDS,
   localize,
 } from '@opensumi/ide-core-browser';
-import { ClientAppContribution } from '@opensumi/ide-core-browser';
-import { MenuId, MenuContribution, IMenuRegistry } from '@opensumi/ide-core-browser/lib/menu/next';
+import { IMenuRegistry, MenuContribution, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import { PrefixQuickOpenService } from '@opensumi/ide-core-browser/lib/quick-open';
-
-import { QUICK_OPEN_COMMANDS } from '../common';
 
 import { QuickOpenContribution, QuickOpenHandlerRegistry } from './prefix-quick-open.service';
 import { QuickCommandHandler } from './quick-open.command.service';
@@ -60,6 +60,12 @@ export class QuickOpenFeatureContribution
     commands.registerCommand(QUICK_OPEN_COMMANDS.OPEN_OUTLINE, {
       execute: () => this.prefixQuickOpenService.open('@'),
     });
+    commands.registerCommand(QUICK_OPEN_COMMANDS.OPEN_VIEW, {
+      execute: () => this.prefixQuickOpenService.open('view '),
+    });
+    commands.registerCommand(QUICK_OPEN_COMMANDS.OPEN_WITH_COMMAND, {
+      execute: (value?: string) => this.prefixQuickOpenService.open('>', value),
+    });
   }
 
   registerKeybindings(keybindings: KeybindingRegistry): void {
@@ -74,6 +80,13 @@ export class QuickOpenFeatureContribution
       command: {
         id: QUICK_OPEN_COMMANDS.OPEN.id,
         label: localize('menu-bar.view.quick.command'),
+      },
+      group: '0_primary',
+    });
+    menus.registerMenuItem(MenuId.MenubarViewMenu, {
+      command: {
+        id: LAYOUT_COMMANDS.OPEN_VIEW.id,
+        label: LAYOUT_COMMANDS.OPEN_VIEW.label,
       },
       group: '0_primary',
     });

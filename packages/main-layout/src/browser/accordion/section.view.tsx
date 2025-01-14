@@ -1,41 +1,71 @@
 import cls from 'classnames';
 import React from 'react';
 
-
-import { getIcon, ErrorBoundary, useViewState } from '@opensumi/ide-core-browser';
-import { useInjectable } from '@opensumi/ide-core-browser';
-import { Layout, PanelContext } from '@opensumi/ide-core-browser/lib/components';
+import {
+  ErrorBoundary,
+  getIcon,
+  useAutorun,
+  useDesignStyles,
+  useInjectable,
+  useViewState,
+} from '@opensumi/ide-core-browser';
+import { Layout } from '@opensumi/ide-core-browser/lib/components';
 import { InlineActionBar, InlineMenuBar } from '@opensumi/ide-core-browser/lib/components/actions';
-import { isIMenu, IMenu, IContextMenu } from '@opensumi/ide-core-browser/lib/menu/next';
+import { IContextMenu, IMenu, isIMenu } from '@opensumi/ide-core-browser/lib/menu/next';
 import { IProgressService } from '@opensumi/ide-core-browser/lib/progress';
 import { ProgressBar } from '@opensumi/ide-core-browser/lib/progress/progress-bar';
+import { transformLabelWithCodicon } from '@opensumi/ide-core-browser/lib/utils/label';
+import { IIconService } from '@opensumi/ide-theme';
 
+import { AccordionService } from './accordion.service';
 import styles from './styles.module.less';
 
+import type { ViewBadge } from 'vscode';
+
 export interface CollapsePanelProps extends React.PropsWithChildren<any> {
-  // panel 头部标题
+  // Header Title
   header: string;
-  // 头部样式名
+  // Header Description
+  description?: string;
+  // Panel Message
+  message?: string;
+  // Header Size
+  headerSize?: number;
+  // Header Class
   headerClass?: string;
-  // panel 点击事件监听
+  // Handle Panel Click
   onItemClick?: any;
+  // Handle Panel Context Menu
   onContextMenuHandler: any;
-  // 计算宽度时的优先级
+  // Panel Weight
   weight?: number;
-  // 排序优先级
+  // Panel Order Priority
   priority?: number;
-  // panel宽高
+  // Panel Size
   size?: {
     width: number;
     height: number;
   };
-  headerSize?: number;
+  // Panel View Id
   viewId: string;
+  // Panel Alignment
   alignment?: Layout.alignment;
+  // Panel Index
   index: number;
+  // Panel Initial Props
   initialProps?: any;
+  // Panel No Header
   noHeader?: boolean;
+  // Panel Title Menu
   titleMenu: IMenu | IContextMenu;
+  // Panel Accordion Service
+  accordionService: AccordionService;
+  // Panel Badge
+  badge?: string | ViewBadge;
+  // Panel Expanded
+  expanded?: boolean;
+  // Panel Title Menu Context
+  titleMenuContext?: any;
 }
 
 const attrs = {
@@ -44,30 +74,76 @@ const attrs = {
 
 export const AccordionSection = ({
   header,
+  description,
+  message,
   headerClass,
   onItemClick,
   noHeader,
   children,
-  expanded,
-  onResize,
-  size,
+  badge,
   headerSize,
   viewId,
   initialProps,
   titleMenu,
   titleMenuContext,
+  expanded,
+  accordionService,
   onContextMenuHandler,
+  alignment,
 }: CollapsePanelProps) => {
+  const iconService = useInjectable<IIconService>(IIconService);
+  const styles_actions_wrap = useDesignStyles(styles.actions_wrap, 'actions_wrap');
+  const styles_kt_split_panel = useDesignStyles(styles.kt_split_panel, 'kt_split_panel');
+  const styles_kt_split_panel_header = useDesignStyles(styles.kt_split_panel_header, 'kt_split_panel_header');
+  const styles_kt_split_panel_body = useDesignStyles(styles.kt_split_panel_body, 'kt_split_panel_body');
+  const styles_section_badge = useDesignStyles(styles.section_badge, 'section_badge');
   const contentRef = React.useRef<HTMLDivElement | null>(null);
 
-  const [headerFocused, setHeaderFocused] = React.useState(false);
+  const [metadata, setMetadata] = React.useState({
+    header,
+    description,
+    message,
+    badge,
+  });
 
-  const { getSize, setSize } = React.useContext(PanelContext);
+  React.useEffect(() => {
+    const disposable = accordionService.onDidChangeViewTitle(({ id, title, description, message: msg, badge }) => {
+      let changed = false;
+      const newMetadata = {
+        ...metadata,
+      };
+      if (viewId === id && title && title !== metadata.header) {
+        newMetadata.header = title;
+        changed = true;
+      }
+
+      if (viewId === id && badge !== metadata.badge) {
+        newMetadata.badge = badge;
+        changed = true;
+      }
+
+      if (viewId === id && description && description !== metadata.description) {
+        newMetadata.description = description;
+        changed = true;
+      }
+
+      if (viewId === id && msg && msg !== metadata.message) {
+        newMetadata.message = msg;
+        changed = true;
+      }
+      if (changed) {
+        setMetadata(newMetadata);
+      }
+    });
+
+    return () => {
+      disposable.dispose();
+    };
+  }, []);
 
   const clickHandler = React.useCallback(() => {
-    const currentSize = getSize(false);
-    onItemClick((targetSize) => setSize(targetSize, false), currentSize);
-  }, [getSize, setSize]);
+    onItemClick();
+  }, [onItemClick]);
 
   const bodyStyle = React.useMemo<React.CSSProperties>(
     () => ({
@@ -76,62 +152,71 @@ export const AccordionSection = ({
     [expanded],
   );
 
-  React.useEffect(() => {
-    if (onResize) {
-      onResize(size);
-    }
-  }, [size]);
-
-  const headerFocusHandler = React.useCallback(() => {
-    setHeaderFocused(true);
-  }, []);
-
-  const headerBlurHandler = React.useCallback(() => {
-    setHeaderFocused(false);
-  }, []);
-
   const viewState = useViewState(viewId, contentRef, true);
   const progressService: IProgressService = useInjectable(IProgressService);
-  const indicator = progressService.getIndicator(viewId)!;
+  const indicator = progressService.getIndicator(viewId);
 
   const Component: any = children;
+  const computedHeaderSize = React.useMemo(() => {
+    if (expanded) {
+      return `${headerSize}px`;
+    }
+
+    if (alignment === 'horizontal') {
+      return '100%';
+    }
+    return `${headerSize}px`;
+  }, [expanded, headerSize, alignment]);
+
   return (
-    <div className={styles.kt_split_panel} data-view-id={viewId}>
+    <div className={styles_kt_split_panel} data-view-id={viewId} draggable={false}>
       {!noHeader && (
         <div
-          onFocus={headerFocusHandler}
-          onBlur={headerBlurHandler}
           {...attrs}
-          className={cls(styles.kt_split_panel_header, headerFocused ? styles.kt_panel_focused : '', headerClass)}
+          className={cls(styles_kt_split_panel_header, headerClass)}
           onClick={clickHandler}
           onContextMenu={(e) => onContextMenuHandler(e, viewId)}
-          style={{ height: headerSize + 'px', lineHeight: headerSize + 'px' }}
+          style={{ height: computedHeaderSize, lineHeight: computedHeaderSize }}
         >
           <div className={styles.label_wrap}>
             <i className={cls(getIcon('arrow-down'), styles.arrow_icon, expanded ? '' : styles.kt_mod_collapsed)}></i>
             <div className={styles.section_label} style={{ lineHeight: headerSize + 'px' }}>
-              {header}
+              {metadata.header}
             </div>
+            {metadata.description && (
+              <div className={styles.section_description} style={{ lineHeight: headerSize + 'px' }}>
+                {transformLabelWithCodicon(metadata.description, {}, iconService.fromString.bind(iconService))}
+              </div>
+            )}
+            {metadata.badge && (
+              <div className={styles_section_badge}>
+                {typeof metadata.badge == 'string' ? metadata.badge : metadata.badge.value}
+              </div>
+            )}
           </div>
           {expanded && titleMenu && (
-            <div className={styles.actions_wrap}>
+            <div className={styles_actions_wrap}>
               {isIMenu(titleMenu) ? (
                 <InlineActionBar menus={titleMenu} context={titleMenuContext} />
               ) : (
-                <InlineMenuBar menus={titleMenu} />
+                <InlineMenuBar menus={titleMenu} context={titleMenuContext} />
               )}
             </div>
           )}
         </div>
       )}
       <div
-        className={cls([styles.kt_split_panel_body, { [styles.hide]: !expanded }])}
+        className={cls([styles_kt_split_panel_body, { [styles.hide]: !expanded }])}
         style={bodyStyle}
         ref={contentRef}
       >
-        <ProgressBar className={styles.progressBar} progressModel={indicator.progressModel} />
+        {<ProgressBar className={styles.progressBar} progressModel={indicator!.progressModel} />}
         <ErrorBoundary>
-          <Component {...initialProps} viewState={viewState} />
+          {metadata.message && <div className={styles.kt_split_panel_message}>{metadata.message}</div>}
+          <Component
+            {...initialProps}
+            viewState={{ height: viewState.height - (metadata.message ? 22 : 0), width: viewState.width }}
+          />
         </ErrorBoundary>
       </div>
     </div>

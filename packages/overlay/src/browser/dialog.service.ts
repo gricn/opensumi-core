@@ -1,9 +1,7 @@
-import { observable, action } from 'mobx';
+import { Autowired, Injectable } from '@opensumi/di';
+import { Deferred, Emitter, MessageType } from '@opensumi/ide-core-common';
 
-import { Injectable, Autowired } from '@opensumi/di';
-import { Deferred, MessageType } from '@opensumi/ide-core-common';
-
-import { IDialogService, AbstractMessageService, Icon } from '../common';
+import { AbstractMessageService, IDialogService, Icon, OpenMessageOptions } from '../common';
 
 import { DialogContextKey } from './dialog.contextkey';
 
@@ -16,60 +14,72 @@ export class DialogService extends AbstractMessageService implements IDialogServ
   @Autowired(DialogContextKey)
   private readonly contextkeyService: DialogContextKey;
 
-  @observable
-  protected visible = false;
+  protected _visible = false;
 
-  @observable
   protected message: string | React.ReactNode = '';
 
-  @observable
+  protected detail: string | undefined;
+
   protected title = '';
 
-  @observable
   public closable = true;
 
-  @observable
-  protected buttons: string[] = [];
+  protected buttons: string[] | undefined;
 
-  @action
-  open<T = string>(
-    message: string | React.ReactNode,
-    type: MessageType,
-    buttons?: any[],
+  protected props: Record<string, any> = {};
+
+  private onDidDialogVisibleChangeEmitter = new Emitter<boolean>();
+
+  get onDidDialogVisibleChange() {
+    return this.onDidDialogVisibleChangeEmitter.event;
+  }
+
+  get visible() {
+    return this._visible;
+  }
+
+  open<T = string>({
+    message,
+    type,
+    buttons,
+    options,
     closable = true,
-  ): Promise<T | undefined> {
+    props,
+  }: OpenMessageOptions): Promise<T | undefined> {
     this.deferred = new Deferred<string>();
     this.type = type;
     this.message = message;
-    this.visible = true;
-    this.contextkeyService.dialogViewVisibleContext.set(true);
+    this.detail = options?.detail;
+    this._visible = true;
     this.closable = closable;
-    if (buttons) {
-      this.buttons = buttons;
-    }
+    this.props = props ?? {};
+    this.buttons = buttons;
+
+    this.onDidDialogVisibleChangeEmitter.fire(this._visible);
+    this.contextkeyService.dialogViewVisibleContext.set(true);
     return this.deferred.promise;
   }
 
-  @action
   hide<T = string>(value?: T): void {
-    this.visible = false;
+    this._visible = false;
+    this.onDidDialogVisibleChangeEmitter.fire(this._visible);
     this.contextkeyService.dialogViewVisibleContext.set(false);
     this.deferred.resolve(value);
   }
 
-  @action
   reset(): void {
     this.type = undefined;
     this.message = '';
     this.buttons = [];
-  }
-
-  isVisible(): boolean {
-    return this.visible;
+    this.props = {};
   }
 
   getMessage(): string | React.ReactNode {
     return this.message;
+  }
+
+  getDetail(): string | undefined {
+    return this.detail;
   }
 
   getType(): MessageType | undefined {
@@ -98,7 +108,11 @@ export class DialogService extends AbstractMessageService implements IDialogServ
     }
   }
 
-  getButtons(): string[] {
+  getButtons() {
     return this.buttons;
+  }
+
+  getProps(): Record<string, any> {
+    return this.props;
   }
 }

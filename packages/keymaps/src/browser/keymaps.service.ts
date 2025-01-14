@@ -1,39 +1,39 @@
 import * as fuzzy from 'fuzzy';
-import { observable, action } from 'mobx';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  Disposable,
-  IDisposable,
-  ScopedKeybinding,
-  KeybindingRegistry,
-  URI,
-  Emitter,
-  Keybinding,
-  KeybindingScope,
-  CommandService,
-  EDITOR_COMMANDS,
   CommandRegistry,
-  localize,
-  KeySequence,
-  KeybindingService,
-  ILogger,
-  Event,
-  KeybindingWeight,
-  ThrottledDelayer,
-  FileStat,
+  CommandService,
+  Deferred,
+  Disposable,
   DisposableCollection,
-  ProgressLocation,
+  EDITOR_COMMANDS,
+  Emitter,
+  Event,
+  FileStat,
+  IDisposable,
+  ILogger,
   IProgress,
   IProgressStep,
-  Deferred,
-  Throttler,
+  KeySequence,
+  Keybinding,
+  KeybindingRegistry,
+  KeybindingScope,
+  KeybindingService,
+  KeybindingWeight,
+  ProgressLocation,
   Schemes,
+  ScopedKeybinding,
+  ThrottledDelayer,
+  Throttler,
+  URI,
+  localize,
+  runWhenIdle,
 } from '@opensumi/ide-core-browser';
 import { IProgressService } from '@opensumi/ide-core-browser/lib/progress';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
 
-import { KEYMAPS_FILE_NAME, IKeymapService, KEYMAPS_SCHEME, KeybindingItem, KeymapItem } from '../common';
+import { IKeymapService, KEYMAPS_FILE_NAME, KEYMAPS_SCHEME, KeybindingItem, KeymapItem } from '../common';
 
 import { KeymapsParser } from './keymaps-parser';
 
@@ -73,9 +73,9 @@ export class KeymapService implements IKeymapService {
 
   protected resource: FileStat | undefined;
 
-  protected readonly keymapChangeEmitter = new Emitter<void>();
+  protected readonly keymapChangeEmitter = new Emitter<KeybindingItem[]>();
 
-  get onDidKeymapChanges(): Event<void> {
+  get onDidKeymapChanges(): Event<KeybindingItem[]> {
     return this.keymapChangeEmitter.event;
   }
 
@@ -118,7 +118,6 @@ export class KeymapService implements IKeymapService {
     this._storeKeybindings = value;
   }
 
-  @observable.shallow
   keybindings: KeybindingItem[] = [];
 
   get whenReady() {
@@ -126,15 +125,6 @@ export class KeymapService implements IKeymapService {
   }
 
   async init() {
-    const keymapUrl = KeymapService.KEYMAP_FILE_URI.toString();
-    this.resource = await this.filesystem.getFileStat(keymapUrl);
-    // 如果不存在，则默认创建一个空文件
-    // 集成测有可能后置才会同步这个配置，如果不创建好不方便 watch
-    if (!this.resource) {
-      this.resource = await this.filesystem.createFile(keymapUrl, {
-        content: JSON.stringify([]),
-      });
-    }
     await this.reconcile();
     const watcher = await this.filesystem.watchFileChanges(KeymapService.KEYMAP_FILE_URI);
     this.disposableCollection.push(watcher);
@@ -191,6 +181,15 @@ export class KeymapService implements IKeymapService {
    * @param keybindings
    */
   async reconcile(keybindings?: KeymapItem[]) {
+    const keymapUrl = KeymapService.KEYMAP_FILE_URI.toString();
+    this.resource = await this.filesystem.getFileStat(keymapUrl);
+    // 如果不存在，则默认创建一个空文件
+    // 集成测有可能后置才会同步这个配置，如果不创建好不方便 watch
+    if (!this.resource) {
+      this.resource = await this.filesystem.createFile(keymapUrl, {
+        content: JSON.stringify([]),
+      });
+    }
     const keymap = keybindings ? keybindings.slice(0) : await this.parseKeybindings();
     const bindings: Keybinding[] = keymap.map((kb) =>
       // 清洗存入keymap数据
@@ -222,7 +221,6 @@ export class KeymapService implements IKeymapService {
       kb.command = kb.command.slice(1);
       this.unregisterDefaultKeybinding(kb, true);
     });
-    this.updateKeybindings();
   }
 
   private unregisterUserKeybinding(kb: Keybinding) {
@@ -289,15 +287,16 @@ export class KeymapService implements IKeymapService {
   /**
    * 更新keybindings列表
    */
-  @action
-  private updateKeybindings() {
+  public updateKeybindings = () => {
     if (this.currentSearchValue) {
       this.doSearchKeybindings(this.currentSearchValue);
     } else {
-      this.keybindings = this.getKeybindingItems();
+      runWhenIdle(() => {
+        this.keybindings = this.getKeybindingItems();
+        this.keymapChangeEmitter.fire(this.keybindings);
+      });
     }
-    this.keymapChangeEmitter.fire();
-  }
+  };
 
   /**
    * 解析快捷键数据
@@ -578,11 +577,10 @@ export class KeymapService implements IKeymapService {
   /**
    * 搜索快捷键
    */
-  @action
   searchKeybindings = (search: string) => {
     this.currentSearchValue = search;
     // throttle
-    if (!this.searchDelayer.isTriggered) {
+    if (!this.searchDelayer.isTriggered()) {
       this.searchDelayer.cancel();
     }
     this.searchDelayer.trigger(async () => {
@@ -596,7 +594,6 @@ export class KeymapService implements IKeymapService {
    * 模糊搜索匹配的快捷键
    * @protected
    */
-  @action
   protected readonly doSearchKeybindings = (search) => {
     if (search) {
       this.isSearching = true;
@@ -606,7 +603,7 @@ export class KeymapService implements IKeymapService {
     const items = this.getKeybindingItems();
     const result: KeybindingItem[] = [];
     items.forEach((item) => {
-      const keys: string[] = ['command', 'keybinding', 'when', 'context', 'source'];
+      const keys: string[] = ['id', 'command', 'keybinding', 'when', 'context', 'source'];
       let matched = false;
       for (const key of keys) {
         const str = item[key];
@@ -694,6 +691,7 @@ export class KeymapService implements IKeymapService {
       }
     });
     this.keybindings = result;
+    this.keymapChangeEmitter.fire(this.keybindings);
   };
 
   /**

@@ -1,11 +1,12 @@
-import { statSync, existsSync } from 'fs';
+/* eslint-disable no-console */
+import { existsSync, statSync } from 'fs';
 import { join } from 'path';
 
-import { green, yellow, red } from 'chalk';
-import got from 'got';
-import yargs from 'yargs';
+import { green, red } from 'chalk';
+import fetch from 'node-fetch';
 
-const CLI_NAME = process.env.CLI_NAME || 'sumi';
+import { ArgvFactory } from '@opensumi/ide-utils/lib/argv';
+
 const PRODUCTION_NAME = process.env.PRODUCTION_NAME || 'OpenSumi';
 const CLIENT_ID = process.env.CLIENT_ID;
 const SUMI_SERVER_HOST = process.env.SUMI_SERVER_HOST || 'http://0.0.0.0:8000';
@@ -39,21 +40,20 @@ function openPathOrUrl(pathOrUrl: string): void {
     }
 
     if (statSync(fullPathOrUrl).isDirectory()) {
-      // eslint-disable-next-line no-console
       console.error(red('Directory is unsupported'));
       process.exit(0);
     }
   }
 
   const query = `?type=${type}&${type}=${encodeURIComponent(fullPathOrUrl)}&clientId=${CLIENT_ID}`;
-  got(`${SUMI_SERVER_HOST}/${OPENER_ROUTE}${query}`).catch((err) => {
+  fetch(`${SUMI_SERVER_HOST}/${OPENER_ROUTE}${query}`).catch((err) => {
     // eslint-disable-next-line no-console
     console.error(red(`Open ${type} ${fullPathOrUrl} error: \n ${err.message}`));
     process.exit(1);
   });
 }
 
-const argv = yargs(process.argv)
+const argv = new ArgvFactory(process.argv)
   .usage(
     `
   Help: Open files or website from a shell.
@@ -66,11 +66,10 @@ Examples:
     3. ${green('open /path/to/file')} Will open the file use ${PRODUCTION_NAME}.
   `,
   )
-  .help()
-  .string('_').argv;
+  .help().argv;
 
 if (argv._[0] !== undefined) {
-  openPathOrUrl(argv._[0]);
+  openPathOrUrl(argv._[0].toString());
 } else {
   // eslint-disable-next-line no-console
   console.error(red('The path or url is not defined.'));

@@ -1,5 +1,5 @@
-import { RGBA, Color } from '../color';
-import { transparent } from '../color-registry';
+import { Color, RGBA } from '../color';
+import { transparent } from '../utils';
 
 export const foregroundColor = Color.white;
 export const secondaryForegroundColor = transparent(foregroundColor, 0.7);

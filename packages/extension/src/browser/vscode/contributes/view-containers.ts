@@ -1,13 +1,17 @@
-import { Injectable, Autowired } from '@opensumi/di';
-import { DisposableCollection } from '@opensumi/ide-core-common';
+import { Autowired, Injectable } from '@opensumi/di';
+import { AI_CHAT_VIEW_ID } from '@opensumi/ide-ai-native';
+import { DisposableCollection, LifeCyclePhase } from '@opensumi/ide-core-common';
 import { IMainLayoutService } from '@opensumi/ide-main-layout';
-import { IIconService } from '@opensumi/ide-theme';
+import { IIconService, IconType } from '@opensumi/ide-theme';
 
-import { VSCodeContributePoint, Contributes } from '../../../common';
+import { Contributes, LifeCycle, VSCodeContributePoint } from '../../../common';
+import { AbstractExtInstanceManagementService } from '../../types';
 
-export interface ViewContainersContribution {
-  [key: string]: ViewContainerItem;
-}
+type LocationKey = 'panel' | 'activitybar' | 'ai-chat';
+
+export type ViewContainersContribution = {
+  [key in LocationKey]: ViewContainerItem;
+};
 
 export interface ViewContainerItem {
   id: string;
@@ -19,6 +23,7 @@ export type ViewContainersSchema = Array<ViewContainersContribution>;
 
 @Injectable()
 @Contributes('viewsContainers')
+@LifeCycle(LifeCyclePhase.Initialize)
 export class ViewContainersContributionPoint extends VSCodeContributePoint<ViewContainersSchema> {
   @Autowired(IMainLayoutService)
   mainlayoutService: IMainLayoutService;
@@ -26,25 +31,51 @@ export class ViewContainersContributionPoint extends VSCodeContributePoint<ViewC
   @Autowired(IIconService)
   iconService: IIconService;
 
+  @Autowired(AbstractExtInstanceManagementService)
+  protected readonly extensionManageService: AbstractExtInstanceManagementService;
+
   private disposableCollection: DisposableCollection = new DisposableCollection();
 
+  private convertLocationToSide(
+    location: LocationKey,
+  ): ['left' | 'bottom' | typeof AI_CHAT_VIEW_ID, 'vertical' | 'horizontal'] {
+    switch (location) {
+      case 'activitybar': {
+        return ['left', 'vertical'];
+      }
+      case 'ai-chat': {
+        return [AI_CHAT_VIEW_ID, 'vertical'];
+      }
+      default:
+        return ['bottom', 'horizontal'];
+    }
+  }
+
   contribute() {
-    for (const location of Object.keys(this.json)) {
-      if (location === 'activitybar') {
-        for (const container of this.json[location]) {
+    for (const contrib of this.contributesMap) {
+      const { extensionId, contributes } = contrib;
+      const extension = this.extensionManageService.getExtensionInstanceByExtId(extensionId);
+      if (!extension) {
+        continue;
+      }
+      for (const location of Object.keys(contributes)) {
+        const [side, alignment] = this.convertLocationToSide(location as LocationKey);
+
+        for (const container of contributes[location]) {
           const handlerId = this.mainlayoutService.collectTabbarComponent(
             [],
             {
-              iconClass: this.toIconClass(container.icon),
-              title: this.getLocalizeFromNlsJSON(container.title),
+              iconClass: this.toIconClass(container.icon, IconType.Mask, extension.path),
+              title: this.getLocalizeFromNlsJSON(container.title, extensionId),
               containerId: container.id,
               // 插件注册的视图默认在最后
               priority: 0,
               fromExtension: true,
               // 插件注册的视图容器无view时默认都隐藏tab
               hideIfEmpty: true,
+              alignment,
             },
-            'left',
+            side,
           );
           this.disposableCollection.push({
             dispose: () => {

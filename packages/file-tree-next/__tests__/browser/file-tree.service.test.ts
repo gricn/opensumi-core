@@ -1,34 +1,30 @@
 import { TreeNodeType } from '@opensumi/ide-components';
 import {
-  IContextKeyService,
   CorePreferences,
   Disposable,
-  URI,
   EDITOR_COMMANDS,
   FILE_COMMANDS,
-  ILoggerManagerClient,
   IApplicationService,
-  isWindows,
-  OperatingSystem,
-  isLinux,
+  IContextKeyService,
+  OS,
   PreferenceService,
   QuickOpenService,
-  OS,
+  URI,
 } from '@opensumi/ide-core-browser';
 import { MockContextKeyService } from '@opensumi/ide-core-browser/__mocks__/context-key';
 import { IDecorationsService } from '@opensumi/ide-decoration';
 import { WorkbenchEditorService } from '@opensumi/ide-editor';
-import { IFileServiceClient, FileChangeType } from '@opensumi/ide-file-service';
+import { FileChangeType, IFileServiceClient } from '@opensumi/ide-file-service';
 import { IMainLayoutService, IViewsRegistry } from '@opensumi/ide-main-layout';
 import { ViewsRegistry } from '@opensumi/ide-main-layout/lib/browser/views-registry';
-import { IWindowDialogService, IDialogService, IMessageService } from '@opensumi/ide-overlay';
-import { MockQuickOpenService } from '@opensumi/ide-quick-open/lib/common/mocks/quick-open.service';
-import { IThemeService, IIconService } from '@opensumi/ide-theme';
-import { IWorkspaceService, DEFAULT_WORKSPACE_SUFFIX_NAME } from '@opensumi/ide-workspace';
+import { IDialogService, IMessageService, IWindowDialogService } from '@opensumi/ide-overlay';
+import { IIconService, IThemeService } from '@opensumi/ide-theme';
+import { DEFAULT_WORKSPACE_SUFFIX_NAME, IWorkspaceService } from '@opensumi/ide-workspace';
 import { MockWorkspaceService } from '@opensumi/ide-workspace/lib/common/mocks';
 
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
+import { MockQuickOpenService } from '../../../quick-open/src/common/mocks/quick-open.service';
 import { FileTreeContribution } from '../../src/browser/file-tree-contribution';
 import { FileTreeService } from '../../src/browser/file-tree.service';
 import { IFileTreeAPI, IFileTreeService } from '../../src/common';
@@ -126,10 +122,6 @@ describe('FileTree Service should be work alone', () => {
         },
       },
       {
-        token: ILoggerManagerClient,
-        useValue: {},
-      },
-      {
         token: IFileTreeAPI,
         useValue: {},
       },
@@ -176,6 +168,7 @@ describe('FileTree Service should be work alone', () => {
         useValue: {
           get: () => {},
           ready: Promise.resolve(),
+          getValid: (_preferenceName: string, defaultValue: any) => defaultValue,
         },
       },
       {
@@ -187,8 +180,8 @@ describe('FileTree Service should be work alone', () => {
     fileTreeService.initContextKey(document.createElement('div'));
   });
 
-  afterEach(() => {
-    injector.disposeAll();
+  afterEach(async () => {
+    await injector.disposeAll();
     onPreferenceChanged.mockReset();
     mockFileServiceClient.watchFileChanges.mockReset();
     fileChangeWatcher.onFilesChanged.mockReset();
@@ -196,7 +189,7 @@ describe('FileTree Service should be work alone', () => {
 
   it('Service should be init correctly', async () => {
     await fileTreeService.init();
-    expect(onPreferenceChanged).toBeCalled();
+    expect(onPreferenceChanged).toHaveBeenCalled();
     expect(fileTreeService.indent).toBe(6);
     expect(fileTreeService.baseIndent).toBe(6);
   });
@@ -227,8 +220,8 @@ describe('FileTree Service should be work alone', () => {
     });
     fileTreeService.startWatchFileEvent();
     await fileTreeService.watchFilesChange(testUri);
-    expect(fileChangeWatcher.onFilesChanged).toBeCalledTimes(1);
-    expect(mockFileServiceClient.watchFileChanges).toBeCalled();
+    expect(fileChangeWatcher.onFilesChanged).toHaveBeenCalledTimes(1);
+    expect(mockFileServiceClient.watchFileChanges).toHaveBeenCalled();
     await fileTreeService.flushEventQueue();
   });
 
@@ -238,7 +231,7 @@ describe('FileTree Service should be work alone', () => {
     fileTreeService.startWatchFileEvent();
     await fileTreeService.watchFilesChange(testUri);
     await fileTreeContribution.onReconnect();
-    expect(fileChangeWatcher.onFilesChanged).toBeCalledTimes(2);
+    expect(fileChangeWatcher.onFilesChanged).toHaveBeenCalledTimes(2);
   });
 
   it('Commands should be work', () => {
@@ -247,15 +240,15 @@ describe('FileTree Service should be work alone', () => {
     const mockOpenResource = jest.fn();
     injector.mockCommand(EDITOR_COMMANDS.OPEN_RESOURCE.id, mockOpenResource);
     fileTreeService.openAndFixedFile(testUri);
-    expect(mockOpenResource).toBeCalledWith(testUri, { disableNavigate: true, preview: false, focus: true });
+    expect(mockOpenResource).toHaveBeenCalledWith(testUri, { disableNavigate: true, preview: false, focus: true });
     // OpenToTheSide
     fileTreeService.openToTheSide(testUri);
-    expect(mockOpenResource).toBeCalledWith(testUri, { disableNavigate: true, split: 4 });
+    expect(mockOpenResource).toHaveBeenCalledWith(testUri, { disableNavigate: true, split: 4 });
     // compare
     const mockCompare = jest.fn();
     injector.mockCommand(EDITOR_COMMANDS.COMPARE.id, mockCompare);
     fileTreeService.compare(testUri, testUri);
-    expect(mockCompare).toBeCalledWith({
+    expect(mockCompare).toHaveBeenCalledWith({
       original: testUri,
       modified: testUri,
     });
@@ -265,13 +258,13 @@ describe('FileTree Service should be work alone', () => {
     fileTreeService.toggleFilterMode();
     // set filterMode to true
     fileTreeService.toggleFilterMode();
-    expect(mockLocation).toBeCalledTimes(1);
+    expect(mockLocation).toHaveBeenCalledTimes(1);
     // enableFilterMode
     fileTreeService.toggleFilterMode();
     expect(fileTreeService.filterMode).toBeTruthy();
     // locationToCurrentFile
     fileTreeService.locationToCurrentFile();
-    expect(mockLocation).toBeCalledTimes(2);
+    expect(mockLocation).toHaveBeenCalledTimes(2);
   });
 
   it('sortComparator method should be work', () => {
@@ -346,10 +339,6 @@ describe('FileTree Service should be work alone on multiple workspace mode', () 
         },
       },
       {
-        token: ILoggerManagerClient,
-        useValue: {},
-      },
-      {
         token: IFileTreeAPI,
         useValue: {},
       },
@@ -385,8 +374,8 @@ describe('FileTree Service should be work alone on multiple workspace mode', () 
     fileTreeService = injector.get(IFileTreeService);
   });
 
-  afterEach(() => {
-    injector.disposeAll();
+  afterEach(async () => {
+    await injector.disposeAll();
     onPreferenceChanged.mockReset();
     mockFileServiceClient.watchFileChanges.mockReset();
     fileChangeWatcher.onFilesChanged.mockReset();

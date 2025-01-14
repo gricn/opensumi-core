@@ -34,20 +34,11 @@
   &.mod_focused {
     outline: 1px solid var(--list-focusOutline);
     outline-offset: -1px;
-    color: var(--kt-tree-activeSelectionForeground) !important;
-    background: var(--kt-tree-activeSelectionBackground);
-
-    .expansion_toggle {
-      color: var(--kt-tree-activeSelectionForeground) !important;
-    }
   }
 
   &.mod_actived {
     outline: 1px solid var(--list-focusOutline);
     outline-offset: -1px;
-    .expansion_toggle {
-      color: var(--kt-tree-activeSelectionForeground) !important;
-    }
   }
 
   &.mod_invalid {
@@ -173,6 +164,11 @@
   height: 22px;
   display: flex;
   align-items: center;
+
+  :global(.kt-icon) {
+    font-size: 14px !important;
+    color: inherit;
+  }
 }
 
 .input_wrapper {
@@ -191,4 +187,15 @@
   white-space: nowrap;
   text-align: left;
   display: flex;
+  color: var(--foreground);
+}
+
+.tree_view_drag_image {
+  position: absolute;
+  top: -1000px;
+  font-size: 12px;
+  display: inline-block;
+  padding: 1px 12px;
+  border-radius: 10px;
+  background: var(--sideBar-dropBackground);
 }

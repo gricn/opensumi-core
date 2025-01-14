@@ -1,9 +1,11 @@
 import mergeWith from 'lodash/mergeWith';
 
-import { Uri, asArray } from '@opensumi/ide-core-common';
+import { Uri, arrays } from '@opensumi/ide-core-common';
 import { IExtensionMetaData } from '@opensumi/ide-extension/lib/common';
 import { ISumiExtensionContributions } from '@opensumi/ide-extension/lib/common/sumi/extension';
 import { IExtensionContributions } from '@opensumi/ide-extension/lib/common/vscode/extension';
+
+const { asArray } = arrays;
 
 export function mergeContributes(
   contributes: IExtensionContributions | undefined,
@@ -47,8 +49,13 @@ export function mergeContributes(
 export async function getExtension(extensionId: string, version: string): Promise<IExtensionMetaData | undefined> {
   const extPath = `gw.alipayobjects.com/os/marketplace/assets/${extensionId}/v${version}/extension/`;
   const packageJSON = await fetch(`https://${extPath}package.json`).then((res) => res.json());
-  // merge for `kaitianContributes` and `contributes`
-  packageJSON.contributes = mergeContributes(packageJSON.kaitianContributes, packageJSON.contributes);
+
+  // compatible with `kaitianContributes` declare
+  if (!packageJSON.sumiContributes && packageJSON.kaitianContributes) {
+    packageJSON.sumiContributes = packageJSON.kaitianContributes;
+  }
+  // merge for `sumiContributes` and `contributes`
+  packageJSON.contributes = mergeContributes(packageJSON.sumiContributes, packageJSON.contributes);
 
   const extensionPath = 'ext://' + extPath;
   const extension = {

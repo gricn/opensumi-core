@@ -1,17 +1,17 @@
 // eslint-disable-next-line no-console
 
-import path from 'path';
 import fs from 'fs';
+import path from 'path';
 import { promisify } from 'util';
 
+import chalk from 'chalk';
 import Hbs from 'handlebars';
 import isGitClean from 'is-git-clean';
 import download from 'offline-iconfont';
-import chalk from 'chalk';
 
-import { IDE_ICONFONT_CN_CSS } from '../packages/core-browser/src/style/icon/ide-iconfont';
 import { defaultIconfont } from '../packages/components/src/icon/iconfont/iconMap';
-import pkg from '../package.json';
+import { IDE_ICONFONT_CN_CSS } from '../packages/core-browser/src/style/icon/ide-iconfont';
+import pkg from '../packages/core-common/package.json';
 
 const targetDir = path.resolve(__dirname, '../packages/components/src/icon/iconfont');
 

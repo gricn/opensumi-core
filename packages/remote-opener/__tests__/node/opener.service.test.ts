@@ -1,13 +1,13 @@
+import { createNodeInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
+
 import {
   IRemoteOpenerClient,
   IRemoteOpenerService,
   RemoteOpenerClientToken,
   RemoteOpenerServiceToken,
-} from '@opensumi/ide-remote-opener/lib/common';
-import { RemoteOpenerClientImpl } from '@opensumi/ide-remote-opener/lib/node/opener.client';
-import { RemoteOpenerServiceImpl } from '@opensumi/ide-remote-opener/lib/node/opener.service';
-
-import { createNodeInjector } from '../../../../tools/dev-tool/src/injector-helper';
+} from '../../src/common';
+import { RemoteOpenerClientImpl } from '../../src/node/opener.client';
+import { RemoteOpenerServiceImpl } from '../../src/node/opener.service';
 
 describe('packages/remote-opener/src/node/opener.service.ts', () => {
   let remoteOpenerService: IRemoteOpenerService;
@@ -33,7 +33,7 @@ describe('packages/remote-opener/src/node/opener.service.ts', () => {
   it('openExternal should be work', async () => {
     const spyOnSetInstance = jest.spyOn(remoteOpenerClient, 'setRemoteOpenerServiceInstance');
     remoteOpenerService['setConnectionClientId']('mock_client_id');
-    expect(spyOnSetInstance).toBeCalledWith('mock_client_id', remoteOpenerService);
+    expect(spyOnSetInstance).toHaveBeenCalledWith('mock_client_id', remoteOpenerService);
 
     const spyOnOpenExternal = jest.spyOn(remoteOpenerService, 'openExternal');
     expect(remoteOpenerService['clientId']).toBe('mock_client_id');
@@ -43,7 +43,7 @@ describe('packages/remote-opener/src/node/opener.service.ts', () => {
       type: 'file',
       clientId: 'mock_client_id',
     });
-    expect(spyOnOpenExternal).toBeCalledWith({
+    expect(spyOnOpenExternal).toHaveBeenCalledWith({
       file: 'mock_file',
       type: 'file',
       clientId: 'mock_client_id',

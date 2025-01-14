@@ -4,54 +4,40 @@ import {
   CommandRegistry,
   ComponentContribution,
   ComponentRegistry,
-  getIcon,
-  localize,
-  TabBarToolbarContribution,
-  ToolbarRegistry,
+  IContextKeyService,
   KeybindingContribution,
   KeybindingRegistry,
-  IContextKeyService,
+  TabBarToolbarContribution,
+  ToolbarRegistry,
+  getIcon,
+  localize,
 } from '@opensumi/ide-core-browser';
 import { IMenuRegistry, MenuContribution, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import { Domain } from '@opensumi/ide-core-common/lib/di-helper';
-import { BrowserEditorContribution, IEditorDocumentModelContentRegistry } from '@opensumi/ide-editor/lib/browser';
 
-import { DEBUG_CONSOLE_CONTAINER_ID } from '../../../common';
+import { DEBUG_COMMANDS, DEBUG_CONSOLE_CONTAINER_ID, IDebugConsoleModelService } from '../../../common';
 import { DebugContextKey } from '../../contextkeys/debug-contextkey.service';
-import { DEBUG_COMMANDS } from '../../debug-contribution';
 import { DebugConsoleNode } from '../../tree';
 
-import { CONTEXT_IN_DEBUG_REPL, CONTEXT_IN_DEBUG_MODE } from './../../../common/constants';
+import { CONTEXT_IN_DEBUG_MODE, CONTEXT_IN_DEBUG_REPL } from './../../../common/constants';
 import { DebugConsoleFilterService } from './debug-console-filter.service';
 import { DebugConsoleFilterView } from './debug-console-filter.view';
-import { DebugConsoleModelService } from './debug-console-tree.model.service';
-import { DebugConsoleInputDocumentProvider, DebugConsoleService } from './debug-console.service';
+import { DebugConsoleService } from './debug-console.service';
 import { DebugConsoleView } from './debug-console.view';
 
 export const DEBUG_CONSOLE_VIEW_ID = 'debug-console-view';
 
-@Domain(
-  ComponentContribution,
-  BrowserEditorContribution,
-  TabBarToolbarContribution,
-  CommandContribution,
-  MenuContribution,
-  KeybindingContribution,
-)
+@Domain(ComponentContribution, TabBarToolbarContribution, CommandContribution, MenuContribution, KeybindingContribution)
 export class DebugConsoleContribution
   implements
     ComponentContribution,
-    BrowserEditorContribution,
     TabBarToolbarContribution,
     CommandContribution,
     MenuContribution,
     KeybindingContribution
 {
-  @Autowired()
-  private readonly debugConsoleModelService: DebugConsoleModelService;
-
-  @Autowired()
-  private readonly debugConsoleInputDocumentProvider: DebugConsoleInputDocumentProvider;
+  @Autowired(IDebugConsoleModelService)
+  private readonly debugConsoleModelService: IDebugConsoleModelService;
 
   @Autowired(IContextKeyService)
   protected readonly contextKeyService: IContextKeyService;
@@ -90,10 +76,6 @@ export class DebugConsoleContribution
       viewId: DEBUG_CONSOLE_CONTAINER_ID,
       tooltip: DEBUG_COMMANDS.CLEAR_CONSOLE.label,
     });
-  }
-
-  registerEditorDocumentModelContentProvider(registry: IEditorDocumentModelContentRegistry) {
-    registry.registerEditorDocumentModelContentProvider(this.debugConsoleInputDocumentProvider);
   }
 
   registerCommands(registry: CommandRegistry) {
@@ -191,7 +173,6 @@ export class DebugConsoleContribution
       command: DEBUG_COMMANDS.CONSOLE_FILTER_FOCUS.id,
       keybinding: 'ctrlcmd+f',
       when: `${CONTEXT_IN_DEBUG_REPL.raw}`,
-      priority: Number.MAX_SAFE_INTEGER,
     });
   }
 }

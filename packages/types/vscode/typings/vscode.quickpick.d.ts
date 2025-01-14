@@ -1,4 +1,18 @@
 declare module 'vscode' {
+  /**
+   * The kind of {@link QuickPickItem quick pick item}.
+   */
+  export enum QuickPickItemKind {
+    /**
+     * When a {@link QuickPickItem} has a kind of {@link Separator}, the item is just a visual separator and does not represent a real item.
+     * The only property that applies is {@link QuickPickItem.label label }. All other properties on {@link QuickPickItem} will be ignored and have no effect.
+     */
+    Separator = -1,
+    /**
+     * The default {@link QuickPickItem.kind} is an item that can be selected in the quick pick.
+     */
+    Default = 0,
+  }
 
   /**
    * Represents an item that can be selected from
@@ -10,6 +24,17 @@ declare module 'vscode' {
      * A human readable string which is rendered prominent.
      */
     label: string;
+
+    /**
+     * The kind of QuickPickItem that will determine how this item is rendered in the quick pick. When not specified,
+     * the default is {@link QuickPickItemKind.Default}.
+     */
+    kind?: QuickPickItemKind;
+
+    /**
+     * The icon path or {@link ThemeIcon} for the QuickPickItem.
+     */
+    iconPath?: IconPath;
 
     /**
      * A human readable string which is rendered less prominent.
@@ -335,7 +360,7 @@ declare module 'vscode' {
      * @return A human readable string which is presented as diagnostic message.
      * Return `undefined`, `null`, or the empty string when 'value' is valid.
      */
-    validateInput?(value: string): string | undefined | null | Thenable<string | undefined | null>;
+    validateInput?(value: string): string | InputBoxValidationMessage | undefined | null | Thenable<string | InputBoxValidationMessage | undefined | null>;
   }
 
   /**
@@ -351,6 +376,17 @@ declare module 'vscode' {
      * Current input value.
      */
     value: string;
+
+    /**
+		 * Selection range in the input value. Defined as tuple of two number where the
+		 * first is the inclusive start index and the second the exclusive end index. When `undefined` the whole
+		 * pre-filled value will be selected, when empty (start equals end) only the cursor will be set,
+		 * otherwise the defined range will be selected.
+		 *
+		 * This property does not get updated when the user types or makes a selection,
+		 * but it can be updated by the extension.
+		 */
+		valueSelection: readonly [number, number] | undefined;
 
     /**
      * Optional placeholder in the filter text.
@@ -390,7 +426,7 @@ declare module 'vscode' {
     /**
      * An optional validation message indicating a problem with the current input value.
      */
-    validationMessage: string | undefined;
+    validationMessage: string | InputBoxValidationMessage | undefined;
   }
 
 
@@ -524,4 +560,30 @@ declare module 'vscode' {
     readonly item: T;
   }
 
+  /**
+   * Impacts the behavior and appearance of the validation message.
+   */
+  export enum InputBoxValidationSeverity {
+    Ignore = 0,
+    Info = 1,
+    Warning = 2,
+    Error = 3
+  }
+
+  /**
+   * Object to configure the behavior of the validation message.
+   */
+  export interface  InputBoxValidationMessage {
+    /**
+     * The validation message to display.
+     */
+    readonly message: string;
+
+    /**
+     * The severity of the validation message.
+     * NOTE: When using `InputBoxValidationSeverity.Error`, the user will not be allowed to accept (hit ENTER) the input.
+     * `Info` and `Warning` will still allow the InputBox to accept the input.
+     */
+    readonly severity: InputBoxValidationSeverity;
+  }
 }

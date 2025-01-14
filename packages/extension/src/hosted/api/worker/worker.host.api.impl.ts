@@ -1,23 +1,26 @@
-import type * as vscode from 'vscode';
-
 import { IRPCProtocol } from '@opensumi/ide-connection';
-import { Emitter, Event, CancellationTokenSource, DefaultReporter, Schemes } from '@opensumi/ide-core-common';
-import { OverviewRulerLane } from '@opensumi/ide-editor';
+import { CancellationTokenSource, DefaultReporter, Emitter, Event } from '@opensumi/ide-core-common';
+import { DEFAULT_VSCODE_ENGINE_VERSION } from '@opensumi/ide-core-common/lib/const';
+
 
 import { IExtensionHostService, IExtensionWorkerHost, WorkerHostAPIIdentifier } from '../../../common';
 import {
-  TextEditorCursorStyle,
-  ViewColumn,
-  TextEditorSelectionChangeKind,
+  ExtHostAPIIdentifier,
+  IExtHostLocalization,
   IExtensionDescription,
+  TextEditorCursorStyle,
+  TextEditorSelectionChangeKind,
+  ViewColumn,
 } from '../../../common/vscode';
-import { ExtHostAPIIdentifier } from '../../../common/vscode';
+import { OverviewRulerLane } from '../../../common/vscode/models';
 import { createAPIFactory as createSumiAPIFactory } from '../sumi/ext.host.api.impl';
 import { ExtensionDocumentDataManagerImpl } from '../vscode/doc';
 import { ExtensionHostEditorService } from '../vscode/editor/editor.host';
+import { ExtHostEnv } from '../vscode/env/ext.host.env';
+import { createWorkerHostEnvAPIFactory } from '../vscode/env/workerEnvApiFactory';
 import { ExtHostWebviewService, ExtHostWebviewViews } from '../vscode/ext.host.api.webview';
-import { createAuthenticationApiFactory, ExtHostAuthentication } from '../vscode/ext.host.authentication';
-import { ExtHostCommands, createCommandsApiFactory } from '../vscode/ext.host.command';
+import { ExtHostAuthentication, createAuthenticationApiFactory } from '../vscode/ext.host.authentication';
+import { ExtHostCommands } from '../vscode/ext.host.command';
 import { ExtHostComments, createCommentsApiFactory } from '../vscode/ext.host.comments';
 import { ExtHostCustomEditorImpl } from '../vscode/ext.host.custom-editor';
 import { ExtHostDecorations } from '../vscode/ext.host.decoration';
@@ -26,8 +29,10 @@ import { createExtensionsApiFactory } from '../vscode/ext.host.extensions';
 import { ExtHostFileSystem } from '../vscode/ext.host.file-system';
 import { ExtHostFileSystemEvent } from '../vscode/ext.host.file-system-event';
 import { ExtHostFileSystemInfo } from '../vscode/ext.host.file-system-info';
-import { createLanguagesApiFactory, ExtHostLanguages } from '../vscode/ext.host.language';
+import { ExtHostLanguages, createLanguagesApiFactory } from '../vscode/ext.host.language';
+import { ExtHostLocalization, createLocalizationApiFactory } from '../vscode/ext.host.localization';
 import { ExtHostMessage } from '../vscode/ext.host.message';
+import { ExtensionNotebookDocumentManagerImpl } from '../vscode/ext.host.notebook';
 import { ExtHostOutput } from '../vscode/ext.host.output';
 import { ExtHostPreference } from '../vscode/ext.host.preference';
 import { ExtHostProgress } from '../vscode/ext.host.progress';
@@ -39,16 +44,17 @@ import { ExtHostTheming } from '../vscode/ext.host.theming';
 import { ExtHostTreeViews } from '../vscode/ext.host.treeview';
 import { ExtHostUrls } from '../vscode/ext.host.urls';
 import { ExtHostWindowState } from '../vscode/ext.host.window-state';
-import { createWindowApiFactory, ExtHostWindow } from '../vscode/ext.host.window.api.impl';
+import { ExtHostWindow, createWindowApiFactory } from '../vscode/ext.host.window.api.impl';
 import { ExtHostWorkspace, createWorkspaceApiFactory } from '../vscode/ext.host.workspace';
 import { ExtHostTasks } from '../vscode/tasks/ext.host.tasks';
 
 import * as workerExtTypes from './worker.ext-types';
 
+import type * as vscode from 'vscode';
+
 export function createAPIFactory(
   rpcProtocol: IRPCProtocol,
   extensionService: IExtensionHostService | IExtensionWorkerHost,
-  type: string,
 ) {
   rpcProtocol.set(WorkerHostAPIIdentifier.ExtWorkerHostExtensionService, extensionService);
 
@@ -56,6 +62,11 @@ export function createAPIFactory(
     ExtHostAPIIdentifier.ExtHostDocuments,
     new ExtensionDocumentDataManagerImpl(rpcProtocol),
   );
+  const extHostNotebook = rpcProtocol.set(
+    ExtHostAPIIdentifier.ExtHostNotebook,
+    new ExtensionNotebookDocumentManagerImpl(rpcProtocol, extHostDocs),
+  );
+
   const extHostCommands = rpcProtocol.set(
     ExtHostAPIIdentifier.ExtHostCommands,
     new ExtHostCommands(rpcProtocol),
@@ -156,6 +167,13 @@ export function createAPIFactory(
     ExtHostAPIIdentifier.ExtHostAuthentication,
     new ExtHostAuthentication(rpcProtocol),
   ) as ExtHostAuthentication;
+  const extHostLocalization = rpcProtocol.set<IExtHostLocalization>(
+    ExtHostAPIIdentifier.ExtHostLocalization,
+    new ExtHostLocalization(rpcProtocol, extensionService.logger),
+  ) as ExtHostLocalization;
+
+  const extHostEnv = rpcProtocol.set(ExtHostAPIIdentifier.ExtHostEnv, new ExtHostEnv(rpcProtocol)) as ExtHostEnv;
+
   // TODO: 目前 worker reporter 缺少一条通信链路，先默认实现
   const reporter = new DefaultReporter();
   const sumiAPI = createSumiAPIFactory(rpcProtocol, extensionService, 'worker', reporter);
@@ -169,18 +187,17 @@ export function createAPIFactory(
     OverviewRulerLane,
     TextEditorCursorStyle,
     TextEditorSelectionChangeKind,
+    version: extHostEnv.getEnvValues()?.customVSCodeEngineVersion || DEFAULT_VSCODE_ENGINE_VERSION,
     // VS Code 纯前端插件 API
-    env: {
-      // ENV 用处貌似比较少, 现有的实现依赖 node  模块，后面需要再重新实现
-      uriScheme: Schemes.file,
-    },
-    languages: createLanguagesApiFactory(extHostLanguages, extension),
-    commands: createCommandsApiFactory(extHostCommands, extHostEditors, extension),
+    // ENV 用处貌似比较少, 现有的实现依赖 node  模块，后面需要再重新实现
+    env: createWorkerHostEnvAPIFactory(rpcProtocol, extHostEnv),
+    languages: createLanguagesApiFactory(extHostLanguages, extHostNotebook, extension),
     extensions: createExtensionsApiFactory(extensionService),
     workspace: createWorkspaceApiFactory(
       extHostWorkspace,
       extHostPreference,
       extHostDocs,
+      extHostNotebook,
       extHostFileSystem,
       extHostFileSystemEvent,
       extHostTasks,
@@ -193,7 +210,11 @@ export function createAPIFactory(
       createSourceControl(id: string, label: string, rootUri: vscode.Uri) {
         return extHostSCM.createSourceControl(extension, id, label, rootUri);
       },
+      getSourceControl(extensionId: string, id: string) {
+        return extHostSCM.getSourceControl(extensionId, id);
+      },
     },
+    l10n: createLocalizationApiFactory(extHostLocalization, extension),
     window: createWindowApiFactory(
       extension,
       extHostEditors,
@@ -214,9 +235,11 @@ export function createAPIFactory(
       extHostCustomEditor,
       extHostEditorTabs,
     ),
+    InlineCompletionItem: workerExtTypes.InlineSuggestion,
+    InlineCompletionList: workerExtTypes.InlineSuggestionList,
     authentication: createAuthenticationApiFactory(extension, extHostAuthentication),
     comments: createCommentsApiFactory(extension, extHostComments),
     // Sumi 扩展 API
-    ...sumiAPI,
+    ...sumiAPI(extension),
   });
 }

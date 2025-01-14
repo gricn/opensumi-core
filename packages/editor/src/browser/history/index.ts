@@ -1,8 +1,17 @@
-import { Injectable, Autowired } from '@opensumi/di';
-import { IPosition, URI, WithEventBus, OnEvent } from '@opensumi/ide-core-browser';
+import { Autowired, Injectable } from '@opensumi/di';
+import {
+  DisposableCollection,
+  EventType,
+  IPosition,
+  OnEvent,
+  PreferenceService,
+  URI,
+  WithEventBus,
+  addDisposableListener,
+} from '@opensumi/ide-core-browser';
 
 import { WorkbenchEditorService } from '../../common';
-import { EditorSelectionChangeEvent, EditorGroupChangeEvent, EditorGroupCloseEvent } from '../types';
+import { EditorGroupChangeEvent, EditorGroupCloseEvent, EditorOpenType, EditorSelectionChangeEvent } from '../types';
 
 const HistoryPositionLineThreshold = 7;
 const HardMaxStateLength = 200; // 超过200个过后，会缩减至100个, 防止反复缩减
@@ -10,18 +19,56 @@ const SoftMaxStateLength = 100;
 
 @Injectable()
 export class EditorHistoryService extends WithEventBus {
+  private static readonly MOUSE_NAVIGATION_SETTING = 'editor.mouseBackForwardToNavigate';
+
+  @Autowired(PreferenceService)
+  private preferenceService: PreferenceService;
+
+  @Autowired(WorkbenchEditorService)
+  private editorService: WorkbenchEditorService;
+
   private currentIndex = -1;
 
   private stack: EditorHistoryState[] = [];
 
   private closedStack: URI[] = [];
 
-  start() {
-    // do nothing
+  init() {
+    this.registerMouseNavigationListener();
   }
 
-  @Autowired(WorkbenchEditorService)
-  editorService: WorkbenchEditorService;
+  private registerMouseNavigationListener() {
+    const disposables = new DisposableCollection();
+    const handleMouseBackForwardSupport = () => {
+      disposables.dispose();
+      if (this.preferenceService.get(EditorHistoryService.MOUSE_NAVIGATION_SETTING)) {
+        disposables.push(addDisposableListener(window.document, EventType.MOUSE_DOWN, (e) => this.onMouseDown(e)));
+      }
+      this.disposables.push(disposables);
+    };
+    this.disposables.push(
+      this.preferenceService.onSpecificPreferenceChange(EditorHistoryService.MOUSE_NAVIGATION_SETTING, () => {
+        if (this.preferenceService.get(EditorHistoryService.MOUSE_NAVIGATION_SETTING)) {
+          handleMouseBackForwardSupport();
+        }
+      }),
+    );
+    handleMouseBackForwardSupport();
+  }
+
+  private onMouseDown(event: MouseEvent) {
+    // Support to navigate in history when mouse buttons 4/5 are pressed
+    switch (event.button) {
+      case 3:
+        event.stopPropagation();
+        this.back();
+        break;
+      case 4:
+        event.stopPropagation();
+        this.forward();
+        break;
+    }
+  }
 
   @OnEvent(EditorSelectionChangeEvent)
   onEditorSelectionChangeEvent(e: EditorSelectionChangeEvent) {
@@ -42,7 +89,10 @@ export class EditorHistoryService extends WithEventBus {
 
   @OnEvent(EditorGroupChangeEvent)
   onEditorGroupChangeEvent(e: EditorGroupChangeEvent) {
-    if (e.payload.newOpenType && (e.payload.newOpenType.type === 'code' || e.payload.newOpenType.type === 'diff')) {
+    if (
+      e.payload.newOpenType &&
+      (e.payload.newOpenType.type === EditorOpenType.code || e.payload.newOpenType.type === EditorOpenType.diff)
+    ) {
       const selections = e.payload.group.currentEditor!.getSelections();
       if (selections && selections.length > 0) {
         this.onNewState(

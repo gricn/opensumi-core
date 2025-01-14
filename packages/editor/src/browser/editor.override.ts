@@ -1,23 +1,26 @@
 import { Autowired, Injectable } from '@opensumi/di';
 import { PreferenceService } from '@opensumi/ide-core-browser';
-import { URI, IRange } from '@opensumi/ide-core-common';
-import type { ICodeEditor as IMonacoCodeEditor } from '@opensumi/monaco-editor-core/esm/vs/editor/browser/editorBrowser';
+import { IRange, URI } from '@opensumi/ide-core-common';
+import * as monaco from '@opensumi/ide-monaco';
+import { isEqual } from '@opensumi/monaco-editor-core/esm/vs/base/common/resources';
+import { AbstractCodeEditorService } from '@opensumi/monaco-editor-core/esm/vs/editor/browser/services/abstractCodeEditorService';
 import { ICodeEditorService } from '@opensumi/monaco-editor-core/esm/vs/editor/browser/services/codeEditorService';
-import { CodeEditorServiceImpl } from '@opensumi/monaco-editor-core/esm/vs/editor/browser/services/codeEditorServiceImpl';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
-import { SimpleLayoutService } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/simpleServices';
-import { StaticServices } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneServices';
+import { EditorScopedLayoutService } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneLayoutService';
+import { StandaloneServices } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneServices';
+import { IStandaloneThemeService } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/common/standaloneTheme';
 import { ContextViewService } from '@opensumi/monaco-editor-core/esm/vs/platform/contextview/browser/contextViewService';
+import { IResourceEditorInput } from '@opensumi/monaco-editor-core/esm/vs/platform/editor/common/editor';
 
 /* istanbul ignore file */
-import { WorkbenchEditorService } from '../common';
+import { EditorOpenType, WorkbenchEditorService } from '../common';
 
 import { BrowserCodeEditor } from './editor-collection.service';
 import { WorkbenchEditorServiceImpl } from './workbench-editor.service';
 
+import type { ICodeEditor as IMonacoCodeEditor } from '@opensumi/monaco-editor-core/esm/vs/editor/browser/editorBrowser';
 
 @Injectable()
-export class MonacoCodeService extends CodeEditorServiceImpl {
+export class MonacoCodeService extends AbstractCodeEditorService {
   @Autowired(WorkbenchEditorService)
   private workbenchEditorService: WorkbenchEditorServiceImpl;
 
@@ -25,7 +28,7 @@ export class MonacoCodeService extends CodeEditorServiceImpl {
   private preferenceService: PreferenceService;
 
   constructor() {
-    super(null, StaticServices.standaloneThemeService.get());
+    super(StandaloneServices.get(IStandaloneThemeService));
   }
 
   getActiveCodeEditor(): IMonacoCodeEditor | null {
@@ -43,29 +46,24 @@ export class MonacoCodeService extends CodeEditorServiceImpl {
    * @param sideBySide ？
    */
   async openCodeEditor(
-    // @ts-ignore
-    input: monaco.editor.IResourceInput,
+    input: IResourceEditorInput,
     source: IMonacoCodeEditor | null,
     sideBySide?: boolean,
   ): Promise<IMonacoCodeEditor | null> {
-    const resourceUri = new URI(input.resource.toString());
+    const resourceUri = input.resource;
     // 判断打开下一个不同于当前编辑器的文件时，是否需要先固定当前编辑器Tab，从而避免被替换，例如：跳转到定义
     const enablePreviewFromCodeNavigation = this.preferenceService.get<boolean>(
       'editor.enablePreviewFromCodeNavigation',
     );
-    if (
-      !enablePreviewFromCodeNavigation &&
-      source &&
-      !sideBySide &&
-      !new URI(source.getModel()?.uri).isEqual(input.resource)
-    ) {
+
+    if (!enablePreviewFromCodeNavigation && source && !sideBySide && isEqual(source.getModel()?.uri, input.resource)) {
       for (const visibleGroup of this.workbenchEditorService.editorGroups) {
-        if (visibleGroup.currentOpenType?.type === 'code') {
+        if (visibleGroup.currentOpenType?.type === EditorOpenType.code) {
           if (visibleGroup.currentEditor?.monacoEditor === source) {
             visibleGroup.pinPreviewed(visibleGroup.currentResource?.uri);
             break;
           }
-        } else if (visibleGroup.currentOpenType?.type === 'diff') {
+        } else if (visibleGroup.currentOpenType?.type === EditorOpenType.diff) {
           if (
             visibleGroup.diffEditor!.modifiedEditor.monacoEditor === source ||
             visibleGroup.diffEditor!.originalEditor.monacoEditor === source
@@ -90,6 +88,7 @@ export class MonacoCodeService extends CodeEditorServiceImpl {
         index++;
       }
     }
+    // @ts-ignore
     const selection = input.options ? input.options.selection : null;
     let range;
     if (selection) {
@@ -104,7 +103,8 @@ export class MonacoCodeService extends CodeEditorServiceImpl {
         );
       }
     }
-    await editorGroup.open(resourceUri, { index, range: range as IRange, focus: true });
+    const openUri = URI.parse(resourceUri.toString());
+    await editorGroup.open(openUri, { index, range: range as IRange, focus: true });
     return (editorGroup.codeEditor as BrowserCodeEditor).monacoEditor;
   }
 }
@@ -113,7 +113,7 @@ export class MonacoContextViewService extends ContextViewService {
   private menuContainer: HTMLDivElement;
 
   constructor(codeEditorService: ICodeEditorService) {
-    super(new SimpleLayoutService(codeEditorService, document.body));
+    super(new EditorScopedLayoutService(document.body, codeEditorService));
   }
 
   setContainer(container) {
@@ -126,6 +126,6 @@ export class MonacoContextViewService extends ContextViewService {
       this.menuContainer.style.zIndex = '10';
       document.body.append(this.menuContainer);
     }
-    super.setContainer(this.menuContainer);
+    super['setContainer'](this.menuContainer);
   }
 }

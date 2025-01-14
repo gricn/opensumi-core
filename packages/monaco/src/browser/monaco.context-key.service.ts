@@ -1,35 +1,36 @@
-import { Optional, Autowired, Injectable, Injector, INJECTOR_TOKEN } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector, Optional } from '@opensumi/di';
 import {
-  IContextKey,
-  Event,
-  IContextKeyService,
   ContextKeyChangeEvent,
-  getDebugLogger,
   Emitter,
+  Event,
+  IContextKey,
+  IContextKeyService,
   IScopedContextKeyService,
-  PreferenceService,
   PreferenceChanges,
-  PreferenceScope,
   PreferenceSchemaProvider,
+  PreferenceScope,
+  PreferenceService,
   createPreferenceProxy,
+  getDebugLogger,
 } from '@opensumi/ide-core-browser';
 import { Disposable, ILogger } from '@opensumi/ide-core-common';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
 import { Emitter as EventEmitter } from '@opensumi/monaco-editor-core/esm/vs/base/common/event';
-import { StaticServices } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneServices';
+import { StandaloneServices } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneServices';
 import {
   ConfigurationTarget,
   IConfigurationChangeEvent,
-  IConfigurationService,
-  IConfigurationOverrides,
   IConfigurationData,
+  IConfigurationOverrides,
+  IConfigurationService,
   IConfigurationValue,
 } from '@opensumi/monaco-editor-core/esm/vs/platform/configuration/common/configuration';
 import { ContextKeyService } from '@opensumi/monaco-editor-core/esm/vs/platform/contextkey/browser/contextKeyService';
 import {
-  ContextKeyExpression,
-  IContextKeyServiceTarget,
   ContextKeyExpr,
+  ContextKeyExpression,
+  ContextKeyValue,
+  IContextKeyServiceTarget,
 } from '@opensumi/monaco-editor-core/esm/vs/platform/contextkey/common/contextkey';
 import { KeybindingResolver } from '@opensumi/monaco-editor-core/esm/vs/platform/keybinding/common/keybindingResolver';
 import { IWorkspaceFolder } from '@opensumi/monaco-editor-core/esm/vs/platform/workspace/common/workspace';
@@ -58,8 +59,10 @@ export class ConfigurationService extends Disposable implements IConfigurationSe
   constructor() {
     super();
     this.preferenceService.onPreferencesChanged(this.triggerPreferencesChanged, this, this.disposables);
-    const monacoConfigService = StaticServices.configurationService.get();
+    const monacoConfigService = StandaloneServices.get(IConfigurationService);
     monacoConfigService.getValue = this.getValue.bind(this);
+    monacoConfigService.updateValue = this.updateValue.bind(this);
+    monacoConfigService.inspect = this.inspect.bind(this);
   }
 
   public keys() {
@@ -85,7 +88,7 @@ export class ConfigurationService extends Disposable implements IConfigurationSe
     // 在 monaco-editor 内部，default scope 变化时需要刷新内置所有的 config 打头的对应的值
     if (defaultScopeChanges.length) {
       this._onDidChangeConfiguration.fire({
-        affectedKeys: defaultScopeChanges.map((n) => n.preferenceName),
+        affectedKeys: new Set(defaultScopeChanges.map((n) => n.preferenceName)),
         source: ConfigurationTarget.DEFAULT,
         change: {
           keys: [],
@@ -95,13 +98,12 @@ export class ConfigurationService extends Disposable implements IConfigurationSe
         affectsConfiguration(configuration: string) {
           return true;
         },
-        sourceConfig: {},
       });
     }
 
     if (userScopeChanges.length) {
       this._onDidChangeConfiguration.fire({
-        affectedKeys: userScopeChanges.map((n) => n.preferenceName),
+        affectedKeys: new Set(userScopeChanges.map((n) => n.preferenceName)),
         source: ConfigurationTarget.USER,
         change: {
           keys: [],
@@ -110,13 +112,12 @@ export class ConfigurationService extends Disposable implements IConfigurationSe
         affectsConfiguration(configuration: string) {
           return true;
         },
-        sourceConfig: {},
       });
     }
 
     if (workspaceScopeChanges.length) {
       this._onDidChangeConfiguration.fire({
-        affectedKeys: workspaceScopeChanges.map((n) => n.preferenceName),
+        affectedKeys: new Set(workspaceScopeChanges.map((n) => n.preferenceName)),
         source: ConfigurationTarget.WORKSPACE,
         change: {
           keys: [],
@@ -125,13 +126,12 @@ export class ConfigurationService extends Disposable implements IConfigurationSe
         affectsConfiguration(configuration: string) {
           return true;
         },
-        sourceConfig: {},
       });
     }
 
     if (workspaceFolderScopeChanges.length) {
       this._onDidChangeConfiguration.fire({
-        affectedKeys: workspaceFolderScopeChanges.map((n) => n.preferenceName),
+        affectedKeys: new Set(workspaceFolderScopeChanges.map((n) => n.preferenceName)),
         source: this.workspaceService.isMultiRootWorkspaceOpened
           ? ConfigurationTarget.WORKSPACE_FOLDER
           : ConfigurationTarget.WORKSPACE,
@@ -142,7 +142,6 @@ export class ConfigurationService extends Disposable implements IConfigurationSe
         affectsConfiguration(configuration: string) {
           return true;
         },
-        sourceConfig: {},
       });
     }
   }
@@ -311,6 +310,10 @@ abstract class BaseContextKeyService extends Disposable implements IContextKeySe
     super();
   }
 
+  bufferChangeEvents(callback: Function): void {
+    this.contextKeyService.bufferChangeEvents(callback);
+  }
+
   listenToContextChanges() {
     this.addDispose(
       this.contextKeyService.onDidChangeContext((payload) => {
@@ -319,7 +322,7 @@ abstract class BaseContextKeyService extends Disposable implements IContextKeySe
     );
   }
 
-  createKey<T>(key: string, defaultValue: T | undefined): IContextKey<T> {
+  createKey<T extends ContextKeyValue = any>(key: string, defaultValue: T | undefined): IContextKey<T> {
     return this.contextKeyService.createKey(key, defaultValue);
   }
 
@@ -411,7 +414,7 @@ export class MonacoContextKeyService extends BaseContextKeyService implements IC
       // 如果找不到 ctx DOM 上的 context_id 返回 NaN
       // 如果遍历到父节点为 html 时，其 parentElement 为 null，也会返回 0
       const keyContext = this.contextKeyService.getContext(ctx);
-      return KeybindingResolver.contextMatchesRules(keyContext, parsed as any);
+      return KeybindingResolver['_contextMatchesRules'](keyContext, parsed as any);
     } catch (e) {
       getDebugLogger().error(e);
       return false;

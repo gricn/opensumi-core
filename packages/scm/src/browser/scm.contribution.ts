@@ -1,39 +1,46 @@
 import { Autowired } from '@opensumi/di';
 import {
   ClientAppContribution,
+  Disposable,
   PreferenceContribution,
   PreferenceService,
+  SCM_COMMANDS,
+  URI,
   getExternalIcon,
+  getIcon,
 } from '@opensumi/ide-core-browser';
-import { getIcon } from '@opensumi/ide-core-browser';
-import { Disposable, URI } from '@opensumi/ide-core-browser';
+import { browserViews } from '@opensumi/ide-core-browser/lib/extensions/schema/browserViews';
 import { ComponentContribution, ComponentRegistry } from '@opensumi/ide-core-browser/lib/layout';
-import { MenuContribution, IMenuRegistry, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
+import { IMenuRegistry, MenuContribution, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import {
+  Command,
   CommandContribution,
   CommandRegistry,
-  Command,
+  IExtensionsSchemaService,
   PreferenceSchema,
-  localize,
   PreferenceScope,
+  formatLocalize,
+  localize,
 } from '@opensumi/ide-core-common';
 import { Domain } from '@opensumi/ide-core-common/lib/di-helper';
-import { WorkbenchEditorService, EditorCollectionService, IEditor } from '@opensumi/ide-editor/lib/common';
-import { IViewsRegistry, MainLayoutContribution } from '@opensumi/ide-main-layout';
+import { EditorCollectionService, IEditor, WorkbenchEditorService } from '@opensumi/ide-editor/lib/common';
+import { IMainLayoutService, IViewsRegistry, MainLayoutContribution } from '@opensumi/ide-main-layout';
 
 import {
-  scmContainerId,
-  IDirtyDiffWorkbenchController,
-  OPEN_DIRTY_DIFF_WIDGET,
+  CLOSE_DIRTY_DIFF_WIDGET,
   GOTO_NEXT_CHANGE,
   GOTO_PREVIOUS_CHANGE,
-  TOGGLE_DIFF_SIDE_BY_SIDE,
-  scmResourceViewId,
-  SET_SCM_TREE_VIEW_MODE,
-  SET_SCM_LIST_VIEW_MODE,
+  IDirtyDiffWorkbenchController,
+  OPEN_DIRTY_DIFF_WIDGET,
   SCMViewModelMode,
+  SET_SCM_LIST_VIEW_MODE,
+  SET_SCM_TREE_VIEW_MODE,
+  TOGGLE_DIFF_SIDE_BY_SIDE,
+  scmContainerId,
+  scmResourceViewId,
 } from '../common';
 
+import { SCMTreeAPI } from './components/scm-resource-tree/scm-tree-api';
 import { SCMTreeService } from './components/scm-resource-tree/scm-tree.service';
 import { DirtyDiffWorkbenchController } from './dirty-diff';
 import { SCMBadgeController, SCMStatusBarController } from './scm-activity';
@@ -76,6 +83,9 @@ export class SCMContribution
   @Autowired(EditorCollectionService)
   private readonly editorCollectionService: EditorCollectionService;
 
+  @Autowired(IMainLayoutService)
+  protected readonly mainlayoutService: IMainLayoutService;
+
   private toDispose = new Disposable();
 
   schema: PreferenceSchema = scmPreferenceSchema;
@@ -88,13 +98,27 @@ export class SCMContribution
   @Autowired()
   private readonly scmTreeService: SCMTreeService;
 
+  @Autowired()
+  private readonly scmTreeAPI: SCMTreeAPI;
+
   @Autowired(IViewsRegistry)
   private readonly viewsRegistry: IViewsRegistry;
+
+  @Autowired(IExtensionsSchemaService)
+  protected readonly extensionsPointService: IExtensionsSchemaService;
 
   onStart() {
     this.viewsRegistry.registerViewWelcomeContent(scmResourceViewId, {
       content: localize('welcome-view.noOpenRepo', 'No source control providers registered.'),
       when: 'default',
+    });
+    this.extensionsPointService.appendExtensionPoint(['browserViews', 'properties'], {
+      extensionPoint: scmContainerId,
+      frameworkKind: ['opensumi'],
+      jsonSchema: {
+        ...browserViews.properties,
+        description: formatLocalize('sumiContributes.browserViews.location.custom', localize('status-bar.scm')),
+      },
     });
   }
 
@@ -121,7 +145,17 @@ export class SCMContribution
           });
           setTimeout(() => {
             codeEditor.revealLineInCenter(lineNumber);
-          }, 50);
+          }, 0);
+        }
+      },
+    });
+
+    commands.registerCommand(CLOSE_DIRTY_DIFF_WIDGET, {
+      execute: async () => {
+        const editor = this.editorService.currentEditor;
+        if (editor) {
+          const codeEditor = editor.monacoEditor;
+          this.dirtyDiffWorkbenchController.closeDirtyDiffWidget(codeEditor);
         }
       },
     });
@@ -130,7 +164,11 @@ export class SCMContribution
       execute: () => {
         const editor = this.editorService.currentEditor;
         if (editor && editor.currentUri) {
-          editor.monacoEditor.revealLineInCenter(this.getDiffChangeLineNumber(editor.currentUri, editor, 'previous'));
+          const number = this.getDiffChangeLineNumber(editor.currentUri, editor, 'previous');
+          editor.monacoEditor.focus();
+          const pos = editor.monacoEditor.getPosition()?.with(number, 0)!;
+          editor.monacoEditor.setPosition(pos);
+          editor.monacoEditor.revealLineInCenter(number);
         }
       },
     });
@@ -139,7 +177,11 @@ export class SCMContribution
       execute: () => {
         const editor = this.editorService.currentEditor;
         if (editor && editor.currentUri) {
-          editor.monacoEditor.revealLineInCenter(this.getDiffChangeLineNumber(editor.currentUri, editor, 'next'));
+          const number = this.getDiffChangeLineNumber(editor.currentUri, editor, 'next');
+          editor.monacoEditor.focus();
+          const pos = editor.monacoEditor.getPosition()?.with(number, 0)!;
+          editor.monacoEditor.setPosition(pos);
+          editor.monacoEditor.revealLineInCenter(number);
         }
       },
     });
@@ -160,6 +202,10 @@ export class SCMContribution
       execute: () => {
         this.scmTreeService.changeTreeMode(false);
       },
+    });
+
+    commands.registerCommand(SCM_COMMANDS.GetSCMResource, {
+      execute: async (uri: URI) => this.scmTreeAPI.getSCMResource(uri),
     });
   }
 
@@ -258,6 +304,6 @@ export class SCMContribution
       index = diffChangesIndex >= lineChanges.length - 1 ? 0 : diffChangesIndex + 1;
     }
     this.diffChangesIndex.set(uri, index);
-    return lineChanges[index].modifiedStartLineNumber;
+    return lineChanges[index][2];
   }
 }

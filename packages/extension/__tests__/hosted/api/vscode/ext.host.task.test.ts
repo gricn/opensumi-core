@@ -1,32 +1,31 @@
 import path from 'path';
 
-import { RPCProtocol } from '@opensumi/ide-connection';
 import { WSChannelHandler } from '@opensumi/ide-connection/lib/browser';
-import { MockLoggerManageClient } from '@opensumi/ide-core-browser/__mocks__/logger';
 import { MockedStorageProvider } from '@opensumi/ide-core-browser/__mocks__/storage';
 import {
-  Emitter as EventEmitter,
+  Deferred,
   Disposable,
-  ILoggerManagerClient,
+  Emitter as EventEmitter,
+  IFileServiceClient,
   StorageProvider,
   Uri,
-  IFileServiceClient,
-  Deferred,
 } from '@opensumi/ide-core-common';
 import { ITaskDefinitionRegistry, TaskDefinitionRegistryImpl } from '@opensumi/ide-core-common/lib/task-definition';
+import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
+import { mockService } from '@opensumi/ide-dev-tool/src/mock-injector';
 import { IEditorDocumentModelService, WorkbenchEditorService } from '@opensumi/ide-editor/lib/browser';
 import { ExtensionDocumentDataManagerImpl } from '@opensumi/ide-extension/lib/hosted/api/vscode/doc';
 import { ExtHostMessage } from '@opensumi/ide-extension/lib/hosted/api/vscode/ext.host.message';
 import { ExtHostWorkspace } from '@opensumi/ide-extension/lib/hosted/api/vscode/ext.host.workspace';
-import { MockFileServiceClient } from '@opensumi/ide-file-service/lib/common/mocks';
-import { IMainLayoutService } from '@opensumi/ide-main-layout/lib/common/main-layout.defination';
+import { MockFileServiceClient } from '@opensumi/ide-file-service/__mocks__/file-service-client';
+import { IMainLayoutService } from '@opensumi/ide-main-layout/lib/common/main-layout.definition';
 import { OutputPreferences } from '@opensumi/ide-output/lib/browser/output-preference';
 import { TaskService } from '@opensumi/ide-task/lib/browser/task.service';
 import { TerminalTaskSystem } from '@opensumi/ide-task/lib/browser/terminal-task-system';
 import { ITaskService, ITaskSystem } from '@opensumi/ide-task/lib/common';
 import {
   ITerminalApiService,
-  ITerminalClientFactory,
+  ITerminalClientFactory2,
   ITerminalController,
   ITerminalGroupViewService,
   ITerminalInternalService,
@@ -35,7 +34,13 @@ import {
   ITerminalService,
   ITerminalTheme,
 } from '@opensumi/ide-terminal-next';
-import { TerminalClientFactory } from '@opensumi/ide-terminal-next/lib/browser/terminal.client';
+import {
+  MockMainLayoutService,
+  MockTerminalProfileInternalService,
+  MockTerminalService,
+  MockTerminalThemeService,
+} from '@opensumi/ide-terminal-next/__tests__/browser/mock.service';
+import { createTerminalClientFactory2 } from '@opensumi/ide-terminal-next/lib/browser/terminal.client';
 import { TerminalController } from '@opensumi/ide-terminal-next/lib/browser/terminal.controller';
 import { TerminalEnvironmentService } from '@opensumi/ide-terminal-next/lib/browser/terminal.environment.service';
 import { TerminalInternalService } from '@opensumi/ide-terminal-next/lib/browser/terminal.internal.service';
@@ -45,21 +50,13 @@ import { TerminalGroupViewService } from '@opensumi/ide-terminal-next/lib/browse
 import { EnvironmentVariableServiceToken } from '@opensumi/ide-terminal-next/lib/common/environmentVariable';
 import { ITerminalPreference } from '@opensumi/ide-terminal-next/lib/common/preference';
 import { IVariableResolverService } from '@opensumi/ide-variable';
-import { VariableResolverService } from '@opensumi/ide-variable/lib/browser/variable-resolver.service';
-import { IWorkspaceService } from '@opensumi/ide-workspace/lib/common/workspace-defination';
+import { IWorkspaceService } from '@opensumi/ide-workspace';
 
-import { createBrowserInjector } from '../../../../../../tools/dev-tool/src/injector-helper';
-import { mockService } from '../../../../../../tools/dev-tool/src/mock-injector';
-import {
-  MockMainLayoutService,
-  MockSocketService,
-  MockTerminalProfileInternalService,
-  MockTerminalThemeService,
-} from '../../../../../terminal-next/__tests__/browser/mock.service';
 import { mockExtensionProps } from '../../../../__mocks__/extensions';
-import { MainthreadTasks } from '../../../../src/browser/vscode/api/main.thread.tasks';
+import { createMockPairRPCProtocol } from '../../../../__mocks__/initRPCProtocol';
+import { MainThreadTasks } from '../../../../src/browser/vscode/api/main.thread.tasks';
 import { MainThreadTerminal } from '../../../../src/browser/vscode/api/main.thread.terminal';
-import { MainThreadAPIIdentifier, ExtHostAPIIdentifier } from '../../../../src/common/vscode';
+import { ExtHostAPIIdentifier, MainThreadAPIIdentifier } from '../../../../src/common/vscode';
 import { ExtHostTerminal } from '../../../../src/hosted/api/vscode/ext.host.terminal';
 import { ExtHostTasks } from '../../../../src/hosted/api/vscode/tasks/ext.host.tasks';
 import { MockEnvironmentVariableService } from '../../__mocks__/environmentVariableService';
@@ -68,25 +65,12 @@ import { CustomBuildTaskProvider } from './__mock__/taskProvider';
 
 const extension = mockExtensionProps;
 
-const emitterA = new EventEmitter<any>();
-const emitterB = new EventEmitter<any>();
-
-const mockClientA = {
-  send: (msg) => emitterB.fire(msg),
-  onMessage: emitterA.event,
-};
-const mockClientB = {
-  send: (msg) => emitterA.fire(msg),
-  onMessage: emitterB.event,
-};
-
-const rpcProtocolExt = new RPCProtocol(mockClientA);
-const rpcProtocolMain = new RPCProtocol(mockClientB);
+const { rpcProtocolExt, rpcProtocolMain } = createMockPairRPCProtocol();
 
 let extHostTask: ExtHostTasks;
 let extHostTerminal: ExtHostTerminal;
 let mainThreadTerminal: MainThreadTerminal;
-let mainThreadTask: MainthreadTasks;
+let mainThreadTask: MainThreadTasks;
 
 describe('ExtHostTask API', () => {
   const injector = createBrowserInjector([]);
@@ -106,6 +90,12 @@ describe('ExtHostTask API', () => {
       }),
     },
     {
+      token: IVariableResolverService,
+      useValue: {
+        resolve: () => '',
+      },
+    },
+    {
       token: ITerminalProfileInternalService,
       useValue: {
         resolveDefaultProfile: jest.fn(() => ({
@@ -117,7 +107,7 @@ describe('ExtHostTask API', () => {
     },
     {
       token: ITerminalService,
-      useValue: new MockSocketService(),
+      useValue: new MockTerminalService(),
     },
     {
       token: ITerminalInternalService,
@@ -147,23 +137,15 @@ describe('ExtHostTask API', () => {
       useClass: TaskService,
     },
     {
-      token: ITaskSystem,
-      useClass: TerminalTaskSystem,
-    },
-    {
-      token: ILoggerManagerClient,
-      useClass: MockLoggerManageClient,
-    },
-    {
-      token: ITerminalClientFactory,
+      token: ITerminalClientFactory2,
       useFactory:
         (injector) =>
         (widget, options = {}) =>
-          TerminalClientFactory.createClient(injector, widget, options),
+          createTerminalClientFactory2(injector)(widget, options),
     },
     {
-      token: IVariableResolverService,
-      useClass: VariableResolverService,
+      token: ITaskSystem,
+      useClass: TerminalTaskSystem,
     },
     {
       token: ITerminalGroupViewService,
@@ -255,7 +237,7 @@ describe('ExtHostTask API', () => {
   rpcProtocolExt.set(ExtHostAPIIdentifier.ExtHostTerminal, extHostTerminal);
   extHostTask = new ExtHostTasks(rpcProtocolExt, extHostTerminal, extHostWorkspace);
   mainThreadTerminal = injector.get(MainThreadTerminal, [rpcProtocolMain]);
-  mainThreadTask = injector.get(MainthreadTasks, [rpcProtocolMain]);
+  mainThreadTask = injector.get(MainThreadTasks, [rpcProtocolMain]);
 
   rpcProtocolExt.set(ExtHostAPIIdentifier.ExtHostTasks, extHostTask);
   rpcProtocolMain.set(MainThreadAPIIdentifier.MainThreadTerminal, mainThreadTerminal);

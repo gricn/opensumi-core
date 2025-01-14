@@ -1,37 +1,26 @@
-import { Autowired, Injectable } from '@opensumi/di';
+import { Autowired } from '@opensumi/di';
 import { IStatusBarService, StatusBarAlignment, StatusBarEntryAccessor } from '@opensumi/ide-core-browser/lib/services';
-import { CommandContribution, CommandRegistry } from '@opensumi/ide-core-common/lib/command';
+import { Command, CommandContribution, CommandRegistry } from '@opensumi/ide-core-common/lib/command';
 import { Domain } from '@opensumi/ide-core-common/lib/di-helper';
-import { localize } from '@opensumi/ide-core-common/lib/localize';
 
-import { ConnectionBackServicePath, IConnectionBackService } from '../common';
+import { ConnectionRTTBrowserService, ConnectionRTTBrowserServiceToken } from './connection-rtt-service';
 
-const START_CONNECTION_RTT_COMMAND = {
+const START_CONNECTION_RTT_COMMAND: Command = {
   id: 'connection.start.rtt',
-  label: localize('connection.start.rtt', '开发人员工具：查看通信延迟'),
+  label: '%connection.start.rtt%',
+  category: '%command.category.developerTools%',
 };
 
 const STOP_CONNECTION_RTT_COMMAND = {
   id: 'connection.stop.rtt',
-  label: localize('connection.stop.rtt', '开发人员工具：关闭通信延迟检查'),
+  label: '%connection.stop.rtt%',
+  category: '%command.category.developerTools%',
 };
 
 const statusBarOption = {
   alignment: StatusBarAlignment.LEFT,
   priority: Infinity - 1,
 };
-
-export const ConnectionRTTBrowserServiceToken = Symbol('ConnectionRTTBrowserService');
-
-@Injectable()
-export class ConnectionRTTBrowserService {
-  @Autowired(ConnectionBackServicePath)
-  protected readonly connectionBackService: IConnectionBackService;
-
-  async measure() {
-    await this.connectionBackService.$measure();
-  }
-}
 
 @Domain(CommandContribution)
 export class ConnectionRTTContribution implements CommandContribution {
@@ -60,7 +49,7 @@ export class ConnectionRTTContribution implements CommandContribution {
         if (!this.interval) {
           return;
         }
-        global.clearInterval(this.interval);
+        clearInterval(this.interval);
         if (this.statusBar) {
           this.statusBar.dispose();
           this.statusBar = undefined;
@@ -70,7 +59,7 @@ export class ConnectionRTTContribution implements CommandContribution {
   }
 
   private startRTTInterval() {
-    this.interval = global.setInterval(async () => {
+    this.interval = setInterval(async () => {
       const start = Date.now();
       await this.rttService.measure();
       const rtt = Date.now() - start;

@@ -1,10 +1,13 @@
 declare module 'vscode' {
-
   /**
    * A reference to one of the workbench colors as defined in https://code.visualstudio.com/docs/getstarted/theme-color-reference.
    * Using a theme color is preferred over a custom color as it gives theme authors and users the possibility to change the color.
    */
   export class ThemeColor {
+    /**
+     * The id of this color.
+     */
+    readonly id: string;
 
     /**
      * Creates a reference to a theme color.
@@ -138,7 +141,10 @@ declare module 'vscode' {
      * CSS styling property that will be applied to text enclosed by a decoration.
      */
     textDecoration?: string;
-
+    /**
+     * @proposal
+     */
+    textUnderlinePosition?: string;
     /**
      * CSS styling property that will be applied to text enclosed by a decoration.
      */
@@ -366,5 +372,4 @@ declare module 'vscode' {
      */
     provideColorPresentations(color: Color, context: { document: TextDocument, range: Range }, token: CancellationToken): ProviderResult<ColorPresentation[]>;
   }
-
 }

@@ -1,4 +1,14 @@
-import { URI, Deferred, IEditorDocumentChange, IEditorDocumentModelSaveResult } from '@opensumi/ide-core-browser';
+import {
+  CancellationToken,
+  CancellationTokenSource,
+  Deferred,
+  Disposable,
+  IEditorDocumentChange,
+  IEditorDocumentModelSaveResult,
+  SaveTaskErrorCause,
+  SaveTaskResponseState,
+  URI,
+} from '@opensumi/ide-core-browser';
 import { EOL } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
 
 import { IEditorDocumentModelService } from './types';
@@ -12,13 +22,16 @@ export interface IEditorDocumentModelServiceImpl extends IEditorDocumentModelSer
     encoding?: string,
     ignoreDiff?: boolean,
     eol?: EOL,
+    token?: CancellationToken,
   ): Promise<IEditorDocumentModelSaveResult>;
 }
 
-export class SaveTask {
+export class SaveTask extends Disposable {
   private deferred: Deferred<IEditorDocumentModelSaveResult> = new Deferred();
 
   public finished: Promise<IEditorDocumentModelSaveResult> = this.deferred.promise;
+
+  private cancelToken: CancellationTokenSource;
 
   public started = false;
 
@@ -28,7 +41,10 @@ export class SaveTask {
     public readonly alternativeVersionId: number,
     public content: string,
     private ignoreDiff: boolean,
-  ) {}
+  ) {
+    super();
+    this.disposables.push((this.cancelToken = new CancellationTokenSource()));
+  }
 
   async run(
     service: IEditorDocumentModelServiceImpl,
@@ -47,16 +63,26 @@ export class SaveTask {
         encoding,
         this.ignoreDiff,
         eol,
+        this.cancelToken.token,
       );
       this.deferred.resolve(res);
       return res;
     } catch (e) {
-      const res = {
+      const res: IEditorDocumentModelSaveResult = {
         errorMessage: e.message,
-        state: 'error',
-      } as any;
+        state: SaveTaskResponseState.ERROR,
+      };
       this.deferred.resolve(res);
       return res;
     }
+  }
+
+  cancel() {
+    this.cancelToken.cancel();
+    const res: IEditorDocumentModelSaveResult = {
+      errorMessage: SaveTaskErrorCause.CANCEL,
+      state: SaveTaskResponseState.ERROR,
+    };
+    this.deferred.resolve(res);
   }
 }

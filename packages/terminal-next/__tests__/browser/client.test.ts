@@ -1,6 +1,3 @@
-/**
- * Terminal Client Test
- */
 import os from 'os';
 import path from 'path';
 
@@ -8,14 +5,23 @@ import * as fs from 'fs-extra';
 import httpProxy from 'http-proxy';
 import WebSocket from 'ws';
 
-import { Disposable, FileUri, URI } from '@opensumi/ide-core-common';
+import { Disposable, Event, FileUri, URI } from '@opensumi/ide-core-common';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
 
-import { ITerminalClientFactory, ITerminalGroupViewService, ITerminalClient, IWidget } from '../../src/common';
+import {
+  IShellLaunchConfig,
+  ITerminalClient,
+  ITerminalClientFactory2,
+  ITerminalGroupViewService,
+  ITerminalInternalService,
+  IWidget,
+} from '../../src/common';
 
 import { injector } from './inject';
-import { createProxyServer, createWsServer, resetPort } from './proxy';
-import { delay } from './utils';
+import { createProxyServer, createWsServer } from './proxy';
+import { createBufferLineArray, delay } from './utils';
+
+import type { ITerminalAddon } from '@xterm/xterm';
 
 function createDOMContainer() {
   const div = document.createElement('div');
@@ -25,13 +31,100 @@ function createDOMContainer() {
   return div;
 }
 
+class MockXTermAddonWebgl {
+  WebglAddon() {
+    return {
+      activate: () => {},
+      onContextLoss: Event.None,
+      dispose: () => {},
+    };
+  }
+}
+
+jest.mock('@xterm/xterm', () => {
+  const Terminal = class MockXTerminal {
+    private _text = '';
+    public options = {};
+    get cols() {
+      return 0;
+    }
+    get onLineFeed() {
+      return Event.None;
+    }
+    get onResize() {
+      return Event.None;
+    }
+    get onCursorMove() {
+      return Event.None;
+    }
+    get onBinary() {
+      return Event.None;
+    }
+    get onData() {
+      return Event.None;
+    }
+    get onWriteParsed() {
+      return Event.None;
+    }
+    getSelection() {
+      // Mock for test
+      return 'pwd';
+    }
+    get buffer() {
+      return {
+        active: {
+          getLine: (index: number) =>
+            createBufferLineArray(this._text.split('\n').map((text: string) => ({ text, width: text.length })))[index],
+        },
+      };
+    }
+    onSelectionChange() {}
+    clearSelection() {}
+    focus() {}
+    write(text: string) {
+      this._text = text;
+    }
+    clear() {
+      this._text = '';
+    }
+    selectAll() {}
+    dispose() {}
+    loadAddon(addon: ITerminalAddon) {
+      addon.activate(this as any);
+    }
+    hasSelection() {
+      return true;
+    }
+    getSelectionPosition() {
+      return {
+        start: {
+          x: 0,
+          y: 0,
+        },
+        end: {
+          x: this._text.length,
+          y: 0,
+        },
+      };
+    }
+    registerLinkProvider() {
+      return Disposable.create(() => {});
+    }
+  };
+  return {
+    ...jest.requireActual('@xterm/xterm'),
+    Terminal,
+  };
+});
+jest.mock('@xterm/addon-webgl', () => MockXTermAddonWebgl);
+
 describe('Terminal Client', () => {
   let client: ITerminalClient;
   let widget: IWidget;
   let proxy: httpProxy;
   let server: WebSocket.Server;
   let view: ITerminalGroupViewService;
-  let factory: ITerminalClientFactory;
+  let factory2: ITerminalClientFactory2;
   let workspaceService: IWorkspaceService;
   let root: URI | null;
 
@@ -47,11 +140,10 @@ describe('Terminal Client', () => {
       lastModification: new Date().getTime(),
       isDirectory: true,
     });
-    resetPort();
-    factory = injector.get(ITerminalClientFactory);
-    view = injector.get(ITerminalGroupViewService);
     server = createWsServer();
     proxy = createProxyServer();
+    factory2 = injector.get(ITerminalClientFactory2);
+    view = injector.get(ITerminalGroupViewService);
     const index = view.createGroup();
     const group = view.getGroup(index);
     widget = view.createWidget(group);
@@ -64,7 +156,7 @@ describe('Terminal Client', () => {
         return target[prop];
       },
     });
-    client = await factory(widget, {});
+    client = await factory2(widget, {});
     client.addDispose(
       Disposable.create(async () => {
         if (root) {
@@ -75,11 +167,11 @@ describe('Terminal Client', () => {
     await client.attached.promise;
   });
 
-  afterAll(() => {
-    client.dispose();
-    server.close();
-    proxy.close();
-    injector.disposeAll();
+  afterAll(async () => {
+    await client.dispose();
+    await server.close();
+    await proxy.close();
+    await injector.disposeAll();
   });
 
   it('Render Terminal', () => {
@@ -88,6 +180,7 @@ describe('Terminal Client', () => {
 
   it('Terminal Pid And Name', () => {
     expect(client.name).toEqual('bash');
+    expect(client.id).toEqual(widget.id);
   });
 
   it('Focus Terminal which is ready', async () => {
@@ -97,7 +190,7 @@ describe('Terminal Client', () => {
   it('Terminal SelectAll', () => {
     client.selectAll();
     const position = client.term.getSelectionPosition();
-    expect(position && position.endColumn).toEqual(client.term.cols);
+    expect(position && position.end.x).toEqual(client.term.cols);
   });
 
   it('Terminal getSelection', async () => {
@@ -146,5 +239,24 @@ describe('Terminal Client', () => {
     client.selectAll();
     client.updateTheme();
     client.clear();
+  });
+
+  it('should use isExtensionOwnedTerminal to determine the terminal process', async () => {
+    let launchConfig1: IShellLaunchConfig | undefined;
+    injector.mock(
+      ITerminalInternalService,
+      'attachByLaunchConfig',
+      (sessionId: string, cols: number, rows: number, launchConfig: IShellLaunchConfig) => {
+        launchConfig1 = launchConfig;
+      },
+    );
+    const factory2 = injector.get(ITerminalClientFactory2) as ITerminalClientFactory2;
+    await factory2(widget, {
+      config: {
+        isExtensionOwnedTerminal: true,
+      },
+    });
+    expect(launchConfig1).toBeDefined();
+    expect(launchConfig1?.customPtyImplementation).toBeDefined();
   });
 });

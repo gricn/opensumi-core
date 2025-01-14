@@ -1,40 +1,41 @@
 import cls from 'classnames';
 import React, {
-  useRef,
-  useEffect,
-  useCallback,
-  useState,
-  memo,
-  RefObject,
-  PropsWithChildren,
-  MouseEvent,
   DragEvent,
+  MouseEvent,
+  PropsWithChildren,
+  RefObject,
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
 } from 'react';
 
 import {
-  RecycleTreeFilterDecorator,
-  RecycleTree,
-  TreeNodeType,
   INodeRendererWrapProps,
   IRecycleTreeFilterHandle,
+  RecycleTree,
+  RecycleTreeFilterDecorator,
   TreeModel,
+  TreeNodeType,
 } from '@opensumi/ide-components';
 import {
-  ViewState,
-  useInjectable,
-  isOSX,
-  URI,
-  DisposableCollection,
   CancellationToken,
   CancellationTokenSource,
+  DisposableCollection,
+  URI,
+  ViewState,
+  isOSX,
+  useInjectable,
 } from '@opensumi/ide-core-browser';
-import { ProgressBar } from '@opensumi/ide-core-browser/lib/components/progressbar';
+import { Progress } from '@opensumi/ide-core-browser/lib/progress/progress-bar';
 import { WelcomeView } from '@opensumi/ide-main-layout/lib/browser/welcome.view';
+import { IIconService } from '@opensumi/ide-theme/lib/common/index';
 
 import { FILE_EXPLORER_WELCOME_ID, IFileTreeService } from '../common';
 import { Directory, File } from '../common/file-tree-node.define';
 
-import { FileTreeNode, FILE_TREE_NODE_HEIGHT } from './file-tree-node';
+import { FILE_TREE_NODE_HEIGHT, FileTreeNode } from './file-tree-node';
 import styles from './file-tree.module.less';
 import { FileTreeService, ITreeIndent } from './file-tree.service';
 import { FileTreeModelService } from './services/file-tree-model.service';
@@ -116,19 +117,16 @@ export const FileTree = ({ viewState }: PropsWithChildren<{ viewState: ViewState
     [],
   );
 
-  const handleItemDoubleClicked = useCallback(
-    (event: MouseEvent, item: File | Directory, type: TreeNodeType, activeUri?: URI) => {
-      // 阻止点击事件冒泡
-      event.stopPropagation();
+  const handleItemDoubleClicked = useCallback((event: MouseEvent, item: File | Directory, type: TreeNodeType) => {
+    // 阻止点击事件冒泡
+    event.stopPropagation();
 
-      const { handleItemDoubleClick } = fileTreeModelService;
-      if (!item) {
-        return;
-      }
-      handleItemDoubleClick(item, type, activeUri);
-    },
-    [],
-  );
+    const { handleItemDoubleClick } = fileTreeModelService;
+    if (!item) {
+      return;
+    }
+    handleItemDoubleClick(item, type);
+  }, []);
 
   const handleTwistierClick = useCallback((ev: MouseEvent, item: Directory) => {
     // 阻止点击事件冒泡
@@ -147,7 +145,7 @@ export const FileTree = ({ viewState }: PropsWithChildren<{ viewState: ViewState
         setIsLoading(true);
         if (treeModel) {
           // 确保数据初始化完毕，减少初始化数据过程中多次刷新视图
-          await treeModel.root.ensureLoaded();
+          await treeModel.ensureReady;
         }
         setModel(treeModel);
         setIsLoading(false);
@@ -271,10 +269,9 @@ export const FileTree = ({ viewState }: PropsWithChildren<{ viewState: ViewState
         return;
       }
       if (fileTreeModelService.treeModel) {
-        setModel(fileTreeModelService.treeModel);
         // 确保数据初始化完毕，减少初始化数据过程中多次刷新视图
-        // 这里需要重新取一下treeModel的值确保为最新的TreeModel
-        await fileTreeModelService.treeModel.root.ensureLoaded();
+        await fileTreeModelService.treeModel.ensureReady;
+        setModel(fileTreeModelService.treeModel);
         if (token.isCancellationRequested) {
           return;
         }
@@ -398,9 +395,9 @@ interface FileTreeViewProps {
     hasFileIcons: boolean;
     hidesExplorerArrows: boolean;
   };
-  onTreeReady: (handle: IRecycleTreeFilterHandle) => void;
-  beforeFilterValueChange?: () => Promise<void>;
-  locationToCurrentFile: (location: string) => void;
+  onTreeReady(handle: IRecycleTreeFilterHandle): void;
+  beforeFilterValueChange?(): Promise<void>;
+  locationToCurrentFile(location: string): void;
   onItemClick(event: MouseEvent, item: File | Directory, type: TreeNodeType, activeUri?: URI): void;
   onItemDoubleClick(event: MouseEvent, item: File | Directory, type: TreeNodeType, activeUri?: URI): void;
   onContextMenu(ev: MouseEvent, node: File | Directory, type: TreeNodeType, activeUri?: URI): void;
@@ -423,6 +420,8 @@ const FileTreeView = memo(
     onTwistierClick,
   }: FileTreeViewProps) => {
     const filetreeService = useInjectable<FileTreeService>(IFileTreeService);
+    const iconService = useInjectable<IIconService>(IIconService);
+
     const { decorationService, labelService, locationToCurrentFile } = filetreeService;
     const fileTreeModelService = useInjectable<FileTreeModelService>(FileTreeModelService);
 
@@ -437,6 +436,7 @@ const FileTreeView = memo(
           template={(props as any).template}
           decorationService={decorationService}
           labelService={labelService}
+          iconService={iconService}
           dndService={fileTreeModelService.dndService}
           decorations={fileTreeModelService.decorations.getDecorations(props.item as any)}
           onClick={onItemClick}
@@ -456,7 +456,7 @@ const FileTreeView = memo(
 
     if (isReady) {
       if (isLoading) {
-        return <ProgressBar loading />;
+        return <Progress loading />;
       } else if (model) {
         return (
           <FilterableRecycleTree
@@ -476,7 +476,7 @@ const FileTreeView = memo(
         return <WelcomeView viewId={FILE_EXPLORER_WELCOME_ID} />;
       }
     } else {
-      return <ProgressBar loading />;
+      return <Progress loading />;
     }
   },
 );

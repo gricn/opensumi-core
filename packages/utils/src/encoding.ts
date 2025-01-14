@@ -4,7 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 import iconv from 'iconv-lite';
 
-import { BinaryBuffer } from './buffer';
+import { SUPPORTED_ENCODINGS } from './const';
+
+import type { BinaryBuffer } from './buffer';
 
 export const UTF8 = 'utf8';
 export const UTF8_with_bom = 'utf8bom';
@@ -15,7 +17,7 @@ export const UTF16be_BOM = [0xfe, 0xff];
 export const UTF16le_BOM = [0xff, 0xfe];
 export const UTF8_BOM = [0xef, 0xbb, 0xbf];
 
-const ZERO_BYTE_DETECTION_BUFFER_MAX_LEN = 512; // number of bytes to look at to decide about a file being binary or not
+export const ZERO_BYTE_DETECTION_BUFFER_MAX_LEN = 512; // number of bytes to look at to decide about a file being binary or not
 const AUTO_ENCODING_GUESS_MAX_BYTES = 512 * 128; // set an upper limit for the number of bytes we pass on to jschardet
 
 export function isUTF8(encoding: string | null) {
@@ -155,7 +157,7 @@ const IGNORE_ENCODINGS = ['ascii', 'utf-16', 'utf-32'];
 
 async function guessEncodingByBuffer(buffer: BinaryBuffer): Promise<string | null> {
   // lazy load
-  const jschardet = require('jschardet');
+  const jschardet = await import('jschardet');
 
   // ensure to limit buffer for guessing due to https://github.com/aadsm/jschardet/issues/53
   const limitedBuffer = buffer.slice(0, AUTO_ENCODING_GUESS_MAX_BYTES);
@@ -255,4 +257,23 @@ export function detectEncodingFromBuffer(
   }
 
   return { seemsBinary, encoding };
+}
+
+export interface IEncodingInfo {
+  id: string; // encoding identifier
+  labelLong: string; // long label name
+  labelShort: string; // short label name
+}
+
+export function getEncodingInfo(encoding: string | null): null | IEncodingInfo {
+  if (!encoding) {
+    return null;
+  }
+  const result = SUPPORTED_ENCODINGS[encoding] || {};
+
+  return {
+    id: encoding,
+    labelLong: result.labelLong || encoding,
+    labelShort: result.labelShort || encoding,
+  };
 }

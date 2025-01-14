@@ -1,23 +1,20 @@
 import { Injectable } from '@opensumi/di';
 import {
-  PreferenceSchemaProvider,
-  IPreferenceSettingsService,
-  ILoggerManagerClient,
   IFileServiceClient,
+  IPreferenceSettingsService,
+  PreferenceSchemaProvider,
   URI,
 } from '@opensumi/ide-core-browser';
-import { MockLoggerManageClient } from '@opensumi/ide-core-browser/__mocks__/logger';
 import {
   MockPreferenceSchemaProvider,
   MockPreferenceSettingsService,
 } from '@opensumi/ide-core-browser/__mocks__/preference';
-import { StaticResourceService } from '@opensumi/ide-static-resource/lib/browser';
+import { StaticResourceService } from '@opensumi/ide-core-browser/lib/static-resource';
 
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
 import { IIconService, IconType } from '../../src';
 import { IconService } from '../../src/browser';
-
 
 @Injectable()
 class MockFileServiceClient {
@@ -166,10 +163,6 @@ describe('icon theme test', () => {
         useClass: MockPreferenceSettingsService,
       },
       {
-        token: ILoggerManagerClient,
-        useClass: MockLoggerManageClient,
-      },
-      {
         token: IFileServiceClient,
         useClass: MockFileServiceClient,
       },
@@ -194,6 +187,7 @@ describe('icon theme test', () => {
           label: 'Test IconTheme',
           uiTheme: 'vs',
           path: './test/path',
+          extensionId: 'mock',
         },
       ],
       new URI('file://mock/path'),
@@ -247,7 +241,6 @@ describe('icon theme test', () => {
     const multiIconClass = service.fromIcon('file:///mock/base/path2', {
       dark: './testIcon.svg',
       light: './testIcon2.svg',
-      hc: './testIcon3.svg',
     });
 
     const randomIconClass1 = multiIconClass!.replace(/(kaitian-icon|mask-mode|background-mode)/g, '').trim();
@@ -281,6 +274,7 @@ describe('icon theme test', () => {
           label: 'Test IconTheme',
           uiTheme: 'vs',
           path: './test/font/path',
+          extensionId: 'mock',
         },
       ],
       new URI('file://mock/path'),

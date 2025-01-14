@@ -4,11 +4,11 @@ import {
   CommandService,
   IClientApp,
   IClipboardService,
+  OperatingSystem,
   URI,
   Uri,
-  isWindows,
-  OperatingSystem,
   isLinux,
+  isWindows,
 } from '@opensumi/ide-core-browser';
 import { IApplicationService, uuid } from '@opensumi/ide-core-common';
 import { IFileTreeService } from '@opensumi/ide-file-tree-next';
@@ -91,37 +91,38 @@ describe('extension browser test', () => {
 
     preferenceContribution.registerCommands(commandRegistry);
     commandService = injector.get<CommandService>(CommandService);
+    injector.mockCommand('editor.openUri', () => {});
   });
 
-  afterEach(() => {
-    injector.disposeAll();
+  afterEach(async () => {
+    await injector.disposeAll();
   });
 
-  it('execute workbench.action.reloadWindow command ', async () => {
+  it('execute workbench.action.reloadWindow command', async () => {
     const clientApp = injector.get<IClientApp>(IClientApp);
     await commandService.executeCommand('workbench.action.reloadWindow');
-    expect(clientApp.fireOnReload).toBeCalled();
+    expect(clientApp.fireOnReload).toHaveBeenCalled();
   });
 
-  it('execute copyFilePath command ', async () => {
+  it('execute copyFilePath command', async () => {
     const clipboardService = injector.get<IClipboardService>(IClipboardService);
     await commandService.executeCommand('copyFilePath', Uri.file('/home/admin/workspace/a.ts'));
-    expect(clipboardService.writeText).toBeCalled();
-    expect(clipboardService.writeText).toBeCalledWith('/home/admin/workspace/a.ts');
+    expect(clipboardService.writeText).toHaveBeenCalled();
+    expect(clipboardService.writeText).toHaveBeenCalledWith('/home/admin/workspace/a.ts');
   });
 
-  it('execute copyRelativeFilePath command ', async () => {
+  it('execute copyRelativeFilePath command', async () => {
     const clipboardService = injector.get<IClipboardService>(IClipboardService);
     await commandService.executeCommand('copyRelativeFilePath', Uri.file('/home/admin/workspace/a.ts'));
-    expect(clipboardService.writeText).toBeCalled();
-    expect(clipboardService.writeText).toBeCalledWith('a.ts');
+    expect(clipboardService.writeText).toHaveBeenCalled();
+    expect(clipboardService.writeText).toHaveBeenCalledWith('a.ts');
   });
 
   it('close page expects disposeClientExtProcess to be called', () => {
     const extensionNodeClientService = injector.get<IExtensionNodeClientService>(ExtensionNodeServiceServerPath);
     // trigger close
     extensionClientAppContribution.onDisposeSideEffects();
-    expect(extensionNodeClientService.disposeClientExtProcess).toBeCalled();
+    expect(extensionNodeClientService.disposeClientExtProcess).toHaveBeenCalled();
   });
 
   it('workbench.action.openSettings', (done) => {

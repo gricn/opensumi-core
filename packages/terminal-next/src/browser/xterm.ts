@@ -1,19 +1,23 @@
-import { ITerminalOptions, ITheme, Terminal } from 'xterm';
-import { FitAddon } from 'xterm-addon-fit';
-import { ISearchOptions, SearchAddon } from 'xterm-addon-search';
+/* eslint-disable @typescript-eslint/ban-ts-comment */
+import { FitAddon } from '@xterm/addon-fit';
+import { ISearchOptions, SearchAddon } from '@xterm/addon-search';
+import { ITerminalOptions, ITheme, Terminal } from '@xterm/xterm';
 
-import { Injectable, Autowired, Injector, INJECTOR_TOKEN } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import { IClipboardService } from '@opensumi/ide-core-browser';
+import { PreferenceService } from '@opensumi/ide-core-browser/lib/preferences/types';
 import { Disposable } from '@opensumi/ide-core-common';
 import { MessageService } from '@opensumi/ide-overlay/lib/browser/message.service';
 import { WorkbenchThemeService } from '@opensumi/ide-theme/lib/browser/workbench.theme.service';
+import { PANEL_BACKGROUND } from '@opensumi/ide-theme/lib/common/color-registry';
 import { IThemeService } from '@opensumi/ide-theme/lib/common/theme.service';
 
-import { SupportedOptions } from '../common/preference';
-import { IXTerm } from '../common/xterm';
+import { CodeTerminalSettingId, SupportedOptions } from '../common/preference';
+import { IXTerm, RenderType } from '../common/xterm';
 
 import styles from './component/terminal.module.less';
 import {
+  TERMINAL_BACKGROUND_COLOR,
   TERMINAL_FIND_MATCH_BACKGROUND_COLOR,
   TERMINAL_FIND_MATCH_BORDER_COLOR,
   TERMINAL_FIND_MATCH_HIGHLIGHT_BACKGROUND_COLOR,
@@ -21,6 +25,9 @@ import {
   TERMINAL_OVERVIEW_RULER_CURSOR_FOREGROUND_COLOR,
   TERMINAL_OVERVIEW_RULER_FIND_MATCH_FOREGROUND_COLOR,
 } from './terminal.color';
+
+import type { CanvasAddon as CanvasAddonType } from '@xterm/addon-canvas';
+import type { WebglAddon as WebglAddonType } from '@xterm/addon-webgl';
 
 export interface XTermOptions {
   cwd?: string;
@@ -43,6 +50,9 @@ export class XTerm extends Disposable implements IXTerm {
   @Autowired(IThemeService)
   protected themeService: WorkbenchThemeService;
 
+  @Autowired(PreferenceService)
+  protected readonly preferenceService: PreferenceService;
+
   container: HTMLDivElement;
 
   raw: Terminal;
@@ -52,24 +62,72 @@ export class XTerm extends Disposable implements IXTerm {
   /** addons */
   private _fitAddon: FitAddon;
   private _searchAddon: SearchAddon;
+  private _webglAddon?: WebglAddonType;
+  private _canvasAddon?: CanvasAddonType;
   /** end */
 
   constructor(public options: XTermOptions) {
     super();
-
     this.container = document.createElement('div');
     this.container.className = styles.terminalInstance;
 
     this.xtermOptions = options.xtermOptions;
 
-    this.raw = new Terminal(this.xtermOptions);
+    this.raw = new Terminal({
+      allowProposedApi: true,
+      ...this.xtermOptions,
+    });
     this._prepareAddons();
     this.raw.onSelectionChange(this.onSelectionChange.bind(this));
   }
 
-  private _prepareAddons() {
+  protected async enableCanvasRenderer() {
+    try {
+      if (!this._canvasAddon) {
+        // @ts-ignore
+        this._canvasAddon = new (await import('@xterm/addon-canvas')).CanvasAddon();
+      }
+
+      this.addDispose(this._canvasAddon);
+      this.raw.loadAddon(this._canvasAddon);
+
+      if (this._webglAddon) {
+        this._webglAddon.dispose();
+        this._webglAddon = undefined;
+      }
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  protected async enableWebglRenderer() {
+    try {
+      if (!this._webglAddon) {
+        // @ts-ignore
+        this._webglAddon = new (await import('@xterm/addon-webgl')).WebglAddon();
+      }
+
+      this.addDispose(this._webglAddon);
+      this.addDispose(
+        this._webglAddon.onContextLoss(() => {
+          // @ts-ignore
+          this.raw.options.rendererType = 'dom';
+        }),
+      );
+      this.raw.loadAddon(this._webglAddon);
+      if (this._canvasAddon) {
+        this._canvasAddon.dispose();
+        this._canvasAddon = undefined;
+      }
+    } catch (err) {
+      await this.enableCanvasRenderer();
+    }
+  }
+
+  private async _prepareAddons() {
     this._searchAddon = new SearchAddon();
     this._fitAddon = new FitAddon();
+
     this.addDispose([this._searchAddon, this._fitAddon]);
 
     this.raw.loadAddon(this._searchAddon);
@@ -78,7 +136,7 @@ export class XTerm extends Disposable implements IXTerm {
 
   updateTheme(theme: ITheme | undefined) {
     if (theme) {
-      this.raw.setOption('theme', theme);
+      this.raw.options.theme = theme;
       this.xtermOptions = {
         ...this.xtermOptions,
         theme,
@@ -99,6 +157,7 @@ export class XTerm extends Disposable implements IXTerm {
     // The mapping is as follows:
     // - findMatch -> activeMatch
     // - findMatchHighlight -> match
+    const terminalBackground = theme.getColor(TERMINAL_BACKGROUND_COLOR) || theme.getColor(PANEL_BACKGROUND);
     const findMatchBackground = theme.getColor(TERMINAL_FIND_MATCH_BACKGROUND_COLOR);
     const findMatchBorder = theme.getColor(TERMINAL_FIND_MATCH_BORDER_COLOR);
     const findMatchOverviewRuler = theme.getColor(TERMINAL_OVERVIEW_RULER_CURSOR_FOREGROUND_COLOR);
@@ -107,10 +166,12 @@ export class XTerm extends Disposable implements IXTerm {
     const findMatchHighlightOverviewRuler = theme.getColor(TERMINAL_OVERVIEW_RULER_FIND_MATCH_FOREGROUND_COLOR);
 
     return {
-      activeMatchBackground: findMatchBackground?.toString() || 'transparent',
+      activeMatchBackground: findMatchBackground?.toString(),
       activeMatchBorder: findMatchBorder?.toString() || 'transparent',
       activeMatchColorOverviewRuler: findMatchOverviewRuler?.toString() || 'transparent',
-      matchBackground: findMatchHighlightBackground?.toString() || 'transparent',
+      matchBackground: terminalBackground
+        ? findMatchHighlightBackground?.blend(terminalBackground).toString()
+        : undefined,
       matchBorder: findMatchHighlightBorder?.toString() || 'transparent',
       matchOverviewRuler: findMatchHighlightOverviewRuler?.toString() || 'transparent',
     };
@@ -129,6 +190,13 @@ export class XTerm extends Disposable implements IXTerm {
 
   open() {
     this.raw.open(this.container);
+    const renderType = this.preferenceService.get<RenderType>(CodeTerminalSettingId.XtermRenderType, RenderType.WebGL);
+    if (renderType === RenderType.WebGL) {
+      this.enableWebglRenderer();
+    } else if (renderType === RenderType.Canvas) {
+      this.enableCanvasRenderer();
+    }
+    // 不设置 enableWebGL/Canvas render 的话，默认就会 fallback 到 DOM Render
   }
 
   fit() {

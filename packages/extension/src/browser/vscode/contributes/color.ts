@@ -1,19 +1,20 @@
-// import { VscodeContributionPoint, Contributes } from './common';
-import { Injectable, Autowired } from '@opensumi/di';
-import { replaceLocalizePlaceholder, localize } from '@opensumi/ide-core-browser';
+import { Autowired, Injectable } from '@opensumi/di';
+import { localize, replaceLocalizePlaceholder } from '@opensumi/ide-core-browser';
+import { LifeCyclePhase } from '@opensumi/ide-core-common';
 import { ExtColorContribution, IThemeService } from '@opensumi/ide-theme';
 
-import { VSCodeContributePoint, Contributes } from '../../../common';
+import { Contributes, LifeCycle, VSCodeContributePoint } from '../../../common';
 
 export type ColorsSchema = Array<ExtColorContribution>;
 const colorIdPattern = '^\\w+[.\\w+]*$';
 @Injectable()
 @Contributes('colors')
+@LifeCycle(LifeCyclePhase.Ready)
 export class ColorsContributionPoint extends VSCodeContributePoint<ColorsSchema> {
   @Autowired(IThemeService)
   themeService: IThemeService;
 
-  schema = {
+  static schema = {
     description: localize('contributes.color', 'Contributes extension defined themable colors'),
     type: 'array',
     items: {
@@ -51,7 +52,15 @@ export class ColorsContributionPoint extends VSCodeContributePoint<ColorsSchema>
             highContrast: {
               description: localize(
                 'contributes.defaults.highContrast',
-                'The default color for high contrast themes. Either a color value in hex (#RRGGBB[AA]) or the identifier of a themable color which provides the default.',
+                'The default color for high contrast dark themes. Either a color value in hex (#RRGGBB[AA]) or the identifier of a themable color which provides the default. If not provided, the `dark` color is used as default for high contrast dark themes.',
+              ),
+              type: 'string',
+              anyOf: [{ type: 'string', format: 'color-hex' }],
+            },
+            highContrastLight: {
+              description: localize(
+                'contributes.defaults.highContrastLight',
+                'The default color for high contrast light themes. Either a color value in hex (#RRGGBB[AA]) or the identifier of a themable color which provides the default. If not provided, the `light` color is used as default for high contrast light themes.',
               ),
               type: 'string',
               anyOf: [{ type: 'string', format: 'color-hex' }],
@@ -63,12 +72,14 @@ export class ColorsContributionPoint extends VSCodeContributePoint<ColorsSchema>
   };
 
   contribute() {
-    const colors = this.json;
-    for (const color of colors) {
-      if (color && color.description) {
-        color.description = replaceLocalizePlaceholder(color.description) as string;
+    for (const contrib of this.contributesMap) {
+      const { contributes } = contrib;
+      for (const color of contributes) {
+        if (color && color.description) {
+          color.description = replaceLocalizePlaceholder(color.description) as string;
+        }
+        this.themeService.registerColor(color);
       }
-      this.themeService.registerColor(color);
     }
   }
 }

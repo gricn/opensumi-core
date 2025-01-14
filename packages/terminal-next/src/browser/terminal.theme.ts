@@ -1,5 +1,3 @@
-import type { ITheme } from 'xterm';
-
 import { Injectable } from '@opensumi/di';
 import { Themable } from '@opensumi/ide-theme/lib/browser/workbench.theme.service';
 import { Color } from '@opensumi/ide-theme/lib/common/color';
@@ -7,6 +5,8 @@ import { Color } from '@opensumi/ide-theme/lib/common/color';
 import { ITerminalTheme } from '../common';
 
 import * as TERMINAL_COLOR from './terminal.color';
+
+import type { ITheme } from '@xterm/xterm';
 
 @Injectable()
 export class TerminalTheme extends Themable implements ITerminalTheme {
@@ -16,6 +16,11 @@ export class TerminalTheme extends Themable implements ITerminalTheme {
     const termSelectionColor = this.getColorSync(TERMINAL_COLOR.TERMINAL_SELECTION_BACKGROUND_COLOR);
     const termCursorColor = this.getColorSync(TERMINAL_COLOR.TERMINAL_CURSOR_FOREGROUND_COLOR) || termFgColor;
     const termCursorAccentColor = this.getColorSync(TERMINAL_COLOR.TERMINAL_CURSOR_BACKGROUND_COLOR) || termBgColor;
+    const selectionBackgroundColor = this.getColorSync(TERMINAL_COLOR.TERMINAL_SELECTION_BACKGROUND_COLOR);
+    const selectionInactiveBackgroundColor = this.getColorSync(
+      TERMINAL_COLOR.TERMINAL_INACTIVE_SELECTION_BACKGROUND_COLOR,
+    );
+    const selectionForegroundColor = this.getColorSync(TERMINAL_COLOR.TERMINAL_SELECTION_FOREGROUND_COLOR) || undefined;
 
     const ansiColorIdentifiers = TERMINAL_COLOR.ansiColorIdentifiers;
 
@@ -29,7 +34,9 @@ export class TerminalTheme extends Themable implements ITerminalTheme {
       foreground: Color.Format.CSS.formatHexA(termFgColor),
       cursor: Color.Format.CSS.formatHexA(termCursorColor),
       cursorAccent: Color.Format.CSS.formatHexA(termCursorAccentColor),
-      selection: Color.Format.CSS.formatHexA(termSelectionColor),
+      selectionBackground: selectionBackgroundColor?.toString(),
+      selectionInactiveBackground: selectionInactiveBackgroundColor?.toString(),
+      selectionForeground: selectionForegroundColor?.toString(),
       black: this.getColorSync(ansiColorIdentifiers[0])?.toString(),
       red: this.getColorSync(ansiColorIdentifiers[1])?.toString(),
       green: this.getColorSync(ansiColorIdentifiers[2])?.toString(),

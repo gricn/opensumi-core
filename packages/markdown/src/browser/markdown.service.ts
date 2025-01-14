@@ -1,14 +1,12 @@
-import { marked } from 'marked';
-
-import { Injectable, Autowired } from '@opensumi/di';
-import { IDisposable, Disposable, CancellationToken, Event, URI, IOpenerService } from '@opensumi/ide-core-browser';
+import { Autowired, Injectable } from '@opensumi/di';
+import { IMarkedOptions, parseMarkdown } from '@opensumi/ide-components/lib/utils';
+import { CancellationToken, Disposable, Event, IDisposable, IOpenerService, URI } from '@opensumi/ide-core-browser';
 import { HttpOpener } from '@opensumi/ide-core-browser/lib/opener/http-opener';
 import { IWebviewService } from '@opensumi/ide-webview';
 
 import { IMarkdownService } from '../common';
 
 import { markdownCss } from './mardown.style';
-
 
 @Injectable()
 export class MarkdownServiceImpl implements IMarkdownService {
@@ -27,10 +25,11 @@ export class MarkdownServiceImpl implements IMarkdownService {
     content: string,
     container: HTMLElement,
     cancellationToken: CancellationToken,
+    options?: IMarkedOptions,
     onUpdate?: Event<string>,
     onLinkClick?: (uri: URI) => void,
   ): Promise<IDisposable> {
-    const body = await this.getBody(content);
+    const body = await this.getBody(content, options);
     if (cancellationToken.isCancellationRequested) {
       return new Disposable();
     }
@@ -61,7 +60,7 @@ export class MarkdownServiceImpl implements IMarkdownService {
     if (onUpdate) {
       disposer.addDispose(
         onUpdate(async (content) => {
-          const body = await this.getBody(content);
+          const body = await this.getBody(content, options);
           if (!cancellationToken.isCancellationRequested) {
             webviewElement.setContent(body);
           }
@@ -72,9 +71,9 @@ export class MarkdownServiceImpl implements IMarkdownService {
     return disposer;
   }
 
-  async getBody(content): Promise<string> {
+  async getBody(content: string, options: IMarkedOptions | undefined): Promise<string> {
     return new Promise((resolve, reject) => {
-      marked.parse(content, (err, result) => {
+      parseMarkdown(content, options, (err, result) => {
         if (err) {
           reject(err);
         }
@@ -89,7 +88,7 @@ function renderBody(body: string): string {
     <html>
       <head>
         <meta http-equiv="Content-type" content="text/html;charset=UTF-8">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data:; media-src https:; script-src 'none'; style-src 'unsafe-inline'; child-src 'none'; frame-src 'none';">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src http: https: data:; media-src https:; script-src 'none'; style-src 'unsafe-inline'; child-src 'none'; frame-src 'none';">
         <style>
           ${markdownCss}
         </style>

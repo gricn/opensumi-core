@@ -1,24 +1,36 @@
-import { Injectable, Autowired } from '@opensumi/di';
-import { localize, URI } from '@opensumi/ide-core-common';
+import { Autowired, Injectable } from '@opensumi/di';
+import { IJSONSchema, LifeCyclePhase, URI, localize } from '@opensumi/ide-core-common';
 import { LanguagesContribution } from '@opensumi/ide-monaco';
 import { ITextmateTokenizer, ITextmateTokenizerService } from '@opensumi/ide-monaco/lib/browser/contrib/tokenizer';
 
-import { VSCodeContributePoint, Contributes } from '../../../common';
+import { Contributes, LifeCycle, VSCodeContributePoint } from '../../../common';
+import { AbstractExtInstanceManagementService } from '../../types';
 
 export type LanguagesSchema = Array<LanguagesContribution>;
 
 @Injectable()
 @Contributes('languages')
+@LifeCycle(LifeCyclePhase.Initialize)
 export class LanguagesContributionPoint extends VSCodeContributePoint<LanguagesSchema> {
   @Autowired(ITextmateTokenizer)
   private readonly textMateService: ITextmateTokenizerService;
 
+  @Autowired(AbstractExtInstanceManagementService)
+  protected readonly extensionManageService: AbstractExtInstanceManagementService;
+
   async contribute() {
-    await this.textMateService.registerLanguages(this.json, URI.from(this.extension.uri!));
+    for (const contrib of this.contributesMap) {
+      const { extensionId, contributes } = contrib;
+      const extension = this.extensionManageService.getExtensionInstanceByExtId(extensionId);
+      if (!extension) {
+        continue;
+      }
+      await this.textMateService.registerLanguages(contributes, URI.from(extension.uri!));
+    }
   }
 
   // copied from vscode
-  schema = {
+  static schema: IJSONSchema = {
     allowComments: true,
     allowTrailingCommas: true,
     default: {
@@ -55,10 +67,10 @@ export class LanguagesContributionPoint extends VSCodeContributePoint<LanguagesS
         type: 'array',
         items: [
           {
-            $ref: '#definitions/openBracket',
+            // $ref: '#definitions/openBracket',
           },
           {
-            $ref: '#definitions/closeBracket',
+            // $ref: '#definitions/closeBracket',
           },
         ],
       },
@@ -107,7 +119,7 @@ export class LanguagesContributionPoint extends VSCodeContributePoint<LanguagesS
         ),
         type: 'array',
         items: {
-          $ref: '#definitions/bracketPair',
+          // $ref: '#definitions/bracketPair',
         },
       },
       autoClosingPairs: {
@@ -124,16 +136,16 @@ export class LanguagesContributionPoint extends VSCodeContributePoint<LanguagesS
         items: {
           oneOf: [
             {
-              $ref: '#definitions/bracketPair',
+              // $ref: '#definitions/bracketPair',
             },
             {
               type: 'object',
               properties: {
                 open: {
-                  $ref: '#definitions/openBracket',
+                  // $ref: '#definitions/openBracket',
                 },
                 close: {
-                  $ref: '#definitions/closeBracket',
+                  // $ref: '#definitions/closeBracket',
                 },
                 notIn: {
                   type: 'array',
@@ -172,16 +184,16 @@ export class LanguagesContributionPoint extends VSCodeContributePoint<LanguagesS
         items: {
           oneOf: [
             {
-              $ref: '#definitions/bracketPair',
+              // $ref: '#definitions/bracketPair',
             },
             {
               type: 'object',
               properties: {
                 open: {
-                  $ref: '#definitions/openBracket',
+                  // $ref: '#definitions/openBracket',
                 },
                 close: {
-                  $ref: '#definitions/closeBracket',
+                  // $ref: '#definitions/closeBracket',
                 },
               },
             },

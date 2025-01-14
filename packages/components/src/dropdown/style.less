@@ -1,7 +1,7 @@
 @import '../style/variable.less';
 @import '../style/mixins.less';
 
-@dropdown-prefix-cls: ~'@{kt-prefix}-dropdown';
+@dropdown-prefix-cls: ~'@{prefix}-dropdown';
 
 .@{dropdown-prefix-cls} {
   .reset-component;
@@ -26,7 +26,7 @@
   &-wrap {
     position: relative;
 
-    .@{kt-prefix}-btn > .@{iconfont-css-prefix}-down {
+    .@{prefix}-btn > .@{iconfont-css-prefix}-down {
       .iconfont-size-under-12px(10px);
     }
 
@@ -244,11 +244,29 @@
 .@{dropdown-prefix-cls}-button {
   white-space: nowrap;
 
-  &.@{kt-prefix}-btn-group > .@{kt-prefix}-btn:last-child:not(:first-child) {
+  &.@{prefix}-btn-group > .@{prefix}-btn:last-child:not(:first-child) {
     padding-right: @padding-xs;
     padding-left: @padding-xs;
   }
   .@{iconfont-css-prefix}.@{iconfont-css-prefix}-down {
     .iconfont-size-under-12px(10px);
+  }
+}
+
+@dropdown-button-prefix-cls: ~'@{prefix}-dropdown-button';
+
+.@{dropdown-button-prefix-cls} {
+  .reset-component;
+  display: flex;
+  border-radius: 2px;
+  overflow: hidden;
+  .@{prefix}-button {
+    border-radius: 0;
+    &:first-child {
+      border-right: 1px solid var(--kt-hintBackground);
+    }
+    &:last-child {
+      padding: 0 6px;
+    }
   }
 }

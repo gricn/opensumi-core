@@ -1,21 +1,28 @@
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
-import { toDisposable, Event, CommandService, positionToRange, URI } from '@opensumi/ide-core-common';
-import { IDocPersistentCacheProvider } from '@opensumi/ide-editor';
-import { EditorCollectionService } from '@opensumi/ide-editor';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
+import { IContextKeyService } from '@opensumi/ide-core-browser/lib/context-key';
+import { CommandService, Event, ILineChange, URI, toDisposable } from '@opensumi/ide-core-common';
+import { EditorCollectionService, IDocPersistentCacheProvider } from '@opensumi/ide-editor';
 import { EmptyDocCacheImpl, IEditorDocumentModel, IEditorDocumentModelService } from '@opensumi/ide-editor/src/browser';
 import { EditorDocumentModel } from '@opensumi/ide-editor/src/browser/doc-model/main';
-import type { ICodeEditor as IMonacoCodeEditor } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
-import type { IDiffComputationResult } from '@opensumi/monaco-editor-core/esm/vs/editor/common/services/editorWorkerService';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
-import { StaticServices } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneServices';
+import * as monaco from '@opensumi/ide-monaco';
+import { DetailedLineRangeMapping, positionToRange } from '@opensumi/ide-monaco';
+import { LineRange } from '@opensumi/monaco-editor-core/esm/vs/editor/common/core/lineRange';
+import {
+  IDiffComputationResult,
+  IEditorWorkerService,
+} from '@opensumi/monaco-editor-core/esm/vs/editor/common/services/editorWorker';
+import { StandaloneServices } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneServices';
 
 import { createBrowserInjector } from '../../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../../tools/dev-tool/src/mock-injector';
 import { createMockedMonaco } from '../../../../monaco/__mocks__/monaco';
-import { SCMService, ISCMRepository } from '../../../src';
+import { MockContextKeyService } from '../../../../monaco/__mocks__/monaco.context-key.service';
+import { ISCMRepository, SCMService } from '../../../src';
 import { DirtyDiffModel } from '../../../src/browser/dirty-diff/dirty-diff-model';
 import { DirtyDiffWidget } from '../../../src/browser/dirty-diff/dirty-diff-widget';
 import { MockSCMProvider } from '../../scm-test-util';
+
+import type { ICodeEditor as IMonacoCodeEditor } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
 
 @Injectable()
 class MockEditorDocumentModelService {
@@ -45,6 +52,9 @@ jest.mock('@opensumi/ide-core-common', () => ({
     constructor() {}
     trigger(promiseFactory: () => Promise<any>) {
       return promiseFactory();
+    }
+    isTriggered() {
+      return false;
     }
     cancel() {}
   },
@@ -83,14 +93,22 @@ describe('scm/src/browser/dirty-diff/dirty-diff-model.ts', () => {
     const mockComputeDiff = jest.fn();
 
     beforeEach(() => {
-      StaticServices.editorWorkerService.get = (() => ({
-        canComputeDiff: (): boolean => true,
-        computeDiff: async () => computeDiffRet,
-      })) as any;
+      StandaloneServices.get(IEditorWorkerService).canComputeDirtyDiff = () => true;
+      StandaloneServices.get(IEditorWorkerService).computeDiff = async () => ({
+        ...computeDiffRet!,
+        changes: computeDiffRet!.changes.map(
+          (e) => new DetailedLineRangeMapping(new LineRange(e[0], e[1]), new LineRange(e[2], e[3]), []),
+        ),
+        moves: [],
+      });
 
       injector = createBrowserInjector(
         [],
         new MockInjector([
+          {
+            token: IContextKeyService,
+            useClass: MockContextKeyService,
+          },
           {
             token: IDocPersistentCacheProvider,
             useClass: EmptyDocCacheImpl,
@@ -136,7 +154,7 @@ describe('scm/src/browser/dirty-diff/dirty-diff-model.ts', () => {
 
       // private property
       const editorWorkerServiceMethods = Object.keys(dirtyDiffModel['editorWorkerService']);
-      expect(editorWorkerServiceMethods).toContain('canComputeDiff');
+      expect(editorWorkerServiceMethods).toContain('canComputeDirtyDiff');
       expect(editorWorkerServiceMethods).toContain('computeDiff');
       fileTextModel.dispose();
     });
@@ -151,17 +169,12 @@ describe('scm/src/browser/dirty-diff/dirty-diff-model.ts', () => {
       expect(dirtyDiffModel.original).toEqual(gitTextModel);
 
       // mock computeDiff compute a diff changes
-      const change0 = {
-        originalStartLineNumber: 2,
-        originalEndLineNumber: 5,
-        modifiedStartLineNumber: 6,
-        modifiedEndLineNumber: 8,
-        charChanges: [],
-      };
+      const change0: ILineChange = [2, 5, 6, 8, []];
       computeDiffRet = {
         quitEarly: false,
         identical: false,
         changes: [change0],
+        moves: [],
       };
       fileTextModel.getMonacoModel().setValue('insert some content for testing');
 
@@ -184,18 +197,13 @@ describe('scm/src/browser/dirty-diff/dirty-diff-model.ts', () => {
       dirtyDiffModel['_originalModel'] = gitTextModel;
 
       // mock computeDiff compute a diff changes
-      const change0 = {
-        originalStartLineNumber: 2,
-        originalEndLineNumber: 5,
-        modifiedStartLineNumber: 6,
-        modifiedEndLineNumber: 8,
-        charChanges: [],
-      };
+      const change0: ILineChange = [2, 5, 6, 8, []];
 
       computeDiffRet = {
         quitEarly: false,
         identical: false,
         changes: [change0],
+        moves: [],
       };
       provider.onDidChangeEmitter.fire();
 
@@ -218,18 +226,13 @@ describe('scm/src/browser/dirty-diff/dirty-diff-model.ts', () => {
       dirtyDiffModel['_originalModel'] = gitTextModel;
 
       // mock computeDiff compute a diff changes
-      const change0 = {
-        originalStartLineNumber: 2,
-        originalEndLineNumber: 5,
-        modifiedStartLineNumber: 6,
-        modifiedEndLineNumber: 8,
-        charChanges: [],
-      };
+      const change0: ILineChange = [2, 5, 6, 8, []];
 
       computeDiffRet = {
         quitEarly: false,
         identical: false,
         changes: [change0],
+        moves: [],
       };
       provider.onDidChangeResourcesEmitter.fire();
 
@@ -258,7 +261,6 @@ describe('scm/src/browser/dirty-diff/dirty-diff-model.ts', () => {
 
       expect(dirtyDiffModel.modified).toEqual(fileTextModel);
       fileTextModel.getMonacoModel().setValue('insert some content for testing');
-      jest.runAllTimers();
 
       expect(eventSpy).toHaveBeenCalledTimes(0);
       // editor content changed trigger a `triggerDiff`
@@ -272,30 +274,10 @@ describe('scm/src/browser/dirty-diff/dirty-diff-model.ts', () => {
 
       const dirtyDiffModel = injector.get(DirtyDiffModel, [fileTextModel]);
       dirtyDiffModel['_originalModel'] = gitTextModel;
-      const change0 = {
-        originalStartLineNumber: 11,
-        originalEndLineNumber: 11,
-        modifiedStartLineNumber: 11,
-        modifiedEndLineNumber: 11,
-      };
-      const change1 = {
-        originalStartLineNumber: 12,
-        originalEndLineNumber: 12,
-        modifiedStartLineNumber: 12,
-        modifiedEndLineNumber: 12,
-      };
-      const change2 = {
-        originalStartLineNumber: 14,
-        originalEndLineNumber: 14,
-        modifiedStartLineNumber: 14,
-        modifiedEndLineNumber: 14,
-      };
-      const change3 = {
-        originalStartLineNumber: 15,
-        originalEndLineNumber: 15,
-        modifiedStartLineNumber: 15,
-        modifiedEndLineNumber: 15,
-      };
+      const change0: ILineChange = [11, 11, 11, 11, []];
+      const change1: ILineChange = [12, 12, 12, 12, []];
+      const change2: ILineChange = [14, 14, 14, 14, []];
+      const change3: ILineChange = [15, 15, 15, 15, []];
 
       dirtyDiffModel['_changes'] = [change0, change1, change2, change3];
 
@@ -361,7 +343,7 @@ describe('scm/src/browser/dirty-diff/dirty-diff-model.ts', () => {
 
       expect(dirtyDiffModel.original).toBeNull();
       expect(dirtyDiffModel.modified).toBeNull();
-      expect(delayerSpy).toBeCalledTimes(1);
+      expect(delayerSpy).toHaveBeenCalledTimes(1);
       expect(dirtyDiffModel['diffDelayer']).toBeNull();
       expect(dirtyDiffModel['repositoryDisposables'].size).toBe(0);
 
@@ -414,16 +396,16 @@ describe('scm/src/browser/dirty-diff/dirty-diff-model.ts', () => {
         const range = positionToRange(10);
         const spy = jest.spyOn(dirtyDiffWidget, 'dispose');
         dirtyDiffModel['_widget'] = null;
-        expect(spy).toBeCalledTimes(0);
+        expect(spy).toHaveBeenCalledTimes(0);
 
         dirtyDiffModel.onClickDecoration(dirtyDiffWidget, range);
         expect(dirtyDiffModel['_widget']).toEqual(dirtyDiffWidget);
-        expect(spy).toBeCalledTimes(0);
+        expect(spy).toHaveBeenCalledTimes(0);
 
         const newDirtyDiffWidget = injector.get(DirtyDiffWidget, [codeEditor, dirtyDiffModel, commandService]);
 
         dirtyDiffModel.onClickDecoration(newDirtyDiffWidget, range);
-        expect(spy).toBeCalledTimes(1);
+        expect(spy).toHaveBeenCalledTimes(1);
         expect(dirtyDiffModel['_widget']).toEqual(newDirtyDiffWidget);
 
         spy.mockReset();
@@ -433,30 +415,10 @@ describe('scm/src/browser/dirty-diff/dirty-diff-model.ts', () => {
       it('dirty editor in zone widget', async () => {
         const { dirtyDiffModel, dirtyDiffWidget } = await createDirtyDiffWidget('/test/workspace/abc11.ts');
         codeEditor.setModel(dirtyDiffModel.modified?.getMonacoModel() ?? null);
-        const change0 = {
-          originalStartLineNumber: 11,
-          originalEndLineNumber: 11,
-          modifiedStartLineNumber: 11,
-          modifiedEndLineNumber: 11,
-        };
-        const change1 = {
-          originalStartLineNumber: 12,
-          originalEndLineNumber: 12,
-          modifiedStartLineNumber: 12,
-          modifiedEndLineNumber: 12,
-        };
-        const change2 = {
-          originalStartLineNumber: 14,
-          originalEndLineNumber: 14,
-          modifiedStartLineNumber: 14,
-          modifiedEndLineNumber: 14,
-        };
-        const change3 = {
-          originalStartLineNumber: 15,
-          originalEndLineNumber: 15,
-          modifiedStartLineNumber: 15,
-          modifiedEndLineNumber: 15,
-        };
+        const change0: ILineChange = [11, 11, 11, 11, []];
+        const change1: ILineChange = [12, 12, 12, 12, []];
+        const change2: ILineChange = [14, 14, 14, 14, []];
+        const change3: ILineChange = [15, 15, 15, 15, []];
 
         dirtyDiffModel['_changes'].push(change1, change2, change3);
 
@@ -473,28 +435,32 @@ describe('scm/src/browser/dirty-diff/dirty-diff-model.ts', () => {
         await dirtyDiffModel.onClickDecoration(dirtyDiffWidget, range);
 
         // createDiffEditor
-        expect(createDiffEditorSpy).toBeCalledTimes(1);
+        expect(createDiffEditorSpy).toHaveBeenCalledTimes(1);
         expect((createDiffEditorSpy.mock.calls[0][0] as HTMLDivElement).tagName).toBe('DIV');
-        expect(createDiffEditorSpy.mock.calls[0][1]).toEqual({ automaticLayout: true, renderSideBySide: false });
+        expect(createDiffEditorSpy.mock.calls[0][1]).toEqual({
+          automaticLayout: true,
+          renderSideBySide: false,
+          hideUnchangedRegions: { enabled: false },
+        });
 
         // editor.compare
-        expect(mockCompare).toBeCalledTimes(1);
+        expect(mockCompare).toHaveBeenCalledTimes(1);
         expect(mockCompare.mock.calls[0][0].instance.uri.scheme).toBe('git');
         expect(mockCompare.mock.calls[0][1].instance.uri.scheme).toBe('file');
 
         // monacoEditor.updateOption
-        expect(updateOptionsSpy1).toBeCalledTimes(1);
-        expect(updateOptionsSpy2).toBeCalledTimes(1);
+        expect(updateOptionsSpy1).toHaveBeenCalledTimes(1);
+        expect(updateOptionsSpy2).toHaveBeenCalledTimes(1);
         expect(updateOptionsSpy1.mock.calls[0][0]).toEqual({ readOnly: true });
         expect(updateOptionsSpy2.mock.calls[0][0]).toEqual({ readOnly: true });
 
         // monacoEditor.revealLineInCenter
-        expect(revealLineInCenterSpy).toBeCalledTimes(1);
-        expect(revealLineInCenterSpy).toBeCalledWith(12 - 9);
+        expect(revealLineInCenterSpy).toHaveBeenCalledTimes(1);
+        expect(revealLineInCenterSpy).toHaveBeenCalledWith(7);
 
         expect(dirtyDiffWidget.currentIndex).toBe(1);
-        expect(dirtyDiffWidget.currentRange).toEqual(positionToRange(12));
-        expect(dirtyDiffWidget.currentHeightInLines).toBe(18);
+        expect(dirtyDiffWidget.currentRange).toEqual(positionToRange(11));
+        expect(dirtyDiffWidget.currentHeightInLines).toBe(10);
 
         // this.onDidChange
         dirtyDiffModel['_changes'].unshift(change0);
@@ -507,13 +473,13 @@ describe('scm/src/browser/dirty-diff/dirty-diff-model.ts', () => {
         ]);
 
         expect(dirtyDiffWidget.currentIndex).toBe(2);
-        expect(dirtyDiffWidget.currentRange).toEqual(positionToRange(12));
-        expect(dirtyDiffWidget.currentHeightInLines).toBe(18);
+        expect(dirtyDiffWidget.currentRange).toEqual(positionToRange(11));
+        expect(dirtyDiffWidget.currentHeightInLines).toBe(10);
 
         // originalEditor.monacoEditor.onDidChangeModelContent
         originalMonacoEditor['_onDidChangeModelContent'].fire();
-        expect(relayoutSpy).toBeCalledTimes(1);
-        expect(relayoutSpy).toBeCalledWith(18);
+        expect(relayoutSpy).toHaveBeenCalledTimes(1);
+        expect(relayoutSpy).toHaveBeenCalledWith(10);
 
         // widget.onDispose
         dirtyDiffWidget.dispose();

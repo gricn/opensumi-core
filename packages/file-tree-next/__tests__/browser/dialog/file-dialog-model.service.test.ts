@@ -1,5 +1,5 @@
 import { TreeNodeType } from '@opensumi/ide-components';
-import { URI, CorePreferences, Disposable } from '@opensumi/ide-core-browser';
+import { CorePreferences, Disposable, URI } from '@opensumi/ide-core-browser';
 import { LabelService } from '@opensumi/ide-core-browser/lib/services';
 
 import { createBrowserInjector } from '../../../../../tools/dev-tool/src/injector-helper';
@@ -33,6 +33,7 @@ describe('FileDialogModel should be work', () => {
     },
     path: 'testRoot',
     uri: rootUri,
+    ensureLoaded: jest.fn(),
   } as any;
   const newDirectoryByName = (name) => {
     const directory = {
@@ -83,8 +84,8 @@ describe('FileDialogModel should be work', () => {
     await fileTreeDialogModel.whenReady;
   });
 
-  afterEach(() => {
-    injector.disposeAll();
+  afterEach(async () => {
+    await injector.disposeAll();
     mockFileTreeDialogService.resolveChildren.mockReset();
     mockFileTreeDialogService.resolveRoot.mockReset();
     mockFileTreeDialogService.getDirectoryList.mockReset();
@@ -98,12 +99,12 @@ describe('FileDialogModel should be work', () => {
 
   it('updateTreeModel method should be work', async () => {
     await fileTreeDialogModel.updateTreeModel(rootUri.resolve('test').toString());
-    expect(mockFileTreeDialogService.resolveRoot).toBeCalledTimes(1);
+    expect(mockFileTreeDialogService.resolveRoot).toHaveBeenCalledTimes(1);
   });
 
   it('getDirectoryList method should be work', () => {
     fileTreeDialogModel.getDirectoryList();
-    expect(mockFileTreeDialogService.getDirectoryList).toBeCalledTimes(1);
+    expect(mockFileTreeDialogService.getDirectoryList).toHaveBeenCalledTimes(1);
   });
 
   it('activeFileDecoration method should be work', () => {
@@ -202,9 +203,9 @@ describe('FileDialogModel should be work', () => {
     let mockNode = { expanded: false };
     fileTreeDialogModel.handleTreeHandler(treeHandle);
     fileTreeDialogModel.toggleDirectory(mockNode as any);
-    expect(treeHandle.expandNode).toBeCalledTimes(1);
+    expect(treeHandle.expandNode).toHaveBeenCalledTimes(1);
     mockNode = { expanded: true };
     fileTreeDialogModel.toggleDirectory(mockNode as any);
-    expect(treeHandle.collapseNode).toBeCalledTimes(1);
+    expect(treeHandle.collapseNode).toHaveBeenCalledTimes(1);
   });
 });

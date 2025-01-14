@@ -1,19 +1,20 @@
 import {
-  Domain,
-  localize,
-  ToolbarRegistry,
-  ComponentRegistry,
   ComponentContribution,
+  ComponentRegistry,
+  Domain,
+  TERMINAL_COMMANDS,
   TabBarToolbarContribution,
+  ToolbarRegistry,
+  localize,
 } from '@opensumi/ide-core-browser';
+import { TERMINAL_CONTAINER_ID } from '@opensumi/ide-core-browser/lib/common/container-id';
 
-import { TERMINAL_COMMANDS, TerminalContainerId } from '../../common';
 import TerminalTabs from '../component/tab.view';
 import TerminalView from '../component/terminal.view';
 
 @Domain(ComponentContribution, TabBarToolbarContribution)
 export class TerminalRenderContribution implements ComponentContribution, TabBarToolbarContribution {
-  static viewId = TerminalContainerId;
+  static viewId = TERMINAL_CONTAINER_ID;
 
   registerToolbarItems(registry: ToolbarRegistry) {
     registry.registerItem({
@@ -26,7 +27,7 @@ export class TerminalRenderContribution implements ComponentContribution, TabBar
       id: TERMINAL_COMMANDS.CLEAR_CONTENT.id,
       command: TERMINAL_COMMANDS.CLEAR_CONTENT.id,
       viewId: TerminalRenderContribution.viewId,
-      tooltip: localize('terminal.menu.clearGroups'),
+      tooltip: localize('terminal.menu.clearCurrentContent'),
     });
     registry.registerItem({
       id: TERMINAL_COMMANDS.SPLIT.id,
@@ -47,7 +48,7 @@ export class TerminalRenderContribution implements ComponentContribution, TabBar
       '@opensumi/ide-terminal-next',
       {
         component: TerminalView,
-        id: 'ide-terminal-next',
+        id: TerminalRenderContribution.viewId,
       },
       {
         title: localize('terminal.name'),

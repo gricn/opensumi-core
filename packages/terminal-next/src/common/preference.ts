@@ -1,9 +1,11 @@
-import { Event } from '@opensumi/ide-core-common';
-import { localize, isElectronRenderer, isWindows } from '@opensumi/ide-core-common';
+import { Event, TerminalSettingsId, localize } from '@opensumi/ide-core-common';
 import { PreferenceSchema } from '@opensumi/ide-core-common/lib/preferences';
+
+import { RenderType } from './xterm';
+
 export interface IPreferenceValue {
   name: string;
-  value: string | number | boolean;
+  value: string | number | boolean | Array<string | number | boolean>;
 }
 
 export const ITerminalPreference = Symbol('ITerminalPreference');
@@ -22,6 +24,7 @@ export interface SupportedOptions {
   fontSize: number;
   copyOnSelection: boolean;
   fontFamily: string;
+  cursorStyle: 'block' | 'underline' | 'bar'; // line 会在后续Xterm的初始化中传入 'bar'
 }
 
 export const SupportedOptionsName = {
@@ -33,6 +36,7 @@ export const SupportedOptionsName = {
   cursorBlink: 'cursorBlink',
   scrollback: 'scrollback',
   copyOnSelection: 'copyOnSelection',
+  cursorStyle: 'cursorStyle',
 };
 
 export const enum CodeTerminalSettingPrefix {
@@ -119,6 +123,7 @@ export const enum CodeTerminalSettingId {
   LocalEchoEnabled = 'terminal.integrated.localEchoEnabled',
   LocalEchoExcludePrograms = 'terminal.integrated.localEchoExcludePrograms',
   LocalEchoStyle = 'terminal.integrated.localEchoStyle',
+  XtermRenderType = 'terminal.integrated.xtermRenderType',
   EnablePersistentSessions = 'terminal.integrated.enablePersistentSessions',
   PersistentSessionReviveProcess = 'terminal.integrated.persistentSessionReviveProcess',
   CustomGlyphs = 'terminal.integrated.customGlyphs',
@@ -128,6 +133,12 @@ export const enum CodeTerminalSettingId {
   IgnoreProcessNames = 'terminal.integrated.ignoreProcessNames',
   AutoReplies = 'terminal.integrated.autoReplies',
 }
+
+export const TerminalCursorStyle = {
+  BLOCK: 'block',
+  LINE: 'line', // Xterm 中的 "bar" Style，就是一条线也就是Line
+  UNDERLINE: 'underline',
+};
 
 const shellDeprecationMessageLinux = localize(
   'terminal.integrated.shell.linux.deprecation',
@@ -149,38 +160,35 @@ export const terminalPreferenceSchema: PreferenceSchema = {
   type: 'object',
   properties: {
     // 终端
-    'terminal.type': {
+    [TerminalSettingsId.Type]: {
       type: 'string',
-      enum:
-        isElectronRenderer() && isWindows
-          ? ['git-bash', 'powershell', 'cmd', 'default']
-          : ['zsh', 'bash', 'sh', 'default'],
+      enum: ['zsh', 'bash', 'sh', 'default'], // for unix
       default: 'default',
       description: '%preference.terminal.typeDesc%',
     },
-    'terminal.fontFamily': {
+    [TerminalSettingsId.FontFamily]: {
       type: 'string',
     },
-    'terminal.fontSize': {
+    [TerminalSettingsId.FontSize]: {
       type: 'number',
       default: 12,
     },
-    'terminal.fontWeight': {
+    [TerminalSettingsId.FontWeight]: {
       type: 'string',
       enum: ['normal', 'bold'],
       default: 400,
     },
-    'terminal.lineHeight': {
+    [TerminalSettingsId.LineHeight]: {
       type: 'number',
       default: 1,
     },
-    'terminal.cursorBlink': {
+    [TerminalSettingsId.CursorBlink]: {
       type: 'boolean',
       default: false,
     },
-    'terminal.scrollback': {
+    [TerminalSettingsId.Scrollback]: {
       type: 'number',
-      default: 5000,
+      default: 1000,
     },
     [CodeTerminalSettingId.ShellArgsLinux]: {
       type: 'array',
@@ -190,10 +198,7 @@ export const terminalPreferenceSchema: PreferenceSchema = {
     },
     [CodeTerminalSettingId.ShellArgsMacOs]: {
       type: 'array',
-      // Unlike on Linux, ~/.profile is not sourced when logging into a macOS session. This
-      // is the reason terminals on macOS typically run login shells by default which set up
-      // the environment. See http://unix.stackexchange.com/a/119675/115410
-      default: ['-l'],
+      default: [],
       markdownDeprecationMessage: shellDeprecationMessageOsx,
     },
     [CodeTerminalSettingId.ShellArgsWindows]: {
@@ -301,6 +306,44 @@ export const terminalPreferenceSchema: PreferenceSchema = {
       type: 'boolean',
       description: '%preference.terminal.integrated.copyOnSelectionDesc%',
       default: false,
+    },
+    [CodeTerminalSettingId.LocalEchoEnabled]: {
+      type: 'boolean',
+      description: '%preference.terminal.integrated.localEchoDesc%',
+      default: true,
+    },
+    [CodeTerminalSettingId.LocalEchoLatencyThreshold]: {
+      type: 'number',
+      description: '%preference.terminal.integrated.localEchoLatencyThresholdDesc%',
+      default: 30,
+    },
+    [CodeTerminalSettingId.LocalEchoExcludePrograms]: {
+      type: 'array',
+      description: '%preference.terminal.integrated.localEchoExcludeProgramsDesc%',
+      default: ['vim', 'vi', 'nano', 'tmux'],
+    },
+    [CodeTerminalSettingId.LocalEchoStyle]: {
+      type: 'string',
+      description: '%preference.terminal.integrated.localEchoStyleDesc%',
+      enum: ['bold', 'dim', 'italic', 'underlined', 'inverted'],
+      default: 'dim',
+    },
+    [CodeTerminalSettingId.CursorStyle]: {
+      type: 'string',
+      description: '%preference.terminal.integrated.cursorStyleDesc%',
+      enum: [TerminalCursorStyle.BLOCK, TerminalCursorStyle.LINE, TerminalCursorStyle.UNDERLINE],
+      default: TerminalCursorStyle.BLOCK,
+    },
+    [CodeTerminalSettingId.XtermRenderType]: {
+      type: 'string',
+      description: '%preference.terminal.integrated.xtermRenderTypeDesc%',
+      enum: [RenderType.WebGL, RenderType.Canvas, RenderType.Dom],
+      default: RenderType.WebGL,
+    },
+    [CodeTerminalSettingId.EnablePersistentSessions]: {
+      type: 'boolean',
+      description: '%preference.terminal.integrated.enablePersistentSessionDesc%',
+      default: true,
     },
   },
 };

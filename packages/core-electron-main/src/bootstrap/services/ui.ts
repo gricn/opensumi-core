@@ -2,19 +2,18 @@ import { spawn } from 'child_process';
 import { dirname } from 'path';
 import qs from 'querystring';
 
-import { BrowserWindow, dialog, shell, webContents } from 'electron';
+import { BrowserWindow, clipboard, dialog, shell, webContents } from 'electron';
 import { stat } from 'fs-extra';
-import semver from 'semver';
 
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
-import { Domain, isWindows, IEventBus, URI } from '@opensumi/ide-core-common';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
+import { Domain, IEventBus, URI, isWindows } from '@opensumi/ide-core-common';
 import {
   IElectronMainUIService,
   IElectronMainUIServiceShape,
   IElectronPlainWebviewWindowOptions,
 } from '@opensumi/ide-core-common/lib/electron';
 
-import { ElectronMainApiProvider, ElectronMainContribution, ElectronMainApiRegistry } from '../types';
+import { ElectronMainApiProvider, ElectronMainApiRegistry, ElectronMainContribution } from '../types';
 
 import { WindowCreatedEvent } from './events';
 
@@ -82,13 +81,7 @@ export class ElectronMainUIService
   }
 
   async moveToTrash(path: string) {
-    if (semver.lt(process.versions.electron, '13.0.0')) {
-      // Removed: shell.moveItemToTrash()
-      // https://www.electronjs.org/docs/latest/breaking-changes#removed-shellmoveitemtotrash
-      await (shell as any).moveItemToTrash(path);
-    } else {
-      await shell.trashItem(path);
-    }
+    await shell.trashItem(path);
   }
 
   async revealInFinder(path: string) {
@@ -104,19 +97,40 @@ export class ElectronMainUIService
     openInTerminal(targetPath);
   }
 
-  getZoomFactor(webContentsId: number): number | undefined {
+  async getZoomFactor(webContentsId: number): Promise<number | undefined> {
     const contents = webContents.fromId(webContentsId);
     return contents?.getZoomFactor();
   }
 
-  setZoomFactor(webContentsId: number, options: { value?: number; delta?: number } = {}) {
+  async setZoomFactor(
+    webContentsId: number,
+    options: { value?: number; delta?: number; minValue?: number; maxValue?: number } = {},
+  ) {
+    if (options.minValue === undefined) {
+      options.minValue = 0.25;
+    }
+    if (options.maxValue === undefined) {
+      options.maxValue = 5;
+    }
+
     const contents = webContents.fromId(webContentsId);
     if (contents) {
+      let factor: number | undefined;
       if (options.value) {
+        factor = options.value;
         contents.setZoomFactor(options.value);
       }
       if (options.delta) {
-        contents.setZoomFactor(contents.getZoomFactor() + options.delta);
+        factor = contents.getZoomFactor() + options.delta;
+      }
+      if (factor) {
+        if (options.minValue && factor < options.minValue) {
+          factor = options.minValue;
+        }
+        if (options.maxValue && factor > options.maxValue) {
+          factor = options.maxValue;
+        }
+        contents.setZoomFactor(factor);
       }
     }
   }
@@ -124,23 +138,17 @@ export class ElectronMainUIService
   async showOpenDialog(windowId: number, options: Electron.OpenDialogOptions): Promise<string[] | undefined> {
     return new Promise((resolve, reject) => {
       try {
-        if (semver.lt(process.versions.electron, '6.0.0')) {
-          (dialog as any).showOpenDialog(BrowserWindow.fromId(windowId), options, (paths) => {
-            resolve(paths);
-          });
-        } else {
-          const win = BrowserWindow.fromId(windowId);
-          if (!win) {
-            return reject(new Error(`BrowserWindow ${windowId} not found`));
-          }
-          dialog.showOpenDialog(win, options).then((value) => {
-            if (value.canceled) {
-              resolve(undefined);
-            } else {
-              resolve(value.filePaths);
-            }
-          }, reject);
+        const win = BrowserWindow.fromId(windowId);
+        if (!win) {
+          return reject(new Error(`BrowserWindow ${windowId} not found`));
         }
+        dialog.showOpenDialog(win, options).then((value) => {
+          if (value.canceled) {
+            resolve(undefined);
+          } else {
+            resolve(value.filePaths);
+          }
+        }, reject);
       } catch (e) {
         reject(e);
       }
@@ -149,23 +157,17 @@ export class ElectronMainUIService
   async showSaveDialog(windowId: number, options: Electron.SaveDialogOptions): Promise<string | undefined> {
     return new Promise((resolve, reject) => {
       try {
-        if (semver.lt(process.versions.electron, '6.0.0')) {
-          (dialog as any).showSaveDialog(BrowserWindow.fromId(windowId), options, (path) => {
-            resolve(path);
-          });
-        } else {
-          const win = BrowserWindow.fromId(windowId);
-          if (!win) {
-            return reject(new Error(`BrowserWindow ${windowId} not found`));
-          }
-          dialog.showSaveDialog(win, options).then((value) => {
-            if (value.canceled) {
-              resolve(undefined);
-            } else {
-              resolve(value.filePath);
-            }
-          }, reject);
+        const win = BrowserWindow.fromId(windowId);
+        if (!win) {
+          return reject(new Error(`BrowserWindow ${windowId} not found`));
         }
+        dialog.showSaveDialog(win, options).then((value) => {
+          if (value.canceled) {
+            resolve(undefined);
+          } else {
+            resolve(value.filePath);
+          }
+        }, reject);
       } catch (e) {
         reject(e);
       }
@@ -268,6 +270,29 @@ export class ElectronMainUIService
       throw new Error('window with windowId ' + windowId + ' does not exist!');
     }
     window.setAlwaysOnTop(flag);
+  }
+
+  async readClipboardText(): Promise<string> {
+    return clipboard.readText();
+  }
+
+  async writeClipboardText(text: string): Promise<void> {
+    return clipboard.writeText(text);
+  }
+
+  async writeClipboardBuffer(field: string, buffer: Uint8Array): Promise<void> {
+    return clipboard.writeBuffer(field, Buffer.from(buffer));
+  }
+
+  async readClipboardBuffer(field: string): Promise<Uint8Array> {
+    return clipboard.readBuffer(field);
+  }
+
+  setDocumentEdited(windowId: number, edited: boolean) {
+    const window = BrowserWindow.fromId(windowId);
+    if (window) {
+      window.setDocumentEdited(edited);
+    }
   }
 }
 

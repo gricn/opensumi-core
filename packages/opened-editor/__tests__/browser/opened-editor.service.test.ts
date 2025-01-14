@@ -2,16 +2,13 @@ import cls from 'classnames';
 
 import { TreeNodeType } from '@opensumi/ide-components';
 import { EDITOR_COMMANDS } from '@opensumi/ide-core-browser';
-import { URI, IEventBus, Emitter } from '@opensumi/ide-core-common';
+import { Emitter, IEventBus, URI } from '@opensumi/ide-core-browser';
 import { IDecorationsService } from '@opensumi/ide-decoration';
 import { FileDecorationsService } from '@opensumi/ide-decoration/lib/browser/decorationsService';
-import { WorkbenchEditorService, ResourceDecorationChangeEvent, IResource } from '@opensumi/ide-editor';
+import { IResource, ResourceDecorationChangeEvent, WorkbenchEditorService } from '@opensumi/ide-editor';
 import { IEditorDocumentModelService, ResourceService } from '@opensumi/ide-editor/lib/browser';
 import { MockWorkbenchEditorService } from '@opensumi/ide-editor/lib/common/mocks/workbench-editor.service';
 import { IMainLayoutService } from '@opensumi/ide-main-layout';
-import { EditorFile, OpenedEditorData } from '@opensumi/ide-opened-editor/lib/browser/opened-editor-node.define';
-import { OpenedEditorModelService } from '@opensumi/ide-opened-editor/lib/browser/services/opened-editor-model.service';
-import { OpenedEditorService } from '@opensumi/ide-opened-editor/lib/browser/services/opened-editor-tree.service';
 import { IThemeService } from '@opensumi/ide-theme';
 import { MockThemeService } from '@opensumi/ide-theme/lib/common/mocks/theme.service';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
@@ -20,7 +17,12 @@ import { MockWorkspaceService } from '@opensumi/ide-workspace/lib/common/mocks';
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
 import { OpenedEditorModule } from '../../src/browser';
+import { EditorFile, OpenedEditorData } from '../../src/browser/opened-editor-node.define';
+import { OpenedEditorModelService } from '../../src/browser/services/opened-editor-model.service';
+import { OpenedEditorService } from '../../src/browser/services/opened-editor-tree.service';
 import styles from '../src/browser/opened-editor-node.module.less';
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('OpenedEditorModelService should be work', () => {
   let openedEditorModelService: OpenedEditorModelService;
@@ -29,9 +31,15 @@ describe('OpenedEditorModelService should be work', () => {
   const testFileUri = URI.file('/userhome/test.js');
 
   const fakeSetBadge = jest.fn();
+  const fakeUpdateViewBadge = jest.fn();
+
   const fakeGetTabbarHandler = jest.fn();
+  const fakeGetAccordionService = jest.fn();
   fakeGetTabbarHandler.mockReturnValue({
     setBadge: fakeSetBadge,
+  });
+  fakeGetAccordionService.mockReturnValue({
+    updateViewBadge: fakeUpdateViewBadge,
   });
 
   const MockResourceService = {
@@ -66,6 +74,7 @@ describe('OpenedEditorModelService should be work', () => {
         token: IMainLayoutService,
         useValue: {
           getTabbarHandler: fakeGetTabbarHandler,
+          getAccordionService: fakeGetAccordionService,
         },
       },
       {
@@ -147,7 +156,7 @@ describe('OpenedEditorModelService should be work', () => {
     openedEditorModelService = injector.get(OpenedEditorModelService);
     openedEditorService = injector.get(OpenedEditorService);
     await openedEditorModelService.whenReady;
-    await openedEditorModelService.treeModel.root.ensureLoaded();
+    await openedEditorModelService.treeModel?.ensureReady;
   });
 
   afterEach(() => {
@@ -183,7 +192,7 @@ describe('OpenedEditorModelService should be work', () => {
 
   describe('02 #API should be worked.', () => {
     it('The tree data should no be empty', async () => {
-      expect(openedEditorModelService.treeModel.root.branchSize > 0).toBeTruthy();
+      expect(openedEditorModelService.treeModel?.root.branchSize! > 0).toBeTruthy();
     });
 
     it('File should be dirty while file change', async () => {
@@ -193,13 +202,13 @@ describe('OpenedEditorModelService should be work', () => {
           uri: testFileUri,
           decoration: {
             dirty: true,
+            readOnly: false,
           },
         }),
       );
+      await sleep(1000);
       const node = openedEditorService.getEditorNodeByUri(testFileUri);
-      expect(openedEditorModelService.decorations.getDecorations(node as any)?.classlist.join(' ')).toBe(
-        styles.mod_dirty,
-      );
+      expect((node as EditorFile).dirty).toBeTruthy();
     });
 
     it('Select file should be work', async () => {
@@ -207,7 +216,7 @@ describe('OpenedEditorModelService should be work', () => {
       const node = openedEditorService.getEditorNodeByUri(testFileUri);
       injector.mockCommand(EDITOR_COMMANDS.OPEN_RESOURCE.id, openFile);
       openedEditorModelService.handleItemClick(node as EditorFile, TreeNodeType.TreeNode);
-      expect(openFile).toBeCalledTimes(1);
+      expect(openFile).toHaveBeenCalledTimes(1);
       expect(openedEditorModelService.decorations.getDecorations(node as any)?.classlist.join(' ')).toBe(
         cls(styles.mod_selected, styles.mod_focused),
       );
@@ -218,7 +227,7 @@ describe('OpenedEditorModelService should be work', () => {
       const node = openedEditorService.getEditorNodeByUri(testFileUri);
       injector.mockCommand(EDITOR_COMMANDS.CLOSE.id, closeFile);
       openedEditorModelService.closeFile(node as EditorFile);
-      expect(closeFile).toBeCalledTimes(1);
+      expect(closeFile).toHaveBeenCalledTimes(1);
     });
   });
 });

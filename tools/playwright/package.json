@@ -1,0 +1,37 @@
+{
+  "name": "@opensumi/playwright",
+  "version": "3.7.0",
+  "description": "E2E test module for OpenSumi",
+  "files": [
+    "lib",
+    "src"
+  ],
+  "license": "MIT",
+  "main": "lib/index.js",
+  "typings": "lib/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:opensumi/core.git"
+  },
+  "scripts": {
+    "prepublishOnly": "yarn run build",
+    "build": "tsc --build ../../configs/ts/references/tsconfig.playwright.json && yarn playwright install chromium",
+    "ui-tests": "yarn run build && playwright test --config=./configs/playwright.config.ts",
+    "ui-tests-ci": "yarn run build && playwright test --config=./configs/playwright.ci.config.ts",
+    "ui-tests-headful": "yarn run build && playwright test --config=./configs/playwright.headful.config.ts",
+    "ui-tests-report-generate": "allure generate ./allure-results --clean -o allure-results/allure-report",
+    "ui-tests-report": "yarn run build ui-tests-report-generate && allure open allure-results/allure-report"
+  },
+  "dependencies": {
+    "@playwright/test": "1.43.0"
+  },
+  "devDependencies": {
+    "@opensumi/ide-utils": "workspace:*",
+    "allure-commandline": "^2.25.0",
+    "allure-playwright": "^2.10.0",
+    "typescript": "^5.6.3"
+  }
+}

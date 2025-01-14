@@ -1,16 +1,10 @@
-import { Autowired, Injectable, Injector, INJECTOR_TOKEN } from '@opensumi/di';
-import {
-  AppConfig,
-  Disposable,
-  getPreferenceLanguageId,
-  StorageProvider,
-  STORAGE_NAMESPACE,
-} from '@opensumi/ide-core-browser';
-import { ExtensionCandidate as ExtensionCandidate } from '@opensumi/ide-core-common';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
+import { AppConfig, Disposable, STORAGE_NAMESPACE, StorageProvider } from '@opensumi/ide-core-browser';
+import { Emitter, ExtensionCandidate as ExtensionCandidate, IStorage, getLanguageId } from '@opensumi/ide-core-common';
 
 import {
-  ExtensionNodeServiceServerPath,
   EXTENSION_ENABLE,
+  ExtensionNodeServiceServerPath,
   IExtensionMetaData,
   IExtensionNodeClientService,
 } from '../common';
@@ -36,6 +30,30 @@ export class ExtInstanceManagementService extends Disposable implements Abstract
 
   @Autowired(ExtensionNodeServiceServerPath)
   private readonly extensionNodeClient: IExtensionNodeClientService;
+
+  private onDidChangeEmitter: Emitter<void> = new Emitter();
+  private workspaceStorage: IStorage;
+  private globalStorage: IStorage;
+
+  private _whenReady: Promise<void>;
+
+  constructor() {
+    super();
+    this._whenReady = this.init();
+  }
+
+  async init() {
+    this.workspaceStorage = await this.storageProvider(STORAGE_NAMESPACE.EXTENSIONS);
+    this.globalStorage = await this.storageProvider(STORAGE_NAMESPACE.GLOBAL_EXTENSIONS);
+  }
+
+  get whenReady() {
+    return this._whenReady;
+  }
+
+  get onDidChange() {
+    return this.onDidChangeEmitter.event;
+  }
 
   private extensionMap = new Map<string, Extension>();
 
@@ -83,25 +101,24 @@ export class ExtInstanceManagementService extends Disposable implements Abstract
 
   public deleteExtensionInstanceByPath(extensionPath: string) {
     this.extensionMap.delete(extensionPath);
+    this.onDidChangeEmitter.fire();
   }
 
   public addExtensionInstance(extension: Extension) {
     // extension.path 就是 extensionPath
     this.extensionMap.set(extension.path, extension);
+    this.onDidChangeEmitter.fire();
   }
 
   /**
    * 检查插件是否激活
    */
   public async checkExtensionEnable(extension: IExtensionMetaData): Promise<boolean> {
-    const [workspaceStorage, globalStorage] = await Promise.all([
-      this.storageProvider(STORAGE_NAMESPACE.EXTENSIONS),
-      this.storageProvider(STORAGE_NAMESPACE.GLOBAL_EXTENSIONS),
-    ]);
+    await this.whenReady;
     // 全局默认为启用
-    const globalEnableFlag = globalStorage.get<number>(extension.extensionId, EXTENSION_ENABLE.ENABLE);
+    const globalEnableFlag = this.globalStorage.get<number>(extension.extensionId, EXTENSION_ENABLE.ENABLE);
     // 如果 workspace 未设置则读取全局配置
-    return workspaceStorage.get<number>(extension.extensionId, globalEnableFlag) === EXTENSION_ENABLE.ENABLE;
+    return this.workspaceStorage.get<number>(extension.extensionId, globalEnableFlag) === EXTENSION_ENABLE.ENABLE;
   }
 
   public async createExtensionInstance(
@@ -111,13 +128,12 @@ export class ExtInstanceManagementService extends Disposable implements Abstract
   ): Promise<Extension | undefined> {
     const extensionMetadata: IExtensionMetaData | undefined =
       typeof extensionPathOrMetaData === 'string'
-        ? await this.extensionNodeClient.getExtension(extensionPathOrMetaData, getPreferenceLanguageId(), {})
+        ? await this.extensionNodeClient.getExtension(extensionPathOrMetaData, getLanguageId(), {})
         : extensionPathOrMetaData;
 
     if (!extensionMetadata) {
       return;
     }
-
     return this.injector.get(Extension, [
       extensionMetadata,
       await this.checkExtensionEnable(extensionMetadata),

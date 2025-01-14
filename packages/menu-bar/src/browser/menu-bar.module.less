@@ -1,4 +1,4 @@
-@import '~@opensumi/ide-core-browser/lib/style/variable.less';
+@import '@opensumi/ide-core-browser/lib/style/variable.less';
 
 .menubarWrapper {
   display: flex;
@@ -15,7 +15,6 @@
 .menubars {
   display: flex;
   align-items: center;
-  height: var(--tabBar-height);
   font-size: 14px;
   flex-grow: 1;
   flex-shrink: 0;
@@ -28,6 +27,7 @@
   align-items: center;
   padding: 0 12px;
   color: var(--kt-menubar-foreground);
+  user-select: none;
 
   // 目前尚未开启使用 kt.menubar.separatorBackground
 
@@ -44,5 +44,22 @@
     position: absolute;
     left: 0;
     top: 100%;
+  }
+}
+
+.icon_menubar_container {
+  display: flex;
+  align-items: center;
+
+  .menubar_action {
+    margin-right: 1px;
+
+    > span[class*='-icon'] {
+      font-size: 1.5em;
+    }
+
+    span + span {
+      margin-left: 12px;
+    }
   }
 }

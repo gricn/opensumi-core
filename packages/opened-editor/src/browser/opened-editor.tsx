@@ -1,8 +1,14 @@
-import React from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
-import { RecycleTree, IRecycleTreeHandle, INodeRendererWrapProps, TreeNodeType } from '@opensumi/ide-components';
-import { ViewState } from '@opensumi/ide-core-browser';
-import { localize } from '@opensumi/ide-core-browser';
+import {
+  INodeRendererWrapProps,
+  IRecycleTreeHandle,
+  RecycleTree,
+  TreeModel,
+  TreeNodeType,
+} from '@opensumi/ide-components';
+import { CancellationToken, CancellationTokenSource, ViewState, localize } from '@opensumi/ide-core-browser';
+import { Progress } from '@opensumi/ide-core-browser/lib/progress/progress-bar';
 import { useInjectable } from '@opensumi/ide-core-browser/lib/react-hooks';
 
 import styles from './index.module.less';
@@ -12,11 +18,13 @@ import { OpenedEditorModelService } from './services/opened-editor-model.service
 
 export const ExplorerOpenEditorPanel = ({ viewState }: React.PropsWithChildren<{ viewState: ViewState }>) => {
   const OPEN_EDITOR_NODE_HEIGHT = 22;
-  const [isReady, setIsReady] = React.useState<boolean>(false);
+  const [isReady, setIsReady] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [model, setModel] = useState<TreeModel | null>();
 
   const { width, height } = viewState;
 
-  const wrapperRef: React.RefObject<HTMLDivElement> = React.createRef();
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
 
   const openedEditorModelService = useInjectable<OpenedEditorModelService>(OpenedEditorModelService);
   const { decorationService, labelService, commandService } = openedEditorModelService;
@@ -24,54 +32,88 @@ export const ExplorerOpenEditorPanel = ({ viewState }: React.PropsWithChildren<{
   const handleTreeReady = (handle: IRecycleTreeHandle) => {
     openedEditorModelService.handleTreeHandler({
       ...handle,
-      getModel: () => openedEditorModelService.treeModel,
       hasDirectFocus: () => wrapperRef.current === document.activeElement,
     });
   };
 
-  const handleItemClicked = (ev: React.MouseEvent, item: EditorFile | EditorFileGroup, type: TreeNodeType) => {
-    // 阻止点击事件冒泡
-    ev.stopPropagation();
+  const handleItemClicked = useCallback(
+    (ev: React.MouseEvent, item: EditorFile | EditorFileGroup, type: TreeNodeType) => {
+      // 阻止点击事件冒泡
+      ev.stopPropagation();
 
-    const { handleItemClick } = openedEditorModelService;
-    if (!item) {
-      return;
-    }
-    handleItemClick(item, type);
-  };
+      const { handleItemClick } = openedEditorModelService;
+      if (!item) {
+        return;
+      }
+      handleItemClick(item, type);
+    },
+    [openedEditorModelService],
+  );
 
-  const handlerContextMenu = (ev: React.MouseEvent, node: EditorFile | EditorFileGroup) => {
+  const handlerContextMenu = useCallback((ev: React.MouseEvent, node: EditorFile | EditorFileGroup) => {
     const { handleContextMenu } = openedEditorModelService;
     handleContextMenu(ev, node);
-  };
+  }, []);
 
-  const handleOuterContextMenu = (ev: React.MouseEvent) => {
-    const { handleContextMenu } = openedEditorModelService;
-    // 空白区域右键菜单
-    handleContextMenu(ev);
-  };
+  const handleOuterContextMenu = useCallback(
+    (ev: React.MouseEvent) => {
+      const { handleContextMenu } = openedEditorModelService;
+      // 空白区域右键菜单
+      handleContextMenu(ev);
+    },
+    [openedEditorModelService],
+  );
 
-  const handleOuterClick = (ev: React.MouseEvent) => {
+  const handleOuterClick = useCallback(() => {
     // 空白区域点击，取消焦点状态
     const { enactiveFileDecoration } = openedEditorModelService;
     enactiveFileDecoration();
-  };
-
-  const ensureIsReady = async () => {
-    await openedEditorModelService.whenReady;
-    if (openedEditorModelService.treeModel) {
-      // 确保数据初始化完毕，减少初始化数据过程中多次刷新视图
-      // 这里需要重新取一下treeModel的值确保为最新的TreeModel
-      await openedEditorModelService.treeModel.root.ensureLoaded();
-    }
-    setIsReady(true);
-  };
-
-  React.useEffect(() => {
-    ensureIsReady();
   }, []);
 
-  React.useEffect(() => {
+  const ensureIsReady = useCallback(
+    async (token: CancellationToken) => {
+      await openedEditorModelService.whenReady;
+      if (token.isCancellationRequested) {
+        return;
+      }
+      if (openedEditorModelService.treeModel) {
+        setModel(openedEditorModelService.treeModel);
+        // 确保数据初始化完毕，减少初始化数据过程中多次刷新视图
+        // 这里需要重新取一下treeModel的值确保为最新的TreeModel
+        await openedEditorModelService.treeModel.ensureReady;
+        if (token.isCancellationRequested) {
+          return;
+        }
+      }
+      setIsLoading(false);
+      setIsReady(true);
+    },
+    [isLoading, isReady, openedEditorModelService],
+  );
+
+  useEffect(() => {
+    if (isReady) {
+      openedEditorModelService.onTreeModelChange(async (treeModel) => {
+        setIsLoading(true);
+        if (treeModel) {
+          // 确保数据初始化完毕，减少初始化数据过程中多次刷新视图
+          await treeModel.ensureReady;
+        }
+        setModel(treeModel);
+        setIsLoading(false);
+      });
+    }
+  }, [isReady]);
+
+  useEffect(() => {
+    const tokenSource = new CancellationTokenSource();
+    ensureIsReady(tokenSource.token);
+    return () => {
+      tokenSource.cancel();
+    };
+  }, []);
+
+  useEffect(() => {
     const handleBlur = () => {
       openedEditorModelService.handleTreeBlur();
     };
@@ -82,7 +124,7 @@ export const ExplorerOpenEditorPanel = ({ viewState }: React.PropsWithChildren<{
     };
   }, [wrapperRef.current]);
 
-  const renderTreeNode = React.useCallback(
+  const renderTreeNode = useCallback(
     (props: INodeRendererWrapProps) => (
       <EditorTreeNode
         item={props.item}
@@ -104,20 +146,26 @@ export const ExplorerOpenEditorPanel = ({ viewState }: React.PropsWithChildren<{
     if (!isReady) {
       return <span className={styles.opened_editor_empty_text}>{localize('opened.editors.empty')}</span>;
     } else {
-      return (
-        <RecycleTree
-          height={height}
-          width={width}
-          itemHeight={OPEN_EDITOR_NODE_HEIGHT}
-          onReady={handleTreeReady}
-          model={openedEditorModelService.treeModel}
-          placeholder={() => (
-            <span className={styles.opened_editor_empty_text}>{localize('opened.editors.empty')}</span>
-          )}
-        >
-          {renderTreeNode}
-        </RecycleTree>
-      );
+      if (isLoading) {
+        return <Progress loading />;
+      } else if (model) {
+        return (
+          <RecycleTree
+            height={height}
+            width={width}
+            itemHeight={OPEN_EDITOR_NODE_HEIGHT}
+            onReady={handleTreeReady}
+            model={model}
+            placeholder={() => (
+              <span className={styles.opened_editor_empty_text}>{localize('opened.editors.empty')}</span>
+            )}
+          >
+            {renderTreeNode}
+          </RecycleTree>
+        );
+      } else {
+        return <span className={styles.opened_editor_empty_text}>{localize('opened.editors.empty')}</span>;
+      }
     }
   };
 

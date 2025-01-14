@@ -1,20 +1,18 @@
-import { quickFileOpen } from '@opensumi/ide-addons/lib/browser/file-search.contribution';
-import { EDITOR_COMMANDS } from '@opensumi/ide-core-browser';
+import { EDITOR_COMMANDS, QUICK_OPEN_COMMANDS } from '@opensumi/ide-core-browser';
 import { CorePreferences } from '@opensumi/ide-core-browser/lib/core-preferences';
 import {
-  QuickOpenService,
+  QuickOpenItem,
   QuickOpenModel,
   QuickOpenOptions,
-  QuickOpenItem,
+  QuickOpenService,
 } from '@opensumi/ide-core-browser/lib/quick-open';
-import { ILogger, localize, Deferred } from '@opensumi/ide-core-common';
+import { Deferred, ILogger, localize } from '@opensumi/ide-core-common';
 import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
 import { MockInjector, mockService } from '@opensumi/ide-dev-tool/src/mock-injector';
 import { IIconService, IThemeService } from '@opensumi/ide-theme';
 
-import { QuickOpenHandlerRegistry, PrefixQuickOpenServiceImpl } from '../../src/browser/prefix-quick-open.service';
+import { PrefixQuickOpenServiceImpl, QuickOpenHandlerRegistry } from '../../src/browser/prefix-quick-open.service';
 import { QuickTitleBar } from '../../src/browser/quick-title-bar';
-import { QUICK_OPEN_COMMANDS } from '../../src/common';
 
 describe('prefix quick open service test', () => {
   let injector: MockInjector;
@@ -49,7 +47,7 @@ describe('prefix quick open service test', () => {
     handler = injector.get(QuickOpenHandlerRegistry);
     handler.registerHandler(fileSearchQuickCommandHandler, {
       title: localize('quickopen.tab.file'),
-      commandId: quickFileOpen.id,
+      commandId: 'workbench.action.quickOpen',
       order: 1,
     });
     handler.registerHandler(workspaceSymbolQuickOpenHandler, {
@@ -72,8 +70,8 @@ describe('prefix quick open service test', () => {
     handler.registerHandler(helpQuickOpenHandler);
   });
 
-  afterEach(() => {
-    injector.disposeAll();
+  afterEach(async () => {
+    await injector.disposeAll();
   });
 
   it('QuickOpenHandlerRegistry', () => {
@@ -92,10 +90,6 @@ describe('prefix quick open service test', () => {
     let quickOpenOptions: QuickOpenOptions;
     let d: Deferred<void>;
     injector.addProviders(
-      {
-        token: QuickTitleBar,
-        useValue: mockService({}),
-      },
       {
         token: IThemeService,
         useValue: mockService({}),

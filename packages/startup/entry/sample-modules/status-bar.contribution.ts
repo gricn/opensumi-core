@@ -1,10 +1,11 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
   ClientAppContribution,
   Domain,
   IStatusBarService,
   StatusBarAlignment,
   StatusBarEntryAccessor,
+  getIcon,
 } from '@opensumi/ide-core-browser';
 import {
   BrowserConnectionCloseEvent,
@@ -12,7 +13,7 @@ import {
   OnEvent,
   WithEventBus,
 } from '@opensumi/ide-core-common';
-import { IconType, IIconService } from '@opensumi/ide-theme';
+import { IIconService } from '@opensumi/ide-theme';
 import { IconService } from '@opensumi/ide-theme/lib/browser';
 
 @Injectable()
@@ -53,11 +54,7 @@ export class StatusBarContribution extends WithEventBus implements ClientAppCont
         color: '#FFFFFF',
         tooltip: 'OpenSumi',
         alignment: StatusBarAlignment.LEFT,
-        iconClass: this.iconService.fromIcon(
-          '',
-          'https://img.alicdn.com/imgextra/i1/O1CN01I0fKZ51PTgHByjznG_!!6000000001842-2-tps-40-40.png',
-          IconType.Mask,
-        ),
+        iconClass: getIcon('code'),
         priority: Infinity,
       });
     }

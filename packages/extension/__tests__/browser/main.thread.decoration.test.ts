@@ -1,41 +1,26 @@
-import type vscode from 'vscode';
-
-import { Injector } from '@opensumi/di';
-import { RPCProtocol } from '@opensumi/ide-connection/lib/common/rpcProtocol';
-import { Event, Uri, Emitter, DisposableCollection, CancellationToken } from '@opensumi/ide-core-common';
+import { CancellationToken, DisposableCollection, Emitter, Event, Uri } from '@opensumi/ide-core-common';
 import { IDecorationsService } from '@opensumi/ide-decoration';
 import { FileDecorationsService } from '@opensumi/ide-decoration/lib/browser/decorationsService';
 import { MainThreadDecorations } from '@opensumi/ide-extension/lib/browser/vscode/api/main.thread.decoration';
 import {
+  ExtHostAPIIdentifier,
   IMainThreadEnv,
   MainThreadAPIIdentifier,
-  ExtHostAPIIdentifier,
 } from '@opensumi/ide-extension/lib/common/vscode';
 import { createWindowApiFactory } from '@opensumi/ide-extension/lib/hosted/api/vscode/ext.host.window.api.impl';
 
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { mockExtensions } from '../../__mocks__/extensions';
+import { createMockPairRPCProtocol } from '../../__mocks__/initRPCProtocol';
 import { ExtHostDecorations } from '../../src/hosted/api/vscode/ext.host.decoration';
 import ExtensionHostextWindowAPIImpl from '../../src/hosted/ext.host';
 
-const emitterA = new Emitter<any>();
-const emitterB = new Emitter<any>();
+import type vscode from 'vscode';
 
-const mockClientA = {
-  send: (msg) => emitterB.fire(msg),
-  onMessage: emitterA.event,
-};
+const { rpcProtocolExt, rpcProtocolMain } = createMockPairRPCProtocol();
 
-const mockClientB = {
-  send: (msg) => emitterA.fire(msg),
-  onMessage: emitterB.event,
-};
-
-const rpcProtocolExt = new RPCProtocol(mockClientA);
-const rpcProtocolMain = new RPCProtocol(mockClientB);
-
-describe('MainThreadDecorationAPI Test Suites ', () => {
-  const injector = createBrowserInjector([], new Injector([]));
+describe('MainThreadDecorationAPI Test Suites', () => {
+  const injector = createBrowserInjector([]);
   let extWindowAPI: ReturnType<typeof createWindowApiFactory>;
   let extHostDecorations: ExtHostDecorations;
   let decorationsService: IDecorationsService;
@@ -95,27 +80,24 @@ describe('MainThreadDecorationAPI Test Suites ', () => {
   });
 
   it('ok for API', (done) => {
-    expect(typeof extWindowAPI.registerDecorationProvider).toBe('function');
+    expect(typeof extWindowAPI.registerFileDecorationProvider).toBe('function');
     done();
   });
 
   it('ok for registerDecorationProvider', async () => {
-    const extDecoProvider = new (class implements vscode.DecorationProvider {
+    const extDecoProvider = new (class implements vscode.FileDecorationProvider {
       onDidChangeDecorationsEmitter = new Emitter<Uri[]>();
       onDidChangeDecorations = this.onDidChangeDecorationsEmitter.event;
-      provideDecoration(uri: Uri, token: CancellationToken) {
+      provideFileDecoration(uri: Uri, token: CancellationToken) {
         return {
-          letter: 'S',
-          title: 'ZZ',
+          badage: 'S',
+          tooltip: 'ZZ',
           color: { id: 'green' },
-          priority: 1,
-          bubble: true,
-          source: 'sync',
         };
       }
     })();
 
-    const disposable = extWindowAPI.registerDecorationProvider(extDecoProvider);
+    const disposable = extWindowAPI.registerFileDecorationProvider(extDecoProvider);
     toTearDown.push(disposable);
 
     const uri = Uri.file('workspace/test/a.ts');
@@ -130,40 +112,36 @@ describe('MainThreadDecorationAPI Test Suites ', () => {
   });
 
   it('multi decorations', async () => {
-    const extDecoProvider1 = new (class implements vscode.DecorationProvider {
+    const extDecoProvider1 = new (class implements vscode.FileDecorationProvider {
       onDidChangeDecorations = Event.None;
-      provideDecoration(uri: Uri, token: CancellationToken) {
+      provideFileDecoration(uri: Uri, token: CancellationToken) {
         return {
-          letter: 'S',
-          title: 'ZZ',
+          badge: 'M',
+          tooltip: 'Modified changes',
           color: { id: 'green' },
-          priority: 1,
-          bubble: false,
-          source: 'sync',
+          propagate: true,
         };
       }
     })();
 
-    const extDecoProvider2 = new (class implements vscode.DecorationProvider {
+    const extDecoProvider2 = new (class implements vscode.FileDecorationProvider {
       onDidChangeDecorations = Event.None;
-      provideDecoration(uri: Uri, token: CancellationToken) {
-        return new Promise<vscode.Decoration>((resolve) => {
+      provideFileDecoration(uri: Uri, token: CancellationToken) {
+        return new Promise<vscode.FileDecoration>((resolve) => {
           setTimeout(() =>
             resolve({
-              letter: 'A',
-              title: 'Modified changes',
+              badge: 'M',
+              tooltip: 'Modified changes',
               color: { id: 'green' },
-              priority: 1,
-              bubble: false,
-              source: 'async',
+              propagate: true,
             }),
           );
         });
       }
     })();
 
-    const disposable1 = extWindowAPI.registerDecorationProvider(extDecoProvider1);
-    const disposable2 = extWindowAPI.registerDecorationProvider(extDecoProvider2);
+    const disposable1 = extWindowAPI.registerFileDecorationProvider(extDecoProvider1);
+    const disposable2 = extWindowAPI.registerFileDecorationProvider(extDecoProvider2);
 
     toTearDown.push(disposable1);
     toTearDown.push(disposable2);

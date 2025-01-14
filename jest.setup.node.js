@@ -1,3 +1,5 @@
+require('./jest.setup.base');
+
 const { JSDOM, ResourceLoader } = require('jsdom');
 
 const resourceLoader = new ResourceLoader({
@@ -18,6 +20,7 @@ const jsdom = new JSDOM('<div id="main"></div>', {
   resources: resourceLoader,
 });
 global.document = jsdom.window.document;
+global.UIEvent = jsdom.window.UIEvent;
 
 let text = '';
 global.navigator = Object.assign(jsdom.window.navigator, {
@@ -39,6 +42,7 @@ global.getComputedStyle = jsdom.window.getComputedStyle;
 global.window = jsdom.window;
 global.DOMParser = jsdom.window.DOMParser;
 global.MutationObserver = jsdom.window.MutationObserver;
+global.IntersectionObserver = jsdom.window.IntersectionObserver;
 global.KeyboardEvent = jsdom.window.KeyboardEvent;
 global.requestAnimationFrame = (fn) => setTimeout(fn, 16);
 global.cancelAnimationFrame = (timer) => {
@@ -52,8 +56,6 @@ global.document.queryCommandSupported = () => {};
 global.document.execCommand = () => {};
 global.HTMLElement = jsdom.window.HTMLElement;
 global.self = global;
-global.TextEncoder = TextEncoder;
-global.TextDecoder = TextDecoder;
 
 global.ElectronIpcRenderer = {
   send: () => {},
@@ -85,8 +87,6 @@ class MockLocalStorage {
 
 global.localStorage = new MockLocalStorage();
 
-process.env.IS_JEST_TEST = true;
-
 // https://jestjs.io/docs/manual-mocks#mocking-methods-which-are-not-implemented-in-jsdom
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
@@ -102,10 +102,5 @@ Object.defineProperty(window, 'matchMedia', {
   })),
 });
 
-process.on('unhandledRejection', (error) => {
-  // eslint-disable-next-line no-console
-  console.error('unhandledRejection', error);
-  if (process.env.EXIT_ON_UNHANDLED_REJECTION) {
-    process.exit(1); // To exit with a 'failure' code
-  }
-});
+// https://stackoverflow.com/a/44143119/9443819
+require('events').EventEmitter.defaultMaxListeners = 100;

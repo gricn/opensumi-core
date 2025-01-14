@@ -1,4 +1,4 @@
-import classNames from 'classnames';
+import cls from 'classnames';
 import React from 'react';
 
 import { warning } from '../utils/warning';
@@ -21,18 +21,23 @@ export const CheckBox: React.FC<
     // https://stackoverflow.com/questions/42764494/blur-event-relatedtarget-returns-null
     wrapTabIndex?: number;
   }
-> = ({ insertClass, className, label, size = 'default', disabled, checked = false, wrapTabIndex, ...restProps }) => {
+> = ({ insertClass, className, label, size = 'default', disabled, checked, wrapTabIndex, ...restProps }) => {
   warning(!insertClass, '`insertClass` was deprecated, please use `className` instead');
 
-  const cls = classNames('kt-checkbox', insertClass, className, {
-    'kt-checkbox-large': size === 'large',
-    'kt-checkbox-disabled': disabled,
-  });
+  const checkboxProps = restProps;
+
+  checkboxProps['checked'] = checked ?? false;
 
   return (
-    <label className={cls} tabIndex={wrapTabIndex}>
+    <label
+      className={cls('kt-checkbox', insertClass, className, {
+        'kt-checkbox-large': size === 'large',
+        'kt-checkbox-disabled': disabled,
+      })}
+      tabIndex={wrapTabIndex}
+    >
       <span className='kt-checkbox-lump'>
-        <input type='checkbox' disabled={disabled} checked={checked} {...restProps} />
+        <input type='checkbox' disabled={disabled} {...checkboxProps} />
         <span className='kt-checkbox-icon'>
           <CheckIconSvg />
         </span>
@@ -42,4 +47,4 @@ export const CheckBox: React.FC<
   );
 };
 
-CheckBox.displayName = 'KTCheckBox';
+CheckBox.displayName = 'OpenSumiCheckBox';

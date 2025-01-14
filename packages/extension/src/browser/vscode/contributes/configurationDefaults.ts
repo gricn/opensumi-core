@@ -1,12 +1,13 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  PreferenceSchemaProperties,
   OVERRIDE_PROPERTY_PATTERN,
   PreferenceProvider,
+  PreferenceSchemaProperties,
   PreferenceScope,
 } from '@opensumi/ide-core-browser';
+import { LifeCyclePhase } from '@opensumi/ide-core-common';
 
-import { VSCodeContributePoint, Contributes } from '../../../common';
+import { Contributes, LifeCycle, VSCodeContributePoint } from '../../../common';
 
 export interface ConfigurationSnippets {
   body: {
@@ -17,15 +18,17 @@ export interface ConfigurationSnippets {
 
 @Injectable()
 @Contributes('configurationDefaults')
+@LifeCycle(LifeCyclePhase.Starting)
 export class ConfigurationDefaultsContributionPoint extends VSCodeContributePoint<PreferenceSchemaProperties> {
   @Autowired(PreferenceProvider, { tag: PreferenceScope.Default })
   protected readonly defaultPreferenceProvider: PreferenceProvider;
 
   contribute() {
-    const contributionDefaults = this.json;
-
-    if (contributionDefaults) {
-      this.updateDefaultOverridesSchema(contributionDefaults);
+    for (const contrib of this.contributesMap) {
+      const { contributes } = contrib;
+      if (contributes) {
+        this.updateDefaultOverridesSchema(contributes);
+      }
     }
   }
 

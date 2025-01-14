@@ -1,77 +1,71 @@
-import type vscode from 'vscode';
-
-import { Autowired, Injector, INJECTOR_TOKEN } from '@opensumi/di';
-import { WSChannelHandler } from '@opensumi/ide-connection/lib/browser';
+import { Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
 import {
-  EDITOR_COMMANDS,
-  UriComponents,
+  CUSTOM_EDITOR_SCHEME,
   ClientAppContribution,
   CommandContribution,
   CommandRegistry,
   CommandService,
   Domain,
-  electronEnv,
+  EDITOR_COMMANDS,
   FILE_COMMANDS,
-  formatLocalize,
-  getIcon,
+  IApplicationService,
   IAsyncResult,
   IClientApp,
   IContextKeyService,
   IEventBus,
+  ILogger,
   IPreferenceSettingsService,
-  localize,
+  PreferenceService,
   QuickOpenItem,
   QuickOpenService,
-  replaceLocalizePlaceholder,
+  QuickPickService,
   URI,
-  ILogger,
-  AppConfig,
+  UriComponents,
+  formatLocalize,
+  getIcon,
+  localize,
+  replaceLocalizePlaceholder,
+  runWhenIdle,
 } from '@opensumi/ide-core-browser';
 import {
   IStatusBarService,
   StatusBarAlignment,
   StatusBarEntryAccessor,
 } from '@opensumi/ide-core-browser/lib/services/status-bar-service';
-import { IResourceOpenOptions, WorkbenchEditorService, EditorGroupColumn } from '@opensumi/ide-editor';
+import { IResourceOpenOptions, WorkbenchEditorService } from '@opensumi/ide-editor';
+import { EditorOpenType, IEditorOpenType } from '@opensumi/ide-editor/lib/common/editor';
 import { IWindowDialogService } from '@opensumi/ide-overlay';
 import { IWebviewService } from '@opensumi/ide-webview';
-import type { ITextEditorOptions } from '@opensumi/monaco-editor-core/esm/vs/platform/editor/common/editor';
 
 import {
-  ExtensionNodeServiceServerPath,
-  IExtensionNodeClientService,
   EMIT_EXT_HOST_EVENT,
+  ERestartPolicy,
   ExtensionHostProfilerServicePath,
+  ExtensionHostTypeUpperCase,
+  ExtensionNodeServiceServerPath,
   ExtensionService,
   IExtensionHostProfilerService,
-  ExtensionHostTypeUpperCase,
+  IExtensionNodeClientService,
 } from '../common';
 import { ActivatedExtension } from '../common/activator';
-import { TextDocumentShowOptions, ViewColumn, CUSTOM_EDITOR_SCHEME } from '../common/vscode';
+import { TextDocumentShowOptions, ViewColumn } from '../common/vscode';
 import { fromRange, isLikelyVscodeRange, viewColumnToResourceOpenOptions } from '../common/vscode/converter';
 
 import {
   AbstractExtInstanceManagementService,
-  ExtensionApiReadyEvent,
   ExtHostEvent,
+  ExtensionApiReadyEvent,
   IActivationEventService,
   Serializable,
 } from './types';
 import * as VSCodeBuiltinCommands from './vscode/builtin-commands';
+import { WalkthroughsService } from './walkthroughs.service';
+
+import type vscode from 'vscode';
 
 export const getClientId = (injector: Injector) => {
-  let clientId: string;
-  const appConfig: AppConfig = injector.get(AppConfig);
-
-  // Electron 环境下，未指定 isRemote 时默认使用本地连接
-  // 否则使用 WebSocket 连接
-  if (appConfig.isElectronRenderer && !appConfig.isRemote) {
-    clientId = electronEnv.metadata.windowClientId;
-  } else {
-    const channelHandler = injector.get(WSChannelHandler);
-    clientId = channelHandler.clientId;
-  }
-  return clientId;
+  const service: IApplicationService = injector.get(IApplicationService);
+  return service.clientId;
 };
 
 @Domain(ClientAppContribution)
@@ -100,36 +94,25 @@ export class ExtensionClientAppContribution implements ClientAppContribution {
   @Autowired(ExtensionService)
   private readonly extensionService: ExtensionService;
 
-  @Autowired(ILogger)
-  private readonly logger: ILogger;
-
   initialize() {
-    /**
-     * 这里不需要阻塞 initialize 流程
-     * 因为其他 contribution 唯一依赖
-     * 的是主题信息，目前主题注册成功以
-     * 后会发送对应事件
-     */
-    this.extensionService
-      .activate()
-      .catch((err) => {
-        this.logger.error(err);
-      })
-      .finally(() => {
-        const disposer = this.webviewService.registerWebviewReviver({
-          handles: () => 0,
-          revive: async (id: string) =>
-            new Promise<void>((resolve) => {
-              this.eventBus.on(ExtensionApiReadyEvent, () => {
-                disposer.dispose();
-                resolve(this.webviewService.tryReviveWebviewComponent(id));
-              });
-            }),
-        });
+    this.extensionService.activate().then(() => {
+      const disposer = this.webviewService.registerWebviewReviver({
+        handles: () => 0,
+        revive: async (id: string) =>
+          new Promise<void>((resolve) => {
+            this.eventBus.on(ExtensionApiReadyEvent, () => {
+              disposer.dispose();
+              resolve(this.webviewService.tryReviveWebviewComponent(id));
+            });
+          }),
       });
+    });
   }
 
   async onStart() {
+    runWhenIdle(() => {
+      this.extensionService.runExtensionContributes();
+    });
     this.preferenceSettingsService.registerSettingGroup({
       id: 'extension',
       title: localize('settings.group.extension'),
@@ -143,6 +126,11 @@ export class ExtensionClientAppContribution implements ClientAppContribution {
      * 最好在这里直接关掉插件进程，调用链路太长可能导致请求调不到后端
      */
     this.extensionNodeClient.disposeClientExtProcess(this.clientId, false);
+  }
+
+  // restart extProcess on reconnect
+  onReconnect() {
+    this.extensionService.restartExtProcess(ERestartPolicy.WhenExit);
   }
 
   /**
@@ -166,6 +154,9 @@ export class ExtensionCommandContribution implements CommandContribution {
 
   @Autowired(QuickOpenService)
   protected readonly quickOpenService: QuickOpenService;
+
+  @Autowired(QuickPickService)
+  protected readonly quickPickService: QuickPickService;
 
   @Autowired(ExtensionHostProfilerServicePath)
   private readonly extensionProfiler: IExtensionHostProfilerService;
@@ -197,6 +188,12 @@ export class ExtensionCommandContribution implements CommandContribution {
   @Autowired(AbstractExtInstanceManagementService)
   private readonly extensionInstanceManageService: AbstractExtInstanceManagementService;
 
+  @Autowired(WalkthroughsService)
+  private readonly walkthroughsService: WalkthroughsService;
+
+  @Autowired(PreferenceService)
+  private readonly preferenceService: PreferenceService;
+
   @Autowired(ILogger)
   private readonly logger: ILogger;
 
@@ -206,16 +203,22 @@ export class ExtensionCommandContribution implements CommandContribution {
     registry.registerCommand(
       {
         id: 'ext.restart',
-        label: '重启进程',
+        label: '%extension.host.restart%',
       },
       {
         execute: async () => {
-          this.logger.log('插件进程开始重启');
+          this.logger.log('start restart ext host process');
           await this.extensionService.restartExtProcess();
-          this.logger.log('插件进程重启结束');
+          this.logger.log('end restart ext host process');
         },
       },
     );
+    registry.registerCommand(VSCodeBuiltinCommands.GET_EXTENSION, {
+      execute: async (id: string) => {
+        const ext = this.extensionInstanceManageService.getExtensionInstanceByExtId(id);
+        return ext && ext.toJSON();
+      },
+    });
 
     this.registerVSCBuiltinCommands(registry);
   }
@@ -327,62 +330,32 @@ export class ExtensionCommandContribution implements CommandContribution {
     registry.registerCommand(VSCodeBuiltinCommands.OPEN, {
       execute: (
         uriComponents: UriComponents,
-        columnOrOptions?: ViewColumn | TextDocumentShowOptions,
+        columnAndOptions?: [ViewColumn?, TextDocumentShowOptions?],
         label?: string,
       ) => {
         const uri = URI.from(uriComponents);
-        const options: IResourceOpenOptions = {};
-        if (columnOrOptions) {
-          if (typeof columnOrOptions === 'number') {
-            options.groupIndex = columnOrOptions;
-          } else {
-            options.groupIndex = columnOrOptions.viewColumn;
-            options.focus = options.preserveFocus = columnOrOptions.preserveFocus;
-            // 这个range 可能是 vscode.range， 因为不会经过args转换
-            if (columnOrOptions.selection && isLikelyVscodeRange(columnOrOptions.selection)) {
-              columnOrOptions.selection = fromRange(columnOrOptions.selection);
-            }
-            if (Array.isArray(columnOrOptions.selection) && columnOrOptions.selection.length === 2) {
-              const [start, end] = columnOrOptions.selection;
-              options.range = {
-                startLineNumber: start.line + 1,
-                startColumn: start.character + 1,
-                endLineNumber: end.line + 1,
-                endColumn: end.character + 1,
-              };
-            } else {
-              options.range = columnOrOptions.selection;
-            }
-            options.preview = columnOrOptions.preview;
-          }
-        }
-        if (label) {
-          options.label = label;
-        }
-        return this.workbenchEditorService.open(uri, options);
+        return this.doOpenWith(uri, columnAndOptions, label, undefined);
       },
     });
 
     registry.registerCommand(VSCodeBuiltinCommands.OPEN_WITH, {
-      execute: (resource: UriComponents, id: string, columnAndOptions?: [EditorGroupColumn?, ITextEditorOptions?]) => {
+      execute: (resource: UriComponents, id: string, columnAndOptions?: [ViewColumn?, TextDocumentShowOptions?]) => {
         const uri = URI.from(resource);
-        const options: IResourceOpenOptions = {};
-        const [columnArg] = columnAndOptions ?? [];
-        if (id !== 'default') {
-          options.forceOpenType = {
-            type: 'component',
-            componentId: `${CUSTOM_EDITOR_SCHEME}-${id}`,
-          };
-        }
-        if (typeof columnArg === 'number') {
-          options.groupIndex = columnArg;
-        }
-        return this.workbenchEditorService.open(uri, options);
+        // 指定使用某种 editor 打开资源，如果 id 传入 default，则使用默认的 editor
+        const openType: IEditorOpenType | undefined =
+          id === 'default'
+            ? undefined
+            : {
+                type: EditorOpenType.component,
+                componentId: `${CUSTOM_EDITOR_SCHEME}-${id}`,
+              };
+        return this.doOpenWith(uri, columnAndOptions, undefined, openType);
       },
     });
 
     registry.registerCommand(VSCodeBuiltinCommands.DIFF, {
       execute: (left: UriComponents, right: UriComponents, title: string, options?: any) => {
+        // const enableHideUnchanged = this.preferenceService.get('diffEditor.hideUnchangedRegions.enabled');
         const openOptions: IResourceOpenOptions = {
           ...viewColumnToResourceOpenOptions(options?.viewColumn),
           revealFirstDiff: true,
@@ -400,7 +373,39 @@ export class ExtensionCommandContribution implements CommandContribution {
       },
     });
 
+    registry.registerCommand(
+      {
+        id: VSCodeBuiltinCommands.WALKTHROUGHS_COMMAND_GET_STARTED.id,
+        category: localize('walkthroughs.welcome'),
+        label: localize('walkthroughs.get.started'),
+      },
+      {
+        execute: async (extensionId?: string) => {
+          const allWalkthrough = this.walkthroughsService.getWalkthroughs();
+
+          if (extensionId) {
+            this.walkthroughsService.openWalkthroughEditor(extensionId);
+          } else {
+            const result = await this.quickPickService.show(
+              allWalkthrough.map((w) => ({
+                label: w.title,
+                value: w.id,
+                description: w.source,
+                detail: w.description,
+              })),
+            );
+
+            if (result) {
+              this.walkthroughsService.openWalkthroughEditor(result);
+            }
+          }
+        },
+      },
+    );
+
     [
+      // layout builtin commands
+      VSCodeBuiltinCommands.LAYOUT_COMMAND_MAXIMIZE_EDITOR,
       // editor builtin commands
       VSCodeBuiltinCommands.WORKBENCH_CLOSE_ACTIVE_EDITOR,
       VSCodeBuiltinCommands.REVERT_AND_CLOSE_ACTIVE_EDITOR,
@@ -416,6 +421,7 @@ export class ExtensionCommandContribution implements CommandContribution {
       VSCodeBuiltinCommands.NEXT_EDITOR_IN_GROUP,
       VSCodeBuiltinCommands.EVEN_EDITOR_WIDTH,
       VSCodeBuiltinCommands.CLOSE_OTHER_GROUPS,
+      VSCodeBuiltinCommands.CLOSE_UNMODIFIED_EDITORS,
       VSCodeBuiltinCommands.LAST_EDITOR_IN_GROUP,
       VSCodeBuiltinCommands.OPEN_EDITOR_AT_INDEX,
       VSCodeBuiltinCommands.CLOSE_OTHER_EDITORS,
@@ -435,6 +441,8 @@ export class ExtensionCommandContribution implements CommandContribution {
       VSCodeBuiltinCommands.API_OPEN_DIFF_EDITOR_COMMAND_ID,
       VSCodeBuiltinCommands.API_OPEN_WITH_EDITOR_COMMAND_ID,
       // debug builtin commands
+      VSCodeBuiltinCommands.DEBUG_START,
+      VSCodeBuiltinCommands.DEBUG_ADD,
       VSCodeBuiltinCommands.DEBUG_COMMAND_STEP_INTO,
       VSCodeBuiltinCommands.DEBUG_COMMAND_STEP_OVER,
       VSCodeBuiltinCommands.DEBUG_COMMAND_STEP_OUT,
@@ -445,20 +453,73 @@ export class ExtensionCommandContribution implements CommandContribution {
       VSCodeBuiltinCommands.DEBUG_COMMAND_RESTART,
       VSCodeBuiltinCommands.DEBUG_COMMAND_STOP,
       VSCodeBuiltinCommands.EDITOR_SHOW_ALL_SYMBOLS,
+      // search builtin commands
+      VSCodeBuiltinCommands.SEARCH_COMMAND_OPEN_SEARCH,
       // explorer builtin commands
       VSCodeBuiltinCommands.REVEAL_IN_EXPLORER,
       VSCodeBuiltinCommands.OPEN_FOLDER,
+      VSCodeBuiltinCommands.SIDEBAR_TOGGLE_VISIBILITY,
       // terminal builtin commands
       VSCodeBuiltinCommands.CLEAR_TERMINAL,
-      VSCodeBuiltinCommands.TOGGLE_WORKBENCH_VIEW_TERMINAL,
+      VSCodeBuiltinCommands.TERMINAL_COMMAND_FOCUS,
+      VSCodeBuiltinCommands.TERMINAL_COMMAND_TOGGLE_VISIBILITY,
       VSCodeBuiltinCommands.NEW_WORKBENCH_VIEW_TERMINAL,
+      // file builtin commmands
+      VSCodeBuiltinCommands.FILE_COMMAND_RENAME_FILE,
+      // marker builtin commands
+      VSCodeBuiltinCommands.MARKER_COMMAND_SHOW_ERRORS_WARNINGS,
+      VSCodeBuiltinCommands.MARKER_COMMAND_TOGGLE_SHOW_ERRORS_WARNINGS,
       // others
       VSCodeBuiltinCommands.RELOAD_WINDOW,
       VSCodeBuiltinCommands.SETTINGS_COMMAND_OPEN_SETTINGS,
+      VSCodeBuiltinCommands.SETTINGS_COMMAND_OPEN_GLOBAL_SETTINGS,
       VSCodeBuiltinCommands.SETTINGS_COMMAND_OPEN_SETTINGS_JSON,
+      VSCodeBuiltinCommands.SETTINGS_COMMAND_OPEN_GLOBAL_OPEN_KEYMAPS,
+      VSCodeBuiltinCommands.THEME_COMMAND_QUICK_SELECT,
+      // merge editor
+      VSCodeBuiltinCommands.OPEN_MERGEEDITOR,
     ].forEach((command) => {
       registry.registerCommand(command);
     });
+  }
+
+  private doOpenWith(
+    uri: URI,
+    columnAndOptions?: [ViewColumn?, TextDocumentShowOptions?],
+    label?: string,
+    forceOpenType?: IEditorOpenType | undefined,
+  ) {
+    const [columnArg, optionsArg] = columnAndOptions ?? [];
+    const options: IResourceOpenOptions = {};
+    if (typeof columnArg === 'number') {
+      options.groupIndex = columnArg;
+    }
+    if (optionsArg) {
+      options.focus = options.preserveFocus = optionsArg.preserveFocus;
+      // 这个range 可能是 vscode.range， 因为不会经过args转换
+      if (optionsArg.selection && isLikelyVscodeRange(optionsArg.selection)) {
+        optionsArg.selection = fromRange(optionsArg.selection);
+      }
+      if (Array.isArray(optionsArg.selection) && optionsArg.selection.length === 2) {
+        const [start, end] = optionsArg.selection;
+        options.range = {
+          startLineNumber: start.line + 1,
+          startColumn: start.character + 1,
+          endLineNumber: end.line + 1,
+          endColumn: end.character + 1,
+        };
+      } else {
+        options.range = optionsArg.selection;
+      }
+      options.preview = optionsArg.preview;
+    }
+    if (forceOpenType) {
+      options.forceOpenType = forceOpenType;
+    }
+    if (label) {
+      options.label = label;
+    }
+    return this.workbenchEditorService.open(uri, options);
   }
 
   private asQuickOpenItems(activated: {

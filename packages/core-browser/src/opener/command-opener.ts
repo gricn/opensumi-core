@@ -1,5 +1,5 @@
-import { Injectable, Autowired } from '@opensumi/di';
-import { URI, Schemes, CommandService } from '@opensumi/ide-core-common';
+import { Autowired, Injectable } from '@opensumi/di';
+import { CommandService, Schemes, URI } from '@opensumi/ide-core-common';
 
 import { IOpener } from '.';
 
@@ -17,11 +17,11 @@ export class CommandOpener implements IOpener {
     let args: any = [];
     try {
       args = JSON.parse(decodeURIComponent(uri.query));
-    } catch {
+    } catch (e) {
       // ignore and retry
       try {
         args = JSON.parse(uri.query);
-      } catch {
+      } catch (e) {
         // ignore error
       }
     }

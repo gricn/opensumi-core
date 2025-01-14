@@ -1,6 +1,7 @@
-import { TreeNode, CompositeTreeNode, ITree, ITreeNodeOrCompositeTreeNode } from '@opensumi/ide-components';
+import { CompositeTreeNode, ITree, ITreeNodeOrCompositeTreeNode, TreeNode } from '@opensumi/ide-components';
 import { MessageType, localize } from '@opensumi/ide-core-browser';
-import { IRange } from '@opensumi/ide-core-common';
+import { IRange, isDefined } from '@opensumi/ide-core-common';
+import { Path } from '@opensumi/ide-utils/lib/path';
 import { Range } from '@opensumi/monaco-editor-core/esm/vs/editor/common/core/range';
 import { DebugProtocol } from '@opensumi/vscode-debugprotocol/lib/debugProtocol';
 
@@ -35,9 +36,10 @@ export class ExpressionTreeService {
     if (!this.session || this.session.terminated) {
       return result;
     }
-    const { variablesReference, startOfVariables, indexedVariables } = parent;
-    if (parent.namedVariables) {
+    const { variablesReference, startOfVariables, indexedVariables, namedVariables } = parent;
+    if (namedVariables) {
       await this.fetch(result, variablesReference, 'named', parent);
+      return result;
     }
     if (indexedVariables) {
       let chunkSize = ExpressionContainer.BASE_CHUNK_SIZE;
@@ -111,8 +113,11 @@ export class ExpressionTreeService {
     }
   }
 
-  // 可折叠节点展示优先级默认较低
   sortComparator(a: ITreeNodeOrCompositeTreeNode, b: ITreeNodeOrCompositeTreeNode) {
+    // 当存在 variablesReference 属性时，默认按大小进行排序
+    if (isDefined((a as any).variablesReference) && isDefined((b as any).variablesReference)) {
+      return (a as any).variablesReference - (b as any).variablesReference;
+    }
     if (a.constructor === b.constructor) {
       return a.name > b.name ? 1 : a.name < b.name ? -1 : 0;
     }
@@ -139,6 +144,7 @@ export class ExpressionNode extends TreeNode {
   public variablesReference: number;
   public namedVariables: number | undefined;
   public indexedVariables: number | undefined;
+  public memoryReference: string | undefined;
 
   constructor(options: ExpressionNode.Options, parent?: ExpressionContainer) {
     super(new ExpressionTreeService(options.session, options.source, options.line) as ITree, parent, undefined, {
@@ -147,6 +153,7 @@ export class ExpressionNode extends TreeNode {
     this.variablesReference = options.variablesReference || 0;
     this.namedVariables = options.namedVariables;
     this.indexedVariables = options.indexedVariables;
+    this.memoryReference = options.memoryReference;
     this.source = options.source;
     this.line = options.line;
   }
@@ -163,10 +170,11 @@ export class ExpressionNode extends TreeNode {
 export namespace ExpressionNode {
   export interface Options {
     session: DebugSession | undefined;
-    variablesReference?: number;
+    variablesReference: number;
     namedVariables?: number;
     indexedVariables?: number;
     startOfVariables?: number;
+    memoryReference?: string;
     source?: DebugProtocol.Source;
     line?: number | string;
   }
@@ -180,6 +188,7 @@ export class ExpressionContainer extends CompositeTreeNode {
   public namedVariables: number | undefined;
   public indexedVariables: number | undefined;
   public startOfVariables: number;
+  public memoryReference: string | undefined;
 
   public source: DebugProtocol.Source | undefined;
   public line: number | string | undefined;
@@ -198,6 +207,7 @@ export class ExpressionContainer extends CompositeTreeNode {
     this.namedVariables = options.namedVariables;
     this.indexedVariables = options.indexedVariables;
     this.startOfVariables = options.startOfVariables || 0;
+    this.memoryReference = options.memoryReference;
     this.source = options.source;
     this.line = options.line;
   }
@@ -216,7 +226,10 @@ export class ExpressionContainer extends CompositeTreeNode {
      * 而在调试场景中，为了保证每个节点的唯一性，需要为每个节点指定唯一的 path 值
      * 故这里使用 id 作为 path 值
      */
-    return String(this.id);
+    if (!this.parent) {
+      return String(this.id);
+    }
+    return new Path(this.parent.path).join(String(this.id)).toString();
   }
 }
 
@@ -227,6 +240,7 @@ export namespace ExpressionContainer {
     namedVariables?: number;
     indexedVariables?: number;
     startOfVariables?: number;
+    memoryReference?: string;
     source?: DebugProtocol.Source;
     line?: number | string;
   }
@@ -265,6 +279,7 @@ export class DebugVariable extends ExpressionNode {
         variablesReference: variable.variablesReference,
         namedVariables: variable.namedVariables,
         indexedVariables: variable.indexedVariables,
+        memoryReference: variable.memoryReference,
       },
       parent,
     );
@@ -280,6 +295,7 @@ export class DebugVariable extends ExpressionNode {
       variablesReference: this.variable.variablesReference || 0,
       value: this.value,
       evaluateName: this.evaluateName,
+      memoryReference: this.memoryReference,
     };
   }
 
@@ -366,6 +382,7 @@ export class DebugVariableContainer extends ExpressionContainer {
         variablesReference: variable.variablesReference,
         namedVariables: variable.namedVariables,
         indexedVariables: variable.indexedVariables,
+        memoryReference: variable.memoryReference,
         source,
         line,
       },
@@ -390,6 +407,7 @@ export class DebugVariableContainer extends ExpressionContainer {
       variablesReference: this.variable.variablesReference || 0,
       value: this.value,
       evaluateName: this.evaluateName,
+      memoryReference: this.memoryReference,
     };
   }
 
@@ -407,7 +425,7 @@ export class DebugVariableContainer extends ExpressionContainer {
         }
       }
     }
-    return String(this.id);
+    return this.variable.type || String(this.id);
   }
 
   get evaluateName(): string {
@@ -445,16 +463,12 @@ export class DebugVariableContainer extends ExpressionContainer {
       return;
     }
     const variablesReference = (parent as DebugScope).variablesReference;
-    try {
-      const response = await this.session.sendRequest('setVariable', { variablesReference, name, value });
-      this._value = response.body.value;
-      this._variableType = response.body.type;
-      this.variablesReference = response.body.variablesReference || 0;
-      this.namedVariables = response.body.namedVariables;
-      this.indexedVariables = response.body.indexedVariables;
-    } catch (error) {
-      throw error;
-    }
+    const response = await this.session.sendRequest('setVariable', { variablesReference, name, value });
+    this._value = response.body.value;
+    this._variableType = response.body.type;
+    this.variablesReference = response.body.variablesReference || 0;
+    this.namedVariables = response.body.namedVariables;
+    this.indexedVariables = response.body.indexedVariables;
   }
 
   public getRawScope(): DebugProtocol.Scope | undefined {
@@ -547,6 +561,7 @@ export class DebugWatchNode extends ExpressionContainer {
           this.variablesReference = body.variablesReference;
           this.namedVariables = body.namedVariables;
           this.indexedVariables = body.indexedVariables;
+          this.memoryReference = body.memoryReference;
           this.raw = body;
         }
       } catch (err) {
@@ -608,36 +623,29 @@ export class DebugConsoleNode extends ExpressionContainer {
   }
 
   private _available: boolean;
-  private _description: string;
+  private _description: string = UNDEFINED_VALUE;
 
   get available() {
     return this._available;
   }
 
   constructor(
-    public readonly session: DebugSession | undefined,
+    public readonly options: ExpressionContainer.Options,
     public readonly expression: string,
     parent: ExpressionContainer | undefined,
   ) {
-    super(
-      {
-        session,
-      },
-      parent,
-      undefined,
-      expression,
-    );
+    super(options, parent, undefined, expression);
   }
 
   get description() {
-    return this._description || UNDEFINED_VALUE;
+    return this._description;
   }
 
   async evaluate(context = 'repl'): Promise<void> {
     const { expression } = this;
     if (this.session) {
       try {
-        if (typeof expression === 'string') {
+        if (typeof expression === 'string' && !!expression) {
           const body = await this.session.evaluate(expression, context);
           if (body) {
             this.name = expression;
@@ -645,6 +653,14 @@ export class DebugConsoleNode extends ExpressionContainer {
             this.variablesReference = body.variablesReference;
             this.namedVariables = body.namedVariables;
             this.indexedVariables = body.indexedVariables;
+            this.memoryReference = body.memoryReference;
+            this._available = true;
+          }
+        } else if (this.options.variablesReference) {
+          const body = await this.session.variables(this.options.variablesReference);
+          if (body.variables.length) {
+            this.name = body.variables.map((v) => v.value).join('\n');
+            this._description = '';
             this._available = true;
           }
         }
@@ -739,6 +755,7 @@ export class DebugHoverVariableRoot extends ExpressionContainer {
           this.variablesReference = body.variablesReference;
           this.namedVariables = body.namedVariables;
           this.indexedVariables = body.indexedVariables;
+          this.memoryReference = body.memoryReference;
         }
       } catch (err) {
         this._value = err.message;

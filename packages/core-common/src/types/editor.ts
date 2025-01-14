@@ -4,6 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 // Some code copied and modified from https://github.com/microsoft/vscode/blob/1.44.0/src/vs/editor/common/core/position.ts
 
+import type { ILineChange } from '@opensumi/monaco-editor-core/esm/vs/editor/common/services/editorWorker';
+
 export interface IRange {
   // from 1
   startLineNumber: number;
@@ -218,8 +220,21 @@ export function isEditChange(change: IEditorDocumentChange): change is IEditorDo
   return !!(change as IEditorDocumentEditChange).changes;
 }
 
+export const enum SaveTaskErrorCause {
+  CANCEL = 'cancel',
+  USE_BY_CONTENT = 'useByContent',
+}
+
+export enum SaveTaskResponseState {
+  ERROR = 'error',
+  SUCCESS = 'success',
+  DIFF = 'diff',
+}
+
+export type EditorDocumentModelSaveResultState = SaveTaskResponseState;
+
 export interface IEditorDocumentModelSaveResult {
-  state: 'success' | 'error' | 'diff';
+  state: EditorDocumentModelSaveResultState;
 
   errorMessage?: string;
 }
@@ -228,29 +243,4 @@ export enum SymbolTag {
   Deprecated = 1,
 }
 
-/**
- * A change
- */
-export interface IChange {
-  readonly originalStartLineNumber: number;
-  readonly originalEndLineNumber: number;
-  readonly modifiedStartLineNumber: number;
-  readonly modifiedEndLineNumber: number;
-}
-
-/**
- * A character level change.
- */
-export interface ICharChange extends IChange {
-  readonly originalStartColumn: number;
-  readonly originalEndColumn: number;
-  readonly modifiedStartColumn: number;
-  readonly modifiedEndColumn: number;
-}
-
-/**
- * A line change
- */
-export interface ILineChange extends IChange {
-  readonly charChanges: ICharChange[] | undefined;
-}
+export { ILineChange };

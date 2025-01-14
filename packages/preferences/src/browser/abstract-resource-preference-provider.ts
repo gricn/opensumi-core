@@ -1,24 +1,24 @@
 import * as jsoncparser from 'jsonc-parser';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  JSONUtils,
-  URI,
+  AppConfig,
   Disposable,
-  isUndefined,
-  PreferenceProviderDataChanges,
+  FileChange,
   ILogger,
   IResolvedPreferences,
-  Throttler,
-  FileChange,
-  Schemes,
-} from '@opensumi/ide-core-browser';
-import {
+  JSONUtils,
+  PreferenceConfigurations,
   PreferenceProvider,
+  PreferenceProviderDataChange,
+  PreferenceProviderDataChanges,
   PreferenceSchemaProvider,
   PreferenceScope,
-  PreferenceProviderDataChange,
-  PreferenceConfigurations,
+  Schemes,
+  Throttler,
+  URI,
+  VSCODE_WORKSPACE_CONFIGURATION_DIR_NAME,
+  isUndefined,
 } from '@opensumi/ide-core-browser';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
 
@@ -45,6 +45,9 @@ export abstract class AbstractResourcePreferenceProvider extends PreferenceProvi
 
   @Autowired(IFileServiceClient)
   protected readonly fileSystem: IFileServiceClient;
+
+  @Autowired(AppConfig)
+  private appConfig: AppConfig;
 
   @Autowired(ILogger)
   private logger: ILogger;
@@ -77,11 +80,11 @@ export abstract class AbstractResourcePreferenceProvider extends PreferenceProvi
       .catch(() => this._ready.resolve());
 
     const uri = this.getUri();
-    const watcher = await this.fileSystem.watchFileChanges(uri);
+    const watcher = await this.fileSystem.watchFileChanges(uri.parent);
     // 配置文件改变时，重新读取配置
     this.toDispose.push(watcher);
     watcher.onFilesChanged((e: FileChange[]) => {
-      const effected = e.find((file) => file.uri === uri.toString());
+      const effected = e.find((file) => file.uri.startsWith(uri.parent.toString()));
       if (effected) {
         return this.readPreferences();
       }
@@ -201,11 +204,25 @@ export abstract class AbstractResourcePreferenceProvider extends PreferenceProvi
   }
 
   protected async readContents(): Promise<string | undefined> {
+    const uri = this.getUri();
     try {
-      const uri = this.getUri();
       const { content } = await this.fileSystem.readFile(uri.toString());
       return content.toString();
-    } catch {
+    } catch (e) {
+      if (this.appConfig.useVSCodeWorkspaceConfiguration) {
+        // 当获取不到工作区配置时，在 `useVSCodeWorkspaceConfiguration` 开启的情况下，尝试获取 `.vscode` 下配置作为默认值
+        if (uri.scheme === Schemes.file) {
+          const vscodeConfigurationUri = uri.parent.parent
+            .resolve(VSCODE_WORKSPACE_CONFIGURATION_DIR_NAME)
+            .resolve(uri.displayName);
+          try {
+            const { content } = await this.fileSystem.readFile(vscodeConfigurationUri.toString());
+            return content.toString();
+          } catch (e) {
+            return undefined;
+          }
+        }
+      }
       return undefined;
     }
   }

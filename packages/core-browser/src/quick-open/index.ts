@@ -1,10 +1,10 @@
-import { observable } from 'mobx';
 import React from 'react';
 
-import { VALIDATE_TYPE } from '@opensumi/ide-components';
-import { URI, Uri, MaybePromise, IDisposable, Event } from '@opensumi/ide-core-common';
+import { observableValue, transaction } from '@opensumi/monaco-editor-core/esm/vs/base/common/observableInternal/base';
 
-import { Keybinding } from '../keybinding';
+import type { Keybinding } from '../keybinding';
+import type { VALIDATE_TYPE } from '@opensumi/ide-components';
+import type { Event, IDisposable, MaybePromise, URI } from '@opensumi/ide-core-common';
 
 export enum Mode {
   /**
@@ -35,6 +35,11 @@ export interface Highlight {
  * 该类型使用 monaco-editor-core/esm 中导入的版本
  */
 export { Mode as QuickOpenMode };
+
+export interface IKeyMods {
+  readonly ctrlCmd: boolean;
+  readonly alt: boolean;
+}
 
 export interface QuickTitleButton {
   iconPath: URI | { light: string | URI; dark: string | URI } | ThemeIcon;
@@ -121,6 +126,7 @@ export interface QuickOpenItemOptions {
    * 图标
    */
   iconClass?: string;
+  iconPath?: URI | { light: URI; dark: URI } | ThemeIcon;
   /**
    * 对应绑定的快捷键
    */
@@ -156,11 +162,12 @@ export class QuickOpenItem {
 
   private detailHighlights?: Highlight[];
 
-  @observable
-  public checked = false;
+  public readonly checked = observableValue<boolean>(this, false);
 
   constructor(protected options: QuickOpenItemOptions) {
-    this.checked = options.checked || false;
+    transaction((tx) => {
+      this.checked.set(options.checked || false, tx);
+    });
   }
 
   getTooltip(): string | undefined {
@@ -192,6 +199,9 @@ export class QuickOpenItem {
   }
   getIconClass(): string | undefined {
     return this.options.iconClass;
+  }
+  getIconPath(): URI | { light: URI; dark: URI } | ThemeIcon | undefined {
+    return this.options.iconPath;
   }
   getKeybinding(): Keybinding | undefined {
     return this.options.keybinding;
@@ -242,6 +252,7 @@ export interface QuickOpenService {
   showDecoration(type: VALIDATE_TYPE): void;
   hideDecoration(): void;
   refresh(): void;
+  updateOptions(options: QuickOpenOptions): void;
 }
 
 export type QuickOpenOptions = Partial<QuickOpenOptions.Resolved>;
@@ -292,7 +303,11 @@ export namespace QuickOpenOptions {
      * 在输入框修改文字时触发
      * @param value
      */
-    onChangeValue(value: string): void;
+    onChangeValue: (value: string) => void;
+    /**
+     * 在 quick pick 时监听是否有 modifer 按下
+     */
+    onKeyMods?: (mods: IKeyMods) => void;
     /**
      * 是否模糊匹配标签
      * 使用 vscode filter matchesFuzzy 方法
@@ -346,6 +361,16 @@ export namespace QuickOpenOptions {
      * 内容更新后保持滚动区域不变
      */
     keepScrollPosition?: boolean;
+
+    /**
+     * 是否显示 progress
+     */
+    busy?: boolean;
+
+    /**
+     * 总是保持显示，除非主动调用 hide
+     */
+    alwaysOpen?: boolean;
   }
   export const defaultOptions: Resolved = Object.freeze({
     enabled: true,
@@ -363,7 +388,7 @@ export namespace QuickOpenOptions {
     onConfirm: () => {
       /* no-op*/
     },
-    valueSelection: [-1, -1],
+    valueSelection: [-1, -1] as [number, number],
     fuzzyMatchLabel: false,
     fuzzyMatchDetail: false,
     fuzzyMatchDescription: false,
@@ -387,6 +412,7 @@ export interface QuickPickItem<T> {
   value: T;
   description?: string;
   detail?: string;
+  iconPath?: URI | { light: URI; dark: URI } | ThemeIcon;
   iconClass?: string;
   buttons?: QuickInputButton[];
 }
@@ -444,6 +470,7 @@ export interface QuickPickService {
   show(elements: string[], options?: QuickPickOptions): Promise<string | undefined>;
   show<T>(elements: QuickPickItem<T>[], options?: QuickPickOptions): Promise<T | undefined>;
   show<T>(elements: (string | QuickPickItem<T>)[], options?: QuickPickOptions): Promise<T | string | undefined>;
+  updateOptions(options: QuickPickOptions): void;
   hide(reason?: HideReason): void;
   readonly onDidAccept: Event<void>;
   readonly onDidChangeActiveItems: Event<QuickOpenItem[]>;
@@ -451,7 +478,7 @@ export interface QuickPickService {
 
 export const PrefixQuickOpenService = Symbol('PrefixQuickOpenService');
 export interface PrefixQuickOpenService {
-  open(prefix: string): void;
+  open(prefix: string, value?: string): void;
 }
 
 export const IQuickInputService = Symbol('IQuickInputService');
@@ -495,7 +522,7 @@ export interface QuickInputOptions {
    * Text for when there is a problem with the current input value
    */
   validationMessage?: string | undefined;
-
+  validationType?: VALIDATE_TYPE;
   /**
    * The prefill value.
    */
@@ -528,6 +555,11 @@ export interface QuickInputOptions {
    * otherwise the defined range will be selected.
    */
   valueSelection?: [number, number];
+  /**
+   * Set to `false` to keep the input box open when onDidAccept trigger
+   * default is true
+   */
+  hideOnDidAccept?: boolean;
 
   /**
    * An optional function that will be called to validate input and to give a hint
@@ -536,7 +568,7 @@ export interface QuickInputOptions {
    * @param value The current value of the input box.
    * @return Return `undefined`, or the empty string when 'value' is valid.
    */
-  validateInput?(value: string): MaybePromise<string | null | undefined>;
+  validateInput?(value: string): MaybePromise<string | { message: string; type: VALIDATE_TYPE } | null | undefined>;
 }
 
 export interface QuickOpenActionProvider {
@@ -567,7 +599,7 @@ export enum QuickTitleButtonSide {
 /**
  * @deprecated
  */
-export class ThemeIcon {
+class ThemeIcon {
   static readonly File: ThemeIcon = new ThemeIcon('file');
 
   static readonly Folder: ThemeIcon = new ThemeIcon('folder');

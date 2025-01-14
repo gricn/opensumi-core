@@ -1,24 +1,29 @@
 import { Injectable, Provider } from '@opensumi/di';
 import { BrowserModule } from '@opensumi/ide-core-browser';
-import { IDebugServer } from '@opensumi/ide-debug';
-import { DebugSessionContributionRegistry } from '@opensumi/ide-debug/lib/browser';
+import { DebugSessionContributionRegistry } from '@opensumi/ide-debug/lib/browser/debug-session-contribution';
+import { IDebugServer } from '@opensumi/ide-debug/lib/common';
 import { FileSearchServicePath } from '@opensumi/ide-file-search/lib/common';
 
 import {
+  AbstractExtensionManagementService,
   ExtensionHostProfilerServicePath,
   ExtensionNodeServiceServerPath,
   ExtensionService,
   IExtCommandManagement,
-  AbstractExtensionManagementService,
-  RequireInterceptorContribution,
   IRequireInterceptorService,
+  RequireInterceptorContribution,
   RequireInterceptorService,
 } from '../common';
 import {
   AbstractNodeExtProcessService,
-  AbstractWorkerExtProcessService,
   AbstractViewExtProcessService,
+  AbstractWorkerExtProcessService,
 } from '../common/extension.service';
+import {
+  IMainThreadExtenderService,
+  MainThreadExtenderContribution,
+  MainThreadExtenderService,
+} from '../common/main.thread.extender';
 
 import { ActivationEventServiceImpl } from './activation.service';
 import { ExtCommandManagementImpl as ExtCommandManagementImpl } from './extension-command-management';
@@ -30,12 +35,14 @@ import { WorkerExtProcessService } from './extension-worker.service';
 import { ExtensionClientAppContribution, ExtensionCommandContribution } from './extension.contribution';
 import { ExtensionServiceImpl } from './extension.service';
 import { BrowserRequireInterceptorContribution } from './require-interceptor.contribution';
+import { SumiContributionsService, SumiContributionsServiceToken } from './sumi/contributes';
 import { AbstractExtInstanceManagementService, IActivationEventService } from './types';
 import { ExtensionDebugService, ExtensionDebugSessionContributionRegistry } from './vscode/api/debug';
+import { VSCodeContributesService, VSCodeContributesServiceToken } from './vscode/contributes';
 
 @Injectable()
 export class ExtensionModule extends BrowserModule {
-  contributionProvider = [RequireInterceptorContribution];
+  contributionProvider = [RequireInterceptorContribution, MainThreadExtenderContribution];
   providers: Provider[] = [
     {
       token: ExtensionService,
@@ -82,6 +89,18 @@ export class ExtensionModule extends BrowserModule {
     {
       token: IRequireInterceptorService,
       useClass: RequireInterceptorService,
+    },
+    {
+      token: VSCodeContributesServiceToken,
+      useClass: VSCodeContributesService,
+    },
+    {
+      token: SumiContributionsServiceToken,
+      useClass: SumiContributionsService,
+    },
+    {
+      token: IMainThreadExtenderService,
+      useClass: MainThreadExtenderService,
     },
     ExtensionCommandContribution,
     ExtensionClientAppContribution,

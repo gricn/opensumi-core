@@ -1,127 +1,8 @@
-import { Terminal, ILinkMatcherOptions, ITerminalAddon } from 'xterm';
+import { ITerminalAddon, Terminal } from '@xterm/xterm';
 
-import { URI, Disposable, Emitter, Event, Schemes } from '@opensumi/ide-core-common';
-import { WorkbenchEditorService } from '@opensumi/ide-editor/lib/common';
-import { IFileServiceClient, FileStat } from '@opensumi/ide-file-service/lib/common';
+import { Disposable, Emitter } from '@opensumi/ide-core-common';
 
 import { ITerminalConnection } from '../common';
-
-import { TerminalKeyBoardInputService } from './terminal.input';
-
-const segmentClause = '\\~\\w\\.@_\\-';
-const posClause = [
-  ':\\d+(?::\\d+)?', // :1 | :1:2
-  '\\s*\\(\\d+(?:,\\s*\\d+)?\\)', // (1) | (1,2) | (1, 2)
-].join('|');
-const pathClause = [
-  // Unix
-  `[${segmentClause}]*(?:/[${segmentClause}]+)+`,
-  // Windows 应该只在 electron 场景用到
-  // Windows https://docs.microsoft.com/en-us/dotnet/standard/io/file-path-formats
-  // C:\xxx\xxx
-  // \\.\c:\xxx\xxx
-  // \\?\c:\xxx\xxx
-  `(?:(?:\\\\\\\\[.?]\\\\)?[a-zA-Z]:\\\\)?[${segmentClause}]+(?:\\\\[${segmentClause}]+)+`,
-].join('|');
-export const rePath = new RegExp(`(?:^|\s)((?:${pathClause})(?:${posClause})?)`);
-
-export class FilePathAddon extends Disposable implements ITerminalAddon {
-  private _linkMatcherId: number | undefined;
-  private _terminal: Terminal | undefined;
-
-  constructor(
-    private _workspace: string,
-    private _fileService: IFileServiceClient,
-    private _editorService: WorkbenchEditorService,
-    private _keyboardService: TerminalKeyBoardInputService,
-    private _options: ILinkMatcherOptions = {},
-  ) {
-    super();
-    this._options.matchIndex = 1;
-  }
-
-  private _mayAbsolutePath(uri: string) {
-    // 同时校验相对路径和绝对路径
-    // 单纯从链接层面无法区分
-    // 只能够全部交给 file api 去判断
-    // 两个同时匹配的时候，优先取相对路径
-    return [
-      // 这里无须使用 join，前置的 match 来保证
-      this._workspace + (uri[0] === '/' ? '' : '/') + uri,
-      uri,
-    ];
-  }
-
-  private async filterAvailablePaths(paths: string[]) {
-    try {
-      const promises: Promise<FileStat | undefined>[] = [];
-      paths.map((absolute) => promises.push(this._fileService.getFileStat(URI.file(absolute).toString())));
-      const stats = await Promise.all(promises);
-      return stats
-        .filter((s) => !!s && !s.isDirectory && new URI(s!.uri).scheme === Schemes.file)
-        .map((s) => new URI(s!.uri).codeUri.fsPath);
-    } catch {
-      return [];
-    }
-  }
-
-  private async _parseUri(uri: string) {
-    const [, path, pos] = uri.match(rePath)!;
-    const posArr: number[] = [];
-    const reNum = /\d+/g;
-    if (pos) {
-      let res: string[] | null;
-      while ((res = reNum.exec(pos))) {
-        posArr.push(+res[0]);
-      }
-    }
-    const [row, col] = posArr;
-    return {
-      paths: await this.filterAvailablePaths(this._mayAbsolutePath(path)),
-      row,
-      col,
-    };
-  }
-
-  private async _openFile(_, uri: string) {
-    if (!this._keyboardService.isCommandOrCtrl) {
-      return;
-    }
-
-    const uriInfo = await this._parseUri(uri);
-
-    for (const path of uriInfo.paths) {
-      const fileUri = URI.file(path);
-      this._editorService.open(
-        fileUri,
-        uriInfo.row && uriInfo.col
-          ? {
-              range: {
-                startLineNumber: uriInfo.row,
-                endLineNumber: uriInfo.row,
-                startColumn: uriInfo.col,
-                endColumn: uriInfo.col,
-              },
-            }
-          : {},
-      );
-      break;
-    }
-  }
-
-  activate(terminal: Terminal): void {
-    this._terminal = terminal;
-    this._linkMatcherId = this._terminal.registerLinkMatcher(rePath, this._openFile.bind(this), this._options);
-
-    this.addDispose({
-      dispose: () => {
-        if (this._linkMatcherId !== undefined && this._terminal !== undefined) {
-          this._terminal.deregisterLinkMatcher(this._linkMatcherId);
-        }
-      },
-    });
-  }
-}
 
 export class AttachAddon extends Disposable implements ITerminalAddon {
   connection: ITerminalConnection | undefined;
@@ -139,6 +20,9 @@ export class AttachAddon extends Disposable implements ITerminalAddon {
 
   private _lastInputTime = 0;
 
+  private readonly _onBeforeProcessData = new Emitter<{ data: string }>();
+  readonly onBeforeProcessData = this._onBeforeProcessData.event;
+
   public setConnection(connection: ITerminalConnection | undefined) {
     if (this._disposeConnection) {
       this._disposeConnection.dispose();
@@ -148,9 +32,24 @@ export class AttachAddon extends Disposable implements ITerminalAddon {
     if (connection) {
       this._disposeConnection = new Disposable(
         connection.onData((data: string | ArrayBuffer) => {
-          // connection.onData 的时候 对 lastInputTime 进行差值运算，统计最后一次输入到收到回复的时间间隔
-          this._terminal.write(typeof data === 'string' ? data : new Uint8Array(data));
-          this._onData.fire(data);
+          let dataToWrite = data;
+          if (typeof data === 'string') {
+            const beforeProcessDataEvent = { data } as { data: string };
+            // 通过 EventEmitter 修改终端 data 的内容
+            this._onBeforeProcessData.fire(beforeProcessDataEvent);
+
+            if (beforeProcessDataEvent.data !== undefined) {
+              dataToWrite = beforeProcessDataEvent.data;
+            }
+          }
+
+          this._onData.fire(dataToWrite);
+
+          this._terminal.write(
+            typeof dataToWrite === 'string' ? dataToWrite : new Uint8Array(dataToWrite, 0, dataToWrite.byteLength),
+          );
+
+          // connection.onData 的时候对 lastInputTime 进行差值运算，统计最后一次输入到收到回复的时间间隔
           if (this._lastInputTime) {
             const delta = Date.now() - this._lastInputTime;
             this._lastInputTime = 0;

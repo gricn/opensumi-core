@@ -1,12 +1,10 @@
-import { KeybindingContribution, KeybindingRegistry } from '@opensumi/ide-core-browser';
+import { KeybindingContribution, KeybindingRegistry, TERMINAL_COMMANDS } from '@opensumi/ide-core-browser';
 import { IsTerminalFocused } from '@opensumi/ide-core-browser/lib/contextkey';
 import { RawContextKey } from '@opensumi/ide-core-browser/lib/raw-context-key';
 import { Domain, isWindows } from '@opensumi/ide-core-common';
 
-import { TERMINAL_COMMANDS } from '../../common';
-
 @Domain(KeybindingContribution)
-export class TerminalKeybindinngContribution implements KeybindingContribution {
+export class TerminalKeybindingContribution implements KeybindingContribution {
   registerKeybindings(registry: KeybindingRegistry) {
     registry.registerKeybinding({
       command: TERMINAL_COMMANDS.OPEN_SEARCH.id,
@@ -28,6 +26,11 @@ export class TerminalKeybindinngContribution implements KeybindingContribution {
       keybinding: isWindows ? 'ctrlcmd+shift+c' : 'ctrlcmd+c',
       // http 协议无法访问 navigator.clipboard，使用 xterm 原生快捷键
       when: RawContextKey.and(IsTerminalFocused.raw, 'locationProtocol != http'),
+    });
+    registry.registerKeybinding({
+      command: TERMINAL_COMMANDS.KILL_PROCESS.id,
+      keybinding: 'ctrlcmd+c',
+      when: RawContextKey.and(IsTerminalFocused.raw, 'locationProtocol != http', 'isWindows'),
     });
     registry.registerKeybinding({
       command: TERMINAL_COMMANDS.PASTE.id,
@@ -72,6 +75,11 @@ export class TerminalKeybindinngContribution implements KeybindingContribution {
       command: TERMINAL_COMMANDS.FOCUS_PREVIOUS_TERMINAL.id,
       keybinding: 'ctrlcmd+alt+up',
       when: IsTerminalFocused.raw,
+    });
+
+    registry.registerKeybinding({
+      command: TERMINAL_COMMANDS.TOGGLE_TERMINAL.id,
+      keybinding: 'ctrl+`',
     });
   }
 }

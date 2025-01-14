@@ -1,13 +1,13 @@
-import { AppConfig } from '@opensumi/ide-core-browser';
+import { StaticResourceService } from '@opensumi/ide-core-browser/lib/static-resource';
 import { Disposable } from '@opensumi/ide-core-common';
 import { WorkbenchEditorService } from '@opensumi/ide-editor';
 import { EditorComponentRegistry, EditorPreferences } from '@opensumi/ide-editor/lib/browser';
-import { StaticResourceService } from '@opensumi/ide-static-resource/lib/browser';
-import { IThemeService, ITheme } from '@opensumi/ide-theme';
+import { ITheme, IThemeService } from '@opensumi/ide-theme';
 
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
 import { IWebviewService } from '../../src/browser';
+import { ElectronPlainWebview } from '../../src/browser/plain-webview';
 import { WebviewServiceImpl } from '../../src/browser/webview.service';
 
 let injector: MockInjector;
@@ -95,8 +95,8 @@ describe('web platform webview service test suite', () => {
     const service: IWebviewService = injector.get(IWebviewService);
     const webview = service.createEditorPlainWebviewComponent();
     expect(webview).toBeDefined();
-    expect(registerFn).toBeCalled();
-    expect(registerFn2).toBeCalled();
+    expect(registerFn).toHaveBeenCalled();
+    expect(registerFn2).toHaveBeenCalled();
   });
 });
 
@@ -126,6 +126,18 @@ describe('electron platform webview service test suite', () => {
     expect(webview.url).toBe('http://example.test.com');
   });
 
+  it('can set partition in electron plain webview', async () => {
+    const service: IWebviewService = injector.get(IWebviewService);
+    const webview = service.createPlainWebview();
+    webview.setPartition('persist:test');
+    webview.appendTo(document.createElement('div'));
+    await webview.loadURL('http://example.test.com');
+    expect(webview.url).toBe('http://example.test.com');
+    const domNode = (webview as ElectronPlainWebview).getWebviewElement();
+    expect(domNode).toBeDefined();
+    expect(domNode?.partition).toBe('persist:test');
+  });
+
   it('should be able to create electron webview webviewComponent', async () => {
     const registerFn = jest.fn(() => new Disposable());
     const registerFn2 = jest.fn(() => new Disposable());
@@ -134,14 +146,12 @@ describe('electron platform webview service test suite', () => {
     const service: IWebviewService = injector.get(IWebviewService);
     const webview = service.createEditorPlainWebviewComponent();
     expect(webview).toBeDefined();
-    expect(registerFn).toBeCalled();
-    expect(registerFn2).toBeCalled();
+    expect(registerFn).toHaveBeenCalled();
+    expect(registerFn2).toHaveBeenCalled();
   });
 
   afterAll(() => {
-    beforeAll(() => {
-      global.isElectronRenderer = false;
-    });
+    global.isElectronRenderer = false;
   });
 });
 

@@ -1,7 +1,7 @@
-import { localize, IJSONSchemaRegistry, ISchemaStore, IApplicationService } from '@opensumi/ide-core-browser';
+import { IApplicationService, IJSONSchemaRegistry, ISchemaStore, localize } from '@opensumi/ide-core-browser';
 import { DefaultUriLabelProvider } from '@opensumi/ide-core-browser/lib/services';
 import { CommonServerPath } from '@opensumi/ide-core-common';
-import { BinaryBuffer, Disposable, URI, OperatingSystem } from '@opensumi/ide-core-common';
+import { BinaryBuffer, Disposable, OperatingSystem, URI } from '@opensumi/ide-core-common';
 import {
   HashCalculateServiceImpl,
   IHashCalculateService,
@@ -15,7 +15,7 @@ import {
   VscodeSchemeDocumentProvider,
 } from '@opensumi/ide-file-scheme/lib/browser/file-doc';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
-import { MockFileServiceClient } from '@opensumi/ide-file-service/lib/common/mocks/file-service-client';
+import { MockFileServiceClient } from '@opensumi/ide-file-service/__mocks__/file-service-client';
 import { IDialogService } from '@opensumi/ide-overlay';
 
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
@@ -33,11 +33,11 @@ describe('file scheme tests', () => {
       useClass: HashCalculateServiceImpl,
     },
     {
-      token: IDialogService,
+      token: IEditorDocumentModelService,
       useValue: {},
     },
     {
-      token: IEditorDocumentModelService,
+      token: IDialogService,
       useValue: {},
     },
     {
@@ -78,6 +78,9 @@ describe('file scheme tests', () => {
     },
     dispose: () => null,
   }));
+  injector.mock(IEditorDocumentModelService, 'getModelDescription', () => ({
+    dirty: true,
+  }));
 
   injector.addProviders({
     token: FileSchemeDocNodeServicePath,
@@ -107,13 +110,13 @@ describe('file scheme tests', () => {
     expect(subname).toBe('.../');
     expect(await resourceProvider.provideResourceSubname(resource, [resource])).toBeNull();
 
-    dialogResult = localize('file.prompt.dontSave', '不保存');
+    dialogResult = localize('file.prompt.dontSave', "Don't Save");
     expect(await resourceProvider.shouldCloseResource(resource, [[resource]])).toBeTruthy();
 
-    dialogResult = localize('file.prompt.save', '保存');
+    dialogResult = localize('file.prompt.save', 'Save');
     expect(await resourceProvider.shouldCloseResource(resource, [[resource]])).toBeTruthy();
 
-    dialogResult = localize('file.prompt.cancel', '取消');
+    dialogResult = localize('file.prompt.cancel', 'Cancel');
     expect(await resourceProvider.shouldCloseResource(resource, [[resource]])).toBeFalsy();
   });
 
@@ -144,8 +147,8 @@ describe('file scheme tests', () => {
       [],
       'utf8',
     );
-    expect(saveByContent).toBeCalledTimes(1);
-    expect(saveByChanges).toBeCalledTimes(0);
+    expect(saveByContent).toHaveBeenCalledTimes(1);
+    expect(saveByChanges).toHaveBeenCalledTimes(0);
 
     expect(await documentProvider.provideEditorDocumentModelContent(new URI('file:///test.ts'), 'utf8')).toBe(
       docContentPrefix + 'file:///test.ts',

@@ -1,7 +1,14 @@
-.tests-cache
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
 
 .DS_Store
-yarn.lock
+
+.package-temp-dir
 
 # Logs
 logs
@@ -60,6 +67,7 @@ jspm_packages/
 .yarn-integrity
 
 dist
+dist-node
 lib
 
 .vscode/*
@@ -80,6 +88,14 @@ tools/extensions
 # temp release log
 releaselog.md
 
+# temp iteration-plan
+iteration-plan.md
+
 tools/electron/app
 tools/electron/extensions
 tools/workspace
+
+# jupyter
+.ipynb_checkpoints
+
+*.tsbuildinfo

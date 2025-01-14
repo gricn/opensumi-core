@@ -1,28 +1,31 @@
 import React from 'react';
-import ReactDOM from 'react-dom';
+import ReactDOM from 'react-dom/client';
 
-import { Autowired, Injectable, Injector, INJECTOR_TOKEN } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
   AppConfig,
-  compareAnything,
   ConfigProvider,
   IContextKey,
   IContextKeyService,
+  IDisposable,
   KeybindingRegistry,
   QuickOpenActionProvider,
   QuickOpenTabOptions,
+  compareAnything,
 } from '@opensumi/ide-core-browser';
 import { VALIDATE_TYPE } from '@opensumi/ide-core-browser/lib/components';
+import { VIEW_CONTAINERS } from '@opensumi/ide-core-browser/lib/layout/view-id';
+import { IProgressService } from '@opensumi/ide-core-browser/lib/progress';
 import {
   HideReason,
-  Highlight,
-  QuickOpenItem,
   QuickOpenModel as IKaitianQuickOpenModel,
+  IKeyMods,
+  QuickOpenItem,
   QuickOpenOptions,
   QuickOpenService,
 } from '@opensumi/ide-core-browser/lib/quick-open';
 import { MonacoContextKeyService } from '@opensumi/ide-monaco/lib/browser/monaco.context-key.service';
-import { matchesFuzzy } from '@opensumi/monaco-editor-core/esm/vs/base/common/filters';
+import { matchesFuzzyIconAware, parseLabelWithIcons } from '@opensumi/ide-utils/lib/iconLabels';
 
 import { IAutoFocus, IQuickOpenModel, QuickOpenContext } from './quick-open.type';
 import { QuickOpenView } from './quick-open.view';
@@ -42,15 +45,17 @@ export interface IKaitianQuickOpenControllerOpts extends QuickOpenTabOptions {
   onSelect?(item: QuickOpenItem, index: number): void;
   onConfirm?(items: QuickOpenItem[]): void;
   onChangeValue?(lookFor: string): void;
+  onKeyMods?(mods: IKeyMods): void;
   keepScrollPosition?: boolean | undefined;
+  busy?: boolean;
 }
 
 @Injectable()
 export class MonacoQuickOpenService implements QuickOpenService {
   protected _widget: QuickOpenWidget | undefined;
-  protected opts: IKaitianQuickOpenControllerOpts;
+  protected opts: KaitianQuickOpenControllerOpts;
   protected container: HTMLElement;
-  protected previousActiveElement: Element | undefined;
+  protected previousActiveElement: Element | undefined | null;
 
   @Autowired(KeybindingRegistry)
   protected keybindingRegistry: KeybindingRegistry;
@@ -67,7 +72,12 @@ export class MonacoQuickOpenService implements QuickOpenService {
   @Autowired(AppConfig)
   private readonly appConfig: AppConfig;
 
+  @Autowired(IProgressService)
+  protected readonly progressService: IProgressService;
+
   private preLookFor = '';
+
+  private progressDispose: IDisposable;
 
   get inQuickOpenContextKey(): IContextKey<boolean> {
     return this.contextKeyService.createKey<boolean>('inQuickOpen', false);
@@ -93,16 +103,19 @@ export class MonacoQuickOpenService implements QuickOpenService {
   }
 
   open(model: IKaitianQuickOpenModel, options?: Partial<QuickOpenOptions.Resolved> | undefined): void {
+    this.previousActiveElement = document.activeElement;
     const opts = new KaitianQuickOpenControllerOpts(model, this.keybindingRegistry, options);
+    this.progressDispose = this.progressService.registerProgressIndicator(VIEW_CONTAINERS.QUICKPICK_PROGRESS);
     this.hideDecoration();
     this.internalOpen(opts);
   }
 
   hide(reason?: HideReason): void {
     this.widget.hide(reason);
+    this.progressDispose.dispose();
   }
 
-  protected internalOpen(opts: IKaitianQuickOpenControllerOpts): void {
+  protected internalOpen(opts: KaitianQuickOpenControllerOpts): void {
     this.opts = opts;
     const widget = this.widget;
 
@@ -113,6 +126,7 @@ export class MonacoQuickOpenService implements QuickOpenService {
       valueSelection: opts.valueSelection,
       canSelectMany: opts.canSelectMany,
       keepScrollPosition: opts.keepScrollPosition,
+      busy: opts.busy,
       renderTab: opts.renderTab,
       toggleTab: opts.toggleTab,
     });
@@ -120,8 +134,13 @@ export class MonacoQuickOpenService implements QuickOpenService {
     this.inQuickOpenContextKey.set(true);
   }
 
+  updateOptions(options: IKaitianQuickOpenControllerOpts): void {
+    this.opts.updateOptions(options);
+    this.widget.updateOptions(options);
+  }
+
   refresh(): void {
-    this.onType(this.widget.inputValue);
+    this.onType(this.widget.inputValue.get());
   }
 
   public get widget(): QuickOpenWidget {
@@ -166,6 +185,11 @@ export class MonacoQuickOpenService implements QuickOpenService {
             this.opts.onConfirm(items);
           }
         },
+        onKeyMods: (mods) => {
+          if (this.opts.onKeyMods) {
+            this.opts.onKeyMods(mods);
+          }
+        },
       },
     ]);
     this.initWidgetView(this._widget);
@@ -175,13 +199,12 @@ export class MonacoQuickOpenService implements QuickOpenService {
   private initWidgetView(widget: QuickOpenWidget) {
     // 因为 quickopen widget 需要通过构造函数初始化，无法通过 useInjectable 获取实例
     // 但其实是一个单例对象，使用 React Context 让其子组件获取到 widget 实例
-    ReactDOM.render(
+    ReactDOM.createRoot(this.container).render(
       <ConfigProvider value={this.appConfig}>
         <QuickOpenContext.Provider value={{ widget }}>
           <QuickOpenView />
         </QuickOpenContext.Provider>
       </ConfigProvider>,
-      this.container,
     );
   }
 
@@ -194,7 +217,7 @@ export class MonacoQuickOpenService implements QuickOpenService {
     if (this.widget && options.onType) {
       options.onType(lookFor, (model) => {
         // 触发 onchange 事件
-        if (this.preLookFor !== lookFor && this.opts.onChangeValue) {
+        if (this.preLookFor !== lookFor) {
           this.opts.onChangeValue(lookFor);
         }
         this.preLookFor = lookFor;
@@ -208,16 +231,16 @@ export class MonacoQuickOpenService implements QuickOpenService {
   }
 
   showDecoration(type: VALIDATE_TYPE): void {
-    this.widget.validateType = type;
+    this.widget.validateType.set(type, undefined);
   }
 
   hideDecoration(): void {
-    this.widget.validateType = undefined;
+    this.widget.validateType.set(undefined, undefined);
   }
 }
 
 export class KaitianQuickOpenControllerOpts implements IKaitianQuickOpenControllerOpts {
-  protected readonly options: QuickOpenOptions.Resolved;
+  protected options: QuickOpenOptions.Resolved;
 
   constructor(
     protected readonly model: IKaitianQuickOpenModel,
@@ -256,6 +279,10 @@ export class KaitianQuickOpenControllerOpts implements IKaitianQuickOpenControll
     return this.options.keepScrollPosition;
   }
 
+  get busy(): boolean | undefined {
+    return this.options.busy;
+  }
+
   get renderTab() {
     return this.options.renderTab;
   }
@@ -285,6 +312,22 @@ export class KaitianQuickOpenControllerOpts implements IKaitianQuickOpenControll
       const result = this.toOpenModel(lookFor, items, actionProvider);
       acceptor(result);
     });
+  }
+
+  onKeyMods(keyMods: any) {
+    if (this.options.onKeyMods) {
+      this.options.onKeyMods(keyMods);
+    }
+  }
+
+  onChangeValue(lookFor: string): void {
+    if (this.options.onChangeValue) {
+      this.options.onChangeValue(lookFor);
+    }
+  }
+
+  updateOptions(options?: QuickOpenOptions) {
+    this.options = QuickOpenOptions.resolve(options, this.options);
   }
 
   /**
@@ -319,7 +362,7 @@ export class KaitianQuickOpenControllerOpts implements IKaitianQuickOpenControll
     const originLookFor = lookFor;
 
     if (this.options.skipPrefix) {
-      lookFor = lookFor.substr(this.options.skipPrefix);
+      lookFor = lookFor.substring(this.options.skipPrefix).trim();
     }
 
     if (actionProvider && actionProvider.getValidateInput) {
@@ -346,15 +389,27 @@ export class KaitianQuickOpenControllerOpts implements IKaitianQuickOpenControll
     const { fuzzyMatchLabel, fuzzyMatchDescription, fuzzyMatchDetail } = this.options;
     // 自动匹配若为空，取自定义的匹配
     const labelHighlights = fuzzyMatchLabel
-      ? this.matchesFuzzy(lookFor, item.getLabel(), fuzzyMatchLabel, item.getLabelHighlights.bind(item))
+      ? matchesFuzzyIconAware(
+          lookFor,
+          parseLabelWithIcons(item.getLabel() || ''),
+          typeof fuzzyMatchLabel === 'object' && fuzzyMatchLabel.enableSeparateSubstringMatching,
+        )
       : item.getLabelHighlights();
 
     const descriptionHighlights = this.options.fuzzyMatchDescription
-      ? this.matchesFuzzy(lookFor, item.getDescription(), fuzzyMatchDescription)
+      ? matchesFuzzyIconAware(
+          lookFor,
+          parseLabelWithIcons(item.getDescription() || ''),
+          typeof fuzzyMatchDescription === 'object' && fuzzyMatchDescription.enableSeparateSubstringMatching,
+        )
       : item.getDescriptionHighlights();
 
     const detailHighlights = this.options.fuzzyMatchDetail
-      ? this.matchesFuzzy(lookFor, item.getDetail(), fuzzyMatchDetail)
+      ? matchesFuzzyIconAware(
+          lookFor,
+          parseLabelWithIcons(item.getDetail() || ''),
+          typeof fuzzyMatchDetail === 'object' && fuzzyMatchDetail.enableSeparateSubstringMatching,
+        )
       : item.getDetailHighlights();
 
     if (
@@ -366,29 +421,8 @@ export class KaitianQuickOpenControllerOpts implements IKaitianQuickOpenControll
     ) {
       return undefined;
     }
-    item.setHighlights(labelHighlights || [], descriptionHighlights, detailHighlights);
+    item.setHighlights(labelHighlights || [], descriptionHighlights || [], detailHighlights || []);
     return item;
-  }
-
-  protected matchesFuzzy(
-    lookFor: string,
-    value: string | undefined,
-    options?: QuickOpenOptions.FuzzyMatchOptions | boolean,
-    fallback?: () => Highlight[] | undefined,
-  ): Highlight[] | undefined {
-    if (!lookFor || !value) {
-      return [];
-    }
-    const enableSeparateSubstringMatching = typeof options === 'object' && options.enableSeparateSubstringMatching;
-    const res = matchesFuzzy(lookFor, value, enableSeparateSubstringMatching) || undefined;
-    if (res && res.length) {
-      return res;
-    }
-    const fallbackRes = fallback && fallback();
-    if (fallbackRes && fallbackRes.length) {
-      return fallbackRes;
-    }
-    return undefined;
   }
 
   getAutoFocus(lookFor: string): IAutoFocus {

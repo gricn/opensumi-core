@@ -1,4 +1,4 @@
-import { Event, Emitter } from '@opensumi/ide-utils';
+import { Emitter, Event } from '@opensumi/ide-utils';
 
 import { ICompositeTreeNode, TreeNodeEvent } from '../../types';
 import { CompositeTreeNode, TreeNode } from '../TreeNode';
@@ -8,11 +8,16 @@ import { ISerializableState, TreeStateManager, TreeStateWatcher } from './treeSt
 export class TreeModel {
   private _state: TreeStateManager;
   private _root: CompositeTreeNode;
+  private _ensureReady: Promise<boolean | void>;
 
   private onChangeEmitter: Emitter<void> = new Emitter();
 
   get onChange(): Event<void> {
     return this.onChangeEmitter.event;
+  }
+
+  get ensureReady() {
+    return this._ensureReady;
   }
 
   get root() {
@@ -22,6 +27,9 @@ export class TreeModel {
   set root(root: CompositeTreeNode) {
     this._root = root;
     this.initState(root);
+    if (this.root) {
+      this._ensureReady = this.root.ensureLoaded();
+    }
   }
 
   get state() {

@@ -1,34 +1,46 @@
 import { Autowired } from '@opensumi/di';
 import {
-  Domain,
+  ClientAppContribution,
   CommandContribution,
   CommandRegistry,
-  localize,
+  Domain,
   IQuickInputService,
   IReporterService,
+  getIcon,
+  localize,
 } from '@opensumi/ide-core-browser';
-import { MenuContribution, IMenuRegistry, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
-import { URI } from '@opensumi/ide-core-common';
-import { WorkbenchEditorService } from '@opensumi/ide-editor/lib/browser';
+import { IMenuRegistry, MenuContribution, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
+import { CUSTOM_EDITOR_SCHEME, CommandService, IExtensionProps, URI } from '@opensumi/ide-core-common';
+import {
+  BrowserEditorContribution,
+  EditorOpenType,
+  IResource,
+  ResourceService,
+  WorkbenchEditorService,
+} from '@opensumi/ide-editor/lib/browser';
+import { IFileServiceClient } from '@opensumi/ide-file-service';
+import { FileServiceClient } from '@opensumi/ide-file-service/lib/browser/file-service-client';
 import { IMessageService } from '@opensumi/ide-overlay';
 import { EditorContextKeys } from '@opensumi/monaco-editor-core/esm/vs/editor/common/editorContextKeys';
 import { ContextKeyExpr } from '@opensumi/monaco-editor-core/esm/vs/platform/contextkey/common/contextkey';
 import { DebugProtocol } from '@opensumi/vscode-debugprotocol';
 
-import { DEBUG_REPORT_NAME } from '../../../common';
-import { DEBUG_COMMANDS } from '../../debug-contribution';
+import { DEBUG_COMMANDS, DEBUG_REPORT_NAME } from '../../../common';
+import { DebugMemoryFileSystemProvider } from '../../debug-memory';
+import { DebugViewModel } from '../debug-view-model';
 
 import {
-  CONTEXT_VARIABLE_EVALUATE_NAME_PRESENT,
+  CONTEXT_CAN_VIEW_MEMORY,
   CONTEXT_IN_DEBUG_MODE,
   CONTEXT_SET_VARIABLE_SUPPORTED,
+  CONTEXT_VARIABLE_EVALUATE_NAME_PRESENT,
+  DEBUG_MEMORY_SCHEME,
 } from './../../../common/constants';
 import { DebugWatchModelService } from './../watch/debug-watch-tree.model.service';
 import { DebugVariablesModelService } from './debug-variables-tree.model.service';
 
-
-@Domain(MenuContribution, CommandContribution)
-export class VariablesPanelContribution implements MenuContribution, CommandContribution {
+@Domain(ClientAppContribution, BrowserEditorContribution, MenuContribution, CommandContribution)
+export class VariablesPanelContribution implements BrowserEditorContribution, MenuContribution, CommandContribution {
   @Autowired(IQuickInputService)
   private readonly quickInputService: IQuickInputService;
 
@@ -47,6 +59,18 @@ export class VariablesPanelContribution implements MenuContribution, CommandCont
   @Autowired(IReporterService)
   private readonly reporterService: IReporterService;
 
+  @Autowired(CommandService)
+  private readonly commandService: CommandService;
+
+  @Autowired(DebugViewModel)
+  private readonly viewModel: DebugViewModel;
+
+  @Autowired(IFileServiceClient)
+  protected readonly fileSystem: FileServiceClient;
+
+  @Autowired(DebugMemoryFileSystemProvider)
+  private readonly debugMemoryFileSystemProvider: DebugMemoryFileSystemProvider;
+
   registerCommands(registry: CommandRegistry) {
     registry.registerCommand(DEBUG_COMMANDS.SET_VARIABLE_VALUE, {
       execute: async () => {
@@ -57,7 +81,7 @@ export class VariablesPanelContribution implements MenuContribution, CommandCont
         }
 
         const param = await this.quickInputService.open({
-          placeHolder: localize('deugger.menu.setValue.param'),
+          placeHolder: localize('debugger.menu.setValue.param'),
           value: node.description.replace(/^\"(.*)\"$/, '$1') as string,
         });
         if (param !== undefined && param !== null) {
@@ -109,13 +133,62 @@ export class VariablesPanelContribution implements MenuContribution, CommandCont
         }
       },
     });
+
+    const HEX_EDITOR_EXTENSION_ID = 'ms-vscode.hexeditor';
+    const HEX_EDITOR_EDITOR_ID = `${CUSTOM_EDITOR_SCHEME}-hexEditor.hexedit`;
+
+    registry.registerCommand(DEBUG_COMMANDS.VIEW_MEMORY_ID, {
+      execute: async (node: DebugProtocol.Variable) => {
+        const ext = await this.commandService.executeCommand<IExtensionProps>(
+          'extension.getDescription',
+          HEX_EDITOR_EXTENSION_ID,
+        );
+
+        if (ext && ext.enabled) {
+          const sessionId = this.viewModel.currentSession?.id;
+          const memoryReference = node.memoryReference;
+          this.workbenchEditorService.open(
+            URI.from({
+              scheme: DEBUG_MEMORY_SCHEME,
+              authority: sessionId,
+              path: '/' + encodeURIComponent(memoryReference || '') + '/memory.bin',
+            }),
+            {
+              disableNavigate: true,
+              preview: true,
+              forceOpenType: {
+                type: EditorOpenType.component,
+                componentId: HEX_EDITOR_EDITOR_ID,
+              },
+            },
+          );
+        } else {
+          this.messageService.warning(localize('debug.variables.view.memory.prompt.hexEditor.notInstalled'));
+        }
+      },
+    });
+  }
+
+  async initialize() {
+    this.fileSystem.registerProvider(DEBUG_MEMORY_SCHEME, this.debugMemoryFileSystemProvider);
+  }
+
+  registerResource(service: ResourceService) {
+    service.registerResourceProvider({
+      scheme: DEBUG_MEMORY_SCHEME,
+      provideResource: async (uri: URI): Promise<IResource<Partial<{ [prop: string]: any }>>> => ({
+        uri,
+        icon: getIcon('hex'),
+        name: uri.displayName,
+      }),
+    });
   }
 
   registerMenus(registry: IMenuRegistry) {
     registry.registerMenuItem(MenuId.DebugVariablesContext, {
       command: {
         id: DEBUG_COMMANDS.SET_VARIABLE_VALUE.id,
-        label: localize('deugger.menu.setValue'),
+        label: localize('debugger.menu.setValue'),
       },
       order: 10,
       when: CONTEXT_SET_VARIABLE_SUPPORTED.raw,
@@ -124,7 +197,7 @@ export class VariablesPanelContribution implements MenuContribution, CommandCont
     registry.registerMenuItem(MenuId.DebugVariablesContext, {
       command: {
         id: DEBUG_COMMANDS.COPY_VARIABLE_VALUE.id,
-        label: localize('deugger.menu.copyValue'),
+        label: localize('debugger.menu.copyValue'),
       },
       order: 10,
       group: '5_cutcopypaste',
@@ -132,7 +205,7 @@ export class VariablesPanelContribution implements MenuContribution, CommandCont
     registry.registerMenuItem(MenuId.DebugVariablesContext, {
       command: {
         id: DEBUG_COMMANDS.COPY_EVALUATE_PATH.id,
-        label: localize('deugger.menu.copyEvaluatePath'),
+        label: localize('debugger.menu.copyEvaluatePath'),
       },
       when: CONTEXT_VARIABLE_EVALUATE_NAME_PRESENT.raw,
       order: 20,
@@ -141,7 +214,7 @@ export class VariablesPanelContribution implements MenuContribution, CommandCont
     registry.registerMenuItem(MenuId.DebugVariablesContext, {
       command: {
         id: DEBUG_COMMANDS.ADD_TO_WATCH_ID.id,
-        label: localize('deugger.menu.addToWatchExpressions'),
+        label: localize('debugger.menu.addToWatchExpressions'),
       },
       when: CONTEXT_VARIABLE_EVALUATE_NAME_PRESENT.raw,
       order: 100,
@@ -150,13 +223,22 @@ export class VariablesPanelContribution implements MenuContribution, CommandCont
     registry.registerMenuItem(MenuId.EditorContext, {
       command: {
         id: DEBUG_COMMANDS.ADD_TO_WATCH_ID.id,
-        label: localize('deugger.menu.addToWatchExpressions'),
+        label: localize('debugger.menu.addToWatchExpressions'),
       },
       when: ContextKeyExpr.and(EditorContextKeys.hasNonEmptySelection, EditorContextKeys.editorTextFocus)
         ?.keys()
         .reduce((p, c) => p + ' && ' + c, CONTEXT_IN_DEBUG_MODE.raw),
       group: 'debug',
       order: 1,
+    });
+    registry.registerMenuItem(MenuId.DebugVariablesContext, {
+      command: {
+        id: DEBUG_COMMANDS.VIEW_MEMORY_ID.id,
+        label: localize('debug.variables.view.memory'),
+      },
+      iconClass: '',
+      when: `${CONTEXT_CAN_VIEW_MEMORY.equalsTo(true)} && ${CONTEXT_IN_DEBUG_MODE.equalsTo(true)}`,
+      type: 'icon',
     });
   }
 }

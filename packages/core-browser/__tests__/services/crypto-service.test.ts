@@ -28,17 +28,17 @@ describe('test for core-browser/src/services/crypto-service.ts', () => {
     cryptoService = injector.get<ICryptoService>(ICryptoService);
   });
 
-  afterAll(() => {
-    injector.disposeAll();
+  afterAll(async () => {
+    await injector.disposeAll();
   });
 
   it('encrypt', async () => {
     await cryptoService.encrypt(password);
-    expect(mockCryptoService.encrypt).toBeCalledWith(password);
+    expect(mockCryptoService.encrypt).toHaveBeenCalledWith(password);
   });
 
   it('decrypt', async () => {
     await cryptoService.decrypt(hash);
-    expect(mockCryptoService.decrypt).toBeCalledWith(hash);
+    expect(mockCryptoService.decrypt).toHaveBeenCalledWith(hash);
   });
 });

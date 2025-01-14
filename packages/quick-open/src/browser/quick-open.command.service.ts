@@ -1,17 +1,23 @@
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
-import { localize, IContextKeyService, EDITOR_COMMANDS } from '@opensumi/ide-core-browser';
-import { KeybindingRegistry, Keybinding } from '@opensumi/ide-core-browser';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
+import {
+  EDITOR_COMMANDS,
+  IContextKeyService,
+  Keybinding,
+  KeybindingRegistry,
+  localize,
+} from '@opensumi/ide-core-browser';
 import { CorePreferences } from '@opensumi/ide-core-browser/lib/core-preferences';
 import { AbstractMenuService, MenuId, MenuItemNode } from '@opensumi/ide-core-browser/lib/menu/next';
-import { QuickOpenModel, QuickOpenItem, QuickOpenItemOptions, Mode } from '@opensumi/ide-core-browser/lib/quick-open';
+import { Mode, QuickOpenItem, QuickOpenItemOptions, QuickOpenModel } from '@opensumi/ide-core-browser/lib/quick-open';
 import {
-  CommandRegistry,
   Command,
+  CommandRegistry,
   CommandService,
   Deferred,
   IReporterService,
   REPORT_NAME,
 } from '@opensumi/ide-core-common';
+import { uppercaseFirstLetter } from '@opensumi/ide-utils/lib/strings';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
 
 import { QuickOpenHandler } from './prefix-quick-open.service';
@@ -101,10 +107,6 @@ export class QuickCommandHandler implements QuickOpenHandler {
     };
   }
 
-  onClose() {
-    this.commandService.executeCommand(EDITOR_COMMANDS.FOCUS.id);
-  }
-
   private getItems() {
     const items: QuickOpenItem[] = [];
     const { recent, other } = this.getCommands();
@@ -135,38 +137,56 @@ export class QuickCommandHandler implements QuickOpenHandler {
     return items;
   }
 
-  protected getOtherCommands() {
+  protected getCommands(): { recent: Command[]; other: Command[] } {
     const menus = this.menuService.createMenu(MenuId.CommandPalette, this.contextKeyService);
-    const menuNodes = menus
-      .getMenuNodes()
-      .reduce((r, [, actions]) => [...r, ...actions], [] as MenuItemNode[])
-      .filter((item) => item instanceof MenuItemNode && !item.disabled)
-      .filter((item, index, array) => array.findIndex((n) => n.id === item.id) === index) as MenuItemNode[];
+
+    const _recentCommands = this.getValidCommands(this.commandRegistry.getRecentCommands());
+    const limit = this.corePreferences['workbench.commandPalette.history'];
+    const recentCommands = _recentCommands.slice(0, limit);
+    const recentCommandIds = new Set<string>(recentCommands.map((command) => command.id));
+    // 用来记录某个命令 id 已被保存。相同的命令 id 只保存第一次
+    const availableCommandIds = new Set<string>();
+    const nodes = [] as MenuItemNode[];
+    const otherCommands = [] as Command[];
+
+    for (const [, actions] of menus.getMenuNodes()) {
+      for (const item of actions) {
+        if (!(item instanceof MenuItemNode) || item.disabled || availableCommandIds.has(item.id)) {
+          continue;
+        }
+        // 这里先添加进来
+        availableCommandIds.add(item.id);
+        // 与上一句判断不能交换位置，allCommandIds 代表了所有命令的 id，也包括 recent 的
+        if (recentCommandIds.has(item.id)) {
+          continue;
+        }
+        nodes.push(item);
+        const command = this.commandRegistry.getCommand(item.id);
+
+        // 过滤掉可能存在的 command "没有注册" 的情况
+        if (command) {
+          // 使用 Menu 中存在的 label
+          otherCommands.push({
+            ...command,
+            label: item.label,
+          });
+        }
+      }
+    }
+
+    // 过滤掉无效的命令，可能此时该命令还没有被激活（when 条件为 False）
+    for (let index = recentCommands.length - 1; index >= 0; index--) {
+      const element = recentCommands[index];
+      if (!availableCommandIds.has(element.id)) {
+        recentCommands.splice(index, 1);
+      }
+    }
+
     menus.dispose();
 
-    return menuNodes.reduce((prev, item) => {
-      const command = this.commandRegistry.getCommand(item.id);
-      // 过滤掉可能存在的 command "没有注册" 的情况
-      if (command) {
-        // 使用 Menu 中存在的 label
-        prev.push({
-          ...command,
-          label: item.label,
-        });
-      }
-      return prev;
-    }, [] as Command[]);
-  }
-
-  protected getCommands(): { recent: Command[]; other: Command[] } {
-    const otherCommands = this.getOtherCommands();
-    const recentCommands = this.getValidCommands(this.commandRegistry.getRecentCommands());
-    const limit = this.corePreferences['workbench.commandPalette.history'];
     return {
-      recent: recentCommands.slice(0, limit),
+      recent: recentCommands,
       other: otherCommands
-        // 过滤掉最近使用中含有的命令
-        .filter((command) => !recentCommands.some((recent) => recent.id === command.id))
         // 命令重新排序
         .sort((a, b) => Command.compareCommands(a, b)),
     };
@@ -206,15 +226,34 @@ export class CommandQuickOpenItem extends QuickOpenItem {
   }
 
   getLabel(): string {
-    return this.command.category ? `${this.command.category}: ` + this.command.label! : this.command.label!;
+    return this.command.category
+      ? `${uppercaseFirstLetter(this.command.category)}: ` + this.command.label!
+      : this.command.label!;
   }
 
   isHidden(): boolean {
     return super.isHidden();
   }
 
+  /**
+   * We show the command label in default language in detail if the command is localized.
+   */
   getDetail(): string | undefined {
-    return this.command.label !== this.command.alias ? this.command.alias : undefined;
+    if (!this.command.labelLocalized) {
+      return;
+    }
+    let detail: string | undefined;
+    const { alias, localized } = this.command.labelLocalized;
+    if (alias !== localized) {
+      const category = this.command.categoryLocalized?.alias ?? this.command.category;
+      if (category) {
+        detail = `${uppercaseFirstLetter(category)}: ${alias}`;
+      } else {
+        detail = alias;
+      }
+    }
+
+    return detail;
   }
 
   getKeybinding(): Keybinding | undefined {

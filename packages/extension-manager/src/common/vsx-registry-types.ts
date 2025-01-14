@@ -161,4 +161,6 @@ export interface VSXExtensionRaw {
   readonly galleryTheme?: string;
   readonly qna?: string;
   readonly engines?: { [engine: string]: string };
+  readonly readme?: string;
+  readonly changelog?: string;
 }

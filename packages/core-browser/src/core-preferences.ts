@@ -1,7 +1,16 @@
 import { Injector } from '@opensumi/di';
-import { localize, getAvailableLanguages, isElectronRenderer, SUPPORTED_ENCODINGS } from '@opensumi/ide-core-common';
+import {
+  GeneralSettingsId,
+  MenubarSettingId,
+  PreferenceSchema,
+  SUPPORTED_ENCODINGS,
+  getAvailableLanguages,
+  localize,
+} from '@opensumi/ide-core-common';
+import { LOCALE_TYPES } from '@opensumi/ide-core-common/lib/const';
+import { defaultFilesWatcherExcludes } from '@opensumi/ide-core-common/lib/preferences/file-watch';
 
-import { createPreferenceProxy, PreferenceProxy, PreferenceService, PreferenceSchema } from './preferences';
+import { PreferenceProxy, PreferenceService, createPreferenceProxy } from './preferences';
 
 const EXPLORER_DEFAULTS = {
   confirmDelete: true,
@@ -9,11 +18,7 @@ const EXPLORER_DEFAULTS = {
 };
 
 export const FILES_DEFAULTS = {
-  filesWatcherExclude: {
-    '**/.git/objects/**': true,
-    '**/.git/subtree-cache/**': true,
-    '**/node_modules/**/*': true,
-  },
+  filesWatcherExclude: defaultFilesWatcherExcludes,
   filesExclude: {
     '**/.git': true,
     '**/.svn': true,
@@ -31,12 +36,12 @@ export const FILE_TREE_DEFAULTS = {
 export const corePreferenceSchema: PreferenceSchema = {
   type: 'object',
   properties: {
-    'general.language': {
+    [GeneralSettingsId.Language]: {
       type: 'string',
       enum: getAvailableLanguages().map((l) => l.languageId),
-      default: 'zh-CN',
+      default: LOCALE_TYPES.EN_US,
     },
-    'general.theme': {
+    [GeneralSettingsId.Theme]: {
       type: 'string',
       default: 'vs-dark',
       enum: [],
@@ -46,10 +51,15 @@ export const corePreferenceSchema: PreferenceSchema = {
       default: true,
       description: '%preference.description.general.askReloadOnLanguageChange%',
     },
-    'general.icon': {
+    [GeneralSettingsId.Icon]: {
       type: 'string',
       default: 'vs-minimal',
       enum: [],
+    },
+    [GeneralSettingsId.ProductIconTheme]: {
+      type: 'string',
+      default: 'opensumi-icons',
+      enum: ['opensumi-icons'],
     },
     'workbench.colorCustomizations': {
       type: 'object',
@@ -60,12 +70,12 @@ export const corePreferenceSchema: PreferenceSchema = {
     // 是否允许打开文件夹
     'application.supportsOpenFolder': {
       type: 'boolean',
-      default: isElectronRenderer(),
+      default: false,
       description: 'Whether default open folder behavior is supported',
     },
     'application.supportsOpenWorkspace': {
       type: 'boolean',
-      default: isElectronRenderer(),
+      default: false,
       description: 'Whether default open workspace behavior is supported',
     },
     'application.confirmExit': {
@@ -89,7 +99,7 @@ export const corePreferenceSchema: PreferenceSchema = {
       type: 'string',
       enum: ['singleClick', 'doubleClick'],
       default: 'singleClick',
-      description: localize('preference.workbench.list.openMode'),
+      description: '%preference.workbench.list.openMode%',
     },
     'workbench.commandPalette.history': {
       type: 'number',
@@ -145,6 +155,16 @@ export const corePreferenceSchema: PreferenceSchema = {
       type: 'boolean',
       default: true,
     },
+    'debug.breakpoint.editorHint': {
+      type: 'boolean',
+      default: true,
+      description: '%preference.debug.breakpoint.editorHint%',
+    },
+    'debug.breakpoint.showBreakpointsInOverviewRuler': {
+      type: 'boolean',
+      default: false,
+      description: '%preference.debug.breakpoint.showBreakpointsInOverviewRuler%',
+    },
     'debug.toolbar.top': {
       type: 'number',
       default: 0,
@@ -183,7 +203,7 @@ export const corePreferenceSchema: PreferenceSchema = {
     },
     'files.associations': {
       type: 'object',
-      description: '%preference.files.associations%',
+      markdownDescription: '%preference.files.associations%',
     },
     'files.encoding': {
       type: 'string',
@@ -268,6 +288,18 @@ export const corePreferenceSchema: PreferenceSchema = {
       type: 'boolean',
       default: false,
     },
+    [MenubarSettingId.CompactMode]: {
+      type: 'boolean',
+      default: false,
+    },
+    'editor.codeActionWidget.showHeaders': {
+      type: 'boolean',
+      default: true,
+    },
+    'mergeEditor.autoApplyNonConflictChanges': {
+      type: 'boolean',
+      default: false,
+    },
   },
 };
 
@@ -286,6 +318,8 @@ export interface CoreConfiguration {
   'explorer.confirmMove': boolean;
   'explorer.compactFolders': boolean;
   'debug.toolbar.float': boolean;
+  'debug.breakpoint.editorHint': boolean;
+  'debug.breakpoint.showBreakpointsInOverviewRuler': boolean;
   'debug.toolbar.top': number;
   'debug.toolbar.height': number;
   'files.watcherExclude': { [key: string]: boolean };
@@ -293,8 +327,11 @@ export interface CoreConfiguration {
   'files.associations': { [key: string]: string };
   'files.encoding': string;
   'general.language': string;
+  'general.productIconTheme': string;
   'general.theme': string;
   'view.saveLayoutWithWorkspace': boolean;
+  'menubar.compactMode': boolean;
+  'editor.codeActionWidget.showHeaders': boolean;
 }
 
 export const CorePreferences = Symbol('CorePreferences');

@@ -1,34 +1,36 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
   Command,
-  Emitter,
-  CommandRegistry,
   CommandHandler,
+  CommandRegistry,
+  CommandService,
+  EDITOR_COMMANDS,
+  Emitter,
   HANDLER_NOT_FOUND,
   ILogger,
-  EDITOR_COMMANDS,
-  CommandService,
   IReporterService,
+  MonacoOverrideServiceRegistry,
   REPORT_NAME,
   ServiceNames,
-  memoize,
   Uri,
-  MonacoOverrideServiceRegistry,
+  memoize,
 } from '@opensumi/ide-core-browser';
+import { DELEGATE_COMMANDS } from '@opensumi/ide-monaco';
 import {
-  CommandsRegistry as MonacoCommandsRegistry,
   EditorExtensionsRegistry,
   ICommandEvent,
   ICommandService,
   IMonacoActionRegistry,
   IMonacoCommandService,
   IMonacoCommandsRegistry,
+  CommandsRegistry as MonacoCommandsRegistry,
   MonacoEditorCommandHandler,
 } from '@opensumi/ide-monaco/lib/browser/contrib/command';
 import { URI } from '@opensumi/ide-monaco/lib/browser/monaco-api';
-import { StaticServices } from '@opensumi/ide-monaco/lib/browser/monaco-api/services';
+import { StandaloneServices } from '@opensumi/ide-monaco/lib/browser/monaco-api/services';
 import { Event, ICodeEditor, IEvent } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
 
+import { MonacoCodeService } from '../../editor.override';
 import { EditorCollectionService, WorkbenchEditorService } from '../../types';
 
 /**
@@ -109,8 +111,8 @@ export class MonacoCommandService implements IMonacoCommandService {
       this._onDidExecuteCommand.fire({ commandId, args });
       return res;
     } catch (err) {
-      // 如果不是 handler 未找到直接抛错，否则执行 delegate 逻辑
-      if (err?.name !== HANDLER_NOT_FOUND) {
+      // 如果不是当前命令的 handler 未找到直接抛错，否则执行 delegate 逻辑
+      if (err?.name !== `${HANDLER_NOT_FOUND}:${commandId}`) {
         throw err;
       }
     }
@@ -137,6 +139,9 @@ export class MonacoCommandRegistry implements IMonacoCommandsRegistry {
 
   @Autowired(EditorCollectionService)
   private editorCollectionService: EditorCollectionService;
+
+  @Autowired(MonacoOverrideServiceRegistry)
+  private readonly overrideServiceRegistry: MonacoOverrideServiceRegistry;
 
   /**
    * 校验 command id 是否是 monaco id
@@ -186,18 +191,27 @@ export class MonacoCommandRegistry implements IMonacoCommandsRegistry {
   protected execute(monacoHandler: MonacoEditorCommandHandler, ...args: any[]): any {
     const editor = this.getActiveCodeEditor();
     if (editor) {
-      // editor.focus();
       return Promise.resolve(monacoHandler.execute(editor, ...args));
     }
     return Promise.resolve();
+  }
+
+  get codeEditorService(): MonacoCodeService | undefined {
+    return this.overrideServiceRegistry.getRegisteredService(ServiceNames.CODE_EDITOR_SERVICE);
   }
 
   /**
    * 获取当前活动的编辑器
    * 此处的活动编辑器和 workbenchEditorService.currentEditor 的概念不同，对于diffEditor，需要获取确实的那个editor而不是modifiedEditor
    */
-  protected getActiveCodeEditor(): ICodeEditor | undefined {
-    // 先从editor-collection的焦点追踪，contextMenu追踪中取
+  public getActiveCodeEditor(): ICodeEditor | undefined {
+    // 先从 monaco 内部获取到当前 focus 的 editor
+    const editor = this.codeEditorService?.getFocusedCodeEditor();
+    if (editor) {
+      return editor;
+    }
+
+    // 如果获取不到再从 editor-collection 的焦点追踪，contextMenu追踪中取
     if (this.editorCollectionService.currentEditor) {
       return this.editorCollectionService.currentEditor.monacoEditor;
     }
@@ -216,9 +230,9 @@ export class MonacoCommandRegistry implements IMonacoCommandsRegistry {
 @Injectable()
 export class MonacoActionRegistry implements IMonacoActionRegistry {
   private static COMMON_ACTIONS = new Map<string, string>([
-    ['undo', EDITOR_COMMANDS.UNDO.id],
-    ['redo', EDITOR_COMMANDS.REDO.id],
-    ['editor.action.selectAll', EDITOR_COMMANDS.SELECT_ALL.id],
+    [DELEGATE_COMMANDS.UNDO, EDITOR_COMMANDS.UNDO.id],
+    [DELEGATE_COMMANDS.REDO, EDITOR_COMMANDS.REDO.id],
+    [DELEGATE_COMMANDS.SELECT_ALL, EDITOR_COMMANDS.SELECT_ALL.id],
   ]);
 
   private static CONVERT_MONACO_COMMAND_ARGS = new Map<string, (...args: any[]) => any[]>([
@@ -255,7 +269,7 @@ export class MonacoActionRegistry implements IMonacoActionRegistry {
     const codeEditorService = this.overrideServiceRegistry.getRegisteredService(ServiceNames.CODE_EDITOR_SERVICE);
     const textModelService = this.overrideServiceRegistry.getRegisteredService(ServiceNames.TEXT_MODEL_SERVICE);
     const contextKeyService = this.overrideServiceRegistry.getRegisteredService(ServiceNames.CONTEXT_KEY_SERVICE);
-    const [, globalInstantiationService] = StaticServices.init({
+    const globalInstantiationService = StandaloneServices.initialize({
       codeEditorService,
       textModelService,
       contextKeyService,
@@ -274,21 +288,40 @@ export class MonacoActionRegistry implements IMonacoActionRegistry {
   }
 
   registerMonacoActions() {
-    const editorActions = new Map(this.monacoEditorRegistry.getEditorActions().map(({ id, label }) => [id, label]));
+    const editorActions = new Map(
+      Array.from(this.monacoEditorRegistry.getEditorActions()).map(({ id, label, alias }) => [
+        id,
+        {
+          label,
+          alias,
+        },
+      ]),
+    );
+
     for (const id of this.monacoCommands.keys()) {
       if (MonacoActionRegistry.EXCLUDE_ACTIONS.includes(id)) {
         continue;
       }
-      const label = editorActions.has(id) ? editorActions.get(id) : '';
+
+      const data: { label?: string; alias?: string } = editorActions.get(id) ?? {};
       const handler = this.actAndComHandler(editorActions, id);
       this.monacoCommandRegistry.registerCommand(
         {
           id,
-          label,
+          label: data.label,
+          labelLocalized:
+            data.label && data.alias
+              ? {
+                  alias: data.alias,
+                  localized: data.label,
+                  raw: data.label,
+                }
+              : undefined,
         },
         handler,
       );
-      // 将 monaco 命令处理函数代理到有 label 的空命令上
+
+      // 将 monaco 命令处理函数代理到有 label 的新的命令上
       const command = MonacoActionRegistry.COMMON_ACTIONS.get(id);
       if (command) {
         this.monacoCommandRegistry.registerHandler(command, handler);
@@ -299,7 +332,16 @@ export class MonacoActionRegistry implements IMonacoActionRegistry {
   /**
    * monaco 内部有些 contribution 既注册了 actions 又注册了 commands，在这里优先调取 commands
    */
-  private actAndComHandler(actions: Map<string, string>, id: string): MonacoEditorCommandHandler {
+  private actAndComHandler(
+    actions: Map<
+      string,
+      {
+        label: string;
+        alias: string;
+      }
+    >,
+    id: string,
+  ): MonacoEditorCommandHandler {
     if (MonacoActionRegistry.CONVERT_MONACO_ACTIONS_TO_CONTRIBUTION_ID.has(id)) {
       const toConver = MonacoActionRegistry.CONVERT_MONACO_ACTIONS_TO_CONTRIBUTION_ID.get(id)!;
       if (this.monacoEditorRegistry.getSomeEditorContributions([toConver]).length > 0) {
@@ -366,10 +408,10 @@ export class MonacoActionRegistry implements IMonacoActionRegistry {
    */
   protected newActionHandler(id: string): MonacoEditorCommandHandler {
     return {
-      execute: (editor) => {
+      execute: (editor, ...args) => {
         const action = editor.getAction(id);
         if (action && action.isSupported()) {
-          return this.runAction(id, editor);
+          return this.runAction(id, editor, ...args);
         }
       },
     };
@@ -380,11 +422,11 @@ export class MonacoActionRegistry implements IMonacoActionRegistry {
    * @param id 要执行的 action
    * @param editor 执行 action 的 editor，默认为当前 editor
    */
-  protected runAction(id: string, editor: ICodeEditor): Promise<void> {
+  protected runAction(id: string, editor: ICodeEditor, ...args: any[]): Promise<void> {
     if (editor) {
       const action = editor.getAction(id);
       if (action) {
-        return action.run();
+        return action.run(...args);
       }
     }
 

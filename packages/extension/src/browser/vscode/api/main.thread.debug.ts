@@ -1,33 +1,23 @@
-import { Injectable, Optional, Autowired, Injector, INJECTOR_TOKEN } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector, Optional } from '@opensumi/di';
 import { IRPCProtocol } from '@opensumi/ide-connection';
-import {
-  DisposableCollection,
-  Uri,
-  ILoggerManagerClient,
-  ILogServiceClient,
-  SupportLogNamespace,
-  URI,
-} from '@opensumi/ide-core-browser';
+import { DisposableCollection, ILogger, URI, Uri } from '@opensumi/ide-core-browser';
 import { LabelService } from '@opensumi/ide-core-browser/lib/services';
 import {
-  DebuggerDescription,
-  IDebugService,
   DebugConfiguration,
-  IDebugServer,
-  IDebuggerContribution,
-  IDebugServiceContributionPoint,
+  DebuggerDescription,
   IDebugBreakpoint,
+  IDebugConsoleModelService,
+  IDebugModelManager,
+  IDebugServiceContributionPoint,
+  IDebuggerContribution,
 } from '@opensumi/ide-debug';
-import {
-  DebugSessionManager,
-  BreakpointManager,
-  DebugConfigurationManager,
-  DebugPreferences,
-  DebugSessionContributionRegistry,
-  DebugModelManager,
-  DebugBreakpoint,
-} from '@opensumi/ide-debug/lib/browser';
+import { BreakpointManager, DebugBreakpoint } from '@opensumi/ide-debug/lib/browser/breakpoint';
+import { DebugConfigurationManager } from '@opensumi/ide-debug/lib/browser/debug-configuration-manager';
+import { DebugPreferences } from '@opensumi/ide-debug/lib/browser/debug-preferences';
+import { DebugSessionContributionRegistry } from '@opensumi/ide-debug/lib/browser/debug-session-contribution';
+import { DebugSessionManager } from '@opensumi/ide-debug/lib/browser/debug-session-manager';
 import { DebugConsoleModelService } from '@opensumi/ide-debug/lib/browser/view/console/debug-console-tree.model.service';
+import { IDebugServer, IDebugService } from '@opensumi/ide-debug/lib/common/debug-service';
 import { IDebugSessionManager, IDebugSessionOptions } from '@opensumi/ide-debug/lib/common/debug-session';
 import { WorkbenchEditorService } from '@opensumi/ide-editor';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
@@ -37,20 +27,18 @@ import { ITerminalApiService } from '@opensumi/ide-terminal-next';
 import { DebugProtocol } from '@opensumi/vscode-debugprotocol';
 
 import {
-  IMainThreadDebug,
   ExtHostAPIIdentifier,
   IExtHostDebug,
-  ExtensionWSChannel,
-  IMainThreadConnectionService,
+  IInterProcessConnectionService,
+  IMainThreadDebug,
   IStartDebuggingOptions,
 } from '../../../common/vscode';
 import { Breakpoint, WorkspaceFolder } from '../../../common/vscode/models';
 import { IActivationEventService } from '../../types';
 
-import { ExtensionDebugSessionFactory, ExtensionDebugSessionContributionRegistry } from './debug';
+import { ExtensionDebugSessionContributionRegistry, ExtensionDebugSessionFactory } from './debug';
 import { ExtensionDebugAdapterContribution } from './debug/extension-debug-adapter-contribution';
 import { ExtensionDebugService } from './debug/extension-debug-service';
-
 
 @Injectable({ multiple: true })
 export class MainThreadDebug implements IMainThreadDebug {
@@ -68,8 +56,8 @@ export class MainThreadDebug implements IMainThreadDebug {
   @Autowired(BreakpointManager)
   protected readonly breakpointManager: BreakpointManager;
 
-  @Autowired(DebugModelManager)
-  protected readonly modelManager: DebugModelManager;
+  @Autowired(IDebugModelManager)
+  protected readonly modelManager: IDebugModelManager;
 
   @Autowired(DebugConfigurationManager)
   protected readonly debugConfigurationManager: DebugConfigurationManager;
@@ -95,14 +83,13 @@ export class MainThreadDebug implements IMainThreadDebug {
   @Autowired(DebugSessionContributionRegistry)
   protected readonly sessionContributionRegistry: ExtensionDebugSessionContributionRegistry;
 
-  @Autowired(ILoggerManagerClient)
-  protected readonly loggerManager: ILoggerManagerClient;
-  protected readonly logger: ILogServiceClient;
+  @Autowired(ILogger)
+  protected readonly logger: ILogger;
 
   @Autowired(ITerminalApiService)
   protected readonly terminalService: ITerminalApiService;
 
-  @Autowired(DebugConsoleModelService)
+  @Autowired(IDebugConsoleModelService)
   protected readonly debugConsoleModelService: DebugConsoleModelService;
 
   @Autowired(OutputService)
@@ -116,9 +103,8 @@ export class MainThreadDebug implements IMainThreadDebug {
 
   constructor(
     @Optional(IRPCProtocol) private rpcProtocol: IRPCProtocol,
-    @Optional(IMainThreadConnectionService) private mainThreadConnection: IMainThreadConnectionService,
+    @Optional(IInterProcessConnectionService) private mainThreadConnection: IInterProcessConnectionService,
   ) {
-    this.logger = this.loggerManager.getLogger(SupportLogNamespace.ExtensionHost);
     this.proxy = this.rpcProtocol.getProxy(ExtHostAPIIdentifier.ExtHostDebug);
     this.listen();
     this.registerDebugContributions();
@@ -229,10 +215,7 @@ export class MainThreadDebug implements IMainThreadDebug {
       this.labelService,
       this.messageService,
       this.debugPreferences,
-      async (sessionId: string) => {
-        const connection = await this.mainThreadConnection.ensureConnection(sessionId);
-        return new ExtensionWSChannel(connection);
-      },
+      async (sessionId: string) => await this.mainThreadConnection.ensureConnection(sessionId),
       this.fileService,
       terminalOptionsExt,
       this.debugPreferences,

@@ -1,3 +1,9 @@
+export * as process from './process';
+export * as strings from './strings';
+export * as arrays from './arrays';
+export * as objects from './objects';
+export * as path from './path';
+
 export * from './ansi';
 export * from './async';
 export * from './buffer';
@@ -26,15 +32,11 @@ export * from './marshalling';
 export * from './os';
 export * from './platform';
 export * from './progress';
-export * from './promise-util';
+export * from './promises';
 export * from './sequence';
 export * from './types';
 export * from './uint';
 export * from './uri';
 export * from './uuid';
 export * from './const';
-export * as process from './process';
-export * as strings from './strings';
-export * as arrays from './arrays';
-export * as objects from './objects';
-export * as path from './path';
+export * from './heap';

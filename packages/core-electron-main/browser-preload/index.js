@@ -32,7 +32,6 @@ electronEnv.currentWebContentsId = webContentsId;
 electronEnv.onigWasmPath = require.resolve('vscode-oniguruma/release/onig.wasm');
 
 const metaData = JSON.parse(ipcRenderer.sendSync('window-metadata', electronEnv.currentWindowId));
-
 electronEnv.metadata = metaData;
 process.env = Object.assign({}, process.env, metaData.env, { WORKSPACE_DIR: metaData.workspace });
 

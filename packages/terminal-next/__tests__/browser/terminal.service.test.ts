@@ -6,13 +6,13 @@ import httpProxy from 'http-proxy';
 import WebSocket from 'ws';
 
 import { AppConfig } from '@opensumi/ide-core-browser';
-import { Disposable, FileUri, URI, OperatingSystem } from '@opensumi/ide-core-common';
+import { FileUri, OperatingSystem, URI } from '@opensumi/ide-core-common';
 import { EnvironmentVariableServiceToken } from '@opensumi/ide-terminal-next/lib/common/environmentVariable';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
 
 import { MockEnvironmentVariableService } from '../../../extension/__tests__/hosted/__mocks__/environmentVariableService';
 import { NodePtyTerminalService } from '../../src/browser/terminal.service';
-import { IShellLaunchConfig, ITerminalService, ITerminalServicePath } from '../../src/common';
+import { IShellLaunchConfig, ITerminalService, ITerminalServicePath, TERMINAL_ID_SEPARATOR } from '../../src/common';
 
 import { injector } from './inject';
 import { createProxyServer, createWsServer, resetPort } from './proxy';
@@ -86,23 +86,21 @@ describe('terminal service test cases', () => {
         },
         create2: (sessionId, cols, rows, _launchConfig) => {
           launchConfig = _launchConfig;
+          setTimeout(() => {
+            (terminalService as any)?.$processChange(sessionId, 'zsh');
+          });
         },
         $resolveUnixShellPath(p) {
           return p;
         },
       },
     });
-
-    // electronEnv 在环境中就是 global
-    (global as any).metadata = {
-      windowClientId: 'test-window-client-id',
-    };
   });
 
-  afterAll(() => {
-    server.close();
-    proxy.close();
-    injector.disposeAll();
+  afterAll(async () => {
+    await server.close();
+    await proxy.close();
+    await injector.disposeAll();
   });
 
   beforeEach(() => {
@@ -113,8 +111,9 @@ describe('terminal service test cases', () => {
     launchConfig = undefined;
   });
   it('should be generate a session id', async () => {
-    const windowClientId = await terminalService.generateSessionId?.();
-    expect(windowClientId).toMatch(/^test-window-client-id.*/);
+    const sessionId = await terminalService.generateSessionId?.();
+    expect(sessionId).toMatch(/^test-window-client-id.*/);
+    expect(sessionId).toContain(TERMINAL_ID_SEPARATOR);
   });
 
   it('[attachByLaunchConfig] should be valid launchConfig with a valid shell path and ignore type', async () => {
@@ -138,16 +137,16 @@ describe('terminal service test cases', () => {
     expect(launchConfig?.executable).toEqual(shellPath);
   });
 
-  it('terminal process name', () => {
+  it('terminal process name will change', (done) => {
+    expect.assertions(2);
+    const launchConfig: IShellLaunchConfig = {
+      executable: shellPath,
+    };
     terminalService.onProcessChange((e) => {
-      const launchConfig: IShellLaunchConfig = {
-        executable: shellPath,
-      };
-      terminalService.attachByLaunchConfig(sessionId, 200, 200, launchConfig, {} as any);
-      terminalService.onProcessChange((e) => {
-        expect(e.sessionId).toBe(sessionId);
-        expect(e.processName).toBe('zsh');
-      });
+      expect(e.sessionId).toBe(sessionId);
+      expect(e.processName).toBe('zsh');
+      done();
     });
+    terminalService.attachByLaunchConfig(sessionId, 200, 200, launchConfig, {} as any);
   });
 });

@@ -1,12 +1,24 @@
-import clx from 'classnames';
-import React, { useCallback } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import cls from 'classnames';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 
-import { ComponentContextProvider, IconContext, IIconResourceOptions } from '@opensumi/ide-components';
-import { DisposableCollection, LabelService, useInjectable } from '@opensumi/ide-core-browser';
-import { localize, URI } from '@opensumi/ide-core-common';
-import { getThemeTypeSelector, IIconService, IThemeService, ThemeType } from '@opensumi/ide-theme';
+import { ComponentContextProvider, IIconResourceOptions, IconContext } from '@opensumi/ide-components';
+import {
+  DisposableCollection,
+  LabelService,
+  TComponentCDNType,
+  getCDNHref as getCDNHrefRaw,
+  useInjectable,
+} from '@opensumi/ide-core-browser';
+import { ExtensionBrowserStyleSheet, URI, localize } from '@opensumi/ide-core-common';
+import {
+  IIconService,
+  IProductIconService,
+  IThemeService,
+  PRODUCT_ICON_STYLE_ID,
+  ThemeType,
+  getThemeTypeSelector,
+} from '@opensumi/ide-theme';
 
 import { IExtension } from '../common';
 import { AbstractViewExtProcessService } from '../common/extension.service';
@@ -18,20 +30,6 @@ const ShadowContent = ({ root, children }) => ReactDOM.createPortal(children, ro
 function cloneNode<T>(head): T {
   return head.cloneNode(true);
 }
-
-const CDN_TYPE_MAP: CDNTypeMap = {
-  alipay: 'https://gw.alipayobjects.com/os/lib',
-  unpkg: 'https://unpkg.com/browse',
-  jsdelivr: 'https://cdn.jsdelivr.net/npm',
-};
-
-interface CDNTypeMap {
-  alipay: string;
-  unpkg: string;
-  jsdelivr: string;
-}
-
-type CDNType = keyof CDNTypeMap;
 
 /**
  * 由于经过 clone 以后，实际 Shadow DOM 中 head 与原始 proxiedHead 不是同一份引用
@@ -74,14 +72,12 @@ function useMutationObserver(from: HTMLHeadElement, target: HTMLHeadElement) {
 
 const packageName = '@opensumi/ide-components';
 
-function getStyleSheet(filePath: string, version: string, cdnType: CDNType = 'alipay') {
+function getCDNHref(filePath: string, version: string, cdnType: TComponentCDNType = 'alipay') {
+  return getCDNHrefRaw(packageName, filePath, version, cdnType);
+}
+
+function getStyleSheet(href: string) {
   const link = document.createElement('link');
-  let href = '';
-  if (cdnType === 'alipay') {
-    href = `${CDN_TYPE_MAP['alipay']}/${packageName.slice(1)}/${version}/${filePath}`;
-  } else {
-    href = `${CDN_TYPE_MAP[cdnType]}/${packageName}@${version}/${filePath}`;
-  }
   link.setAttribute('href', href);
   link.setAttribute('rel', 'stylesheet');
   return link;
@@ -93,18 +89,21 @@ const ShadowRoot = ({
   children,
   proxiedHead,
   cdnType,
+  styleSheet,
 }: {
   id: string;
   extensionId: string;
   children: any;
   proxiedHead: HTMLHeadElement;
-  cdnType?: CDNType;
+  cdnType?: TComponentCDNType;
+  styleSheet?: ExtensionBrowserStyleSheet;
 }) => {
   const shadowRootRef = useRef<HTMLDivElement | null>(null);
   const [shadowRoot, setShadowRoot] = React.useState<ShadowRoot | null>(null);
   const viewExtensionService = useInjectable<AbstractViewExtProcessService>(AbstractViewExtProcessService);
   const themeService = useInjectable<IThemeService>(IThemeService);
   const iconService = useInjectable<IIconService>(IIconService);
+  const productIconService = useInjectable<IProductIconService>(IProductIconService);
   const [themeType, setThemeType] = useState<null | ThemeType>(null);
 
   useEffect(() => {
@@ -112,8 +111,15 @@ const ShadowRoot = ({
     if (shadowRootRef.current) {
       const shadowRootElement = shadowRootRef.current.attachShadow({ mode: 'open' });
       if (proxiedHead) {
-        proxiedHead.appendChild(getStyleSheet('dist/index.css', pkgJson.version, cdnType));
-        proxiedHead.appendChild(getStyleSheet('lib/icon/iconfont/iconfont.css', pkgJson.version, cdnType));
+        if (styleSheet) {
+          proxiedHead.appendChild(getStyleSheet(styleSheet.componentUri));
+          proxiedHead.appendChild(getStyleSheet(styleSheet.iconfontUri));
+        } else {
+          proxiedHead.appendChild(getStyleSheet(getCDNHref('dist/index.css', pkgJson.version, cdnType)));
+          proxiedHead.appendChild(
+            getStyleSheet(getCDNHref('lib/icon/iconfont/iconfont.css', pkgJson.version, cdnType)),
+          );
+        }
 
         // 如果是一个插件注册了多个视图，节点需要被 clone 才能生效，否则第一个视图 appendChild 之后节点就没了
         const newHead = cloneNode<HTMLHeadElement>(proxiedHead);
@@ -123,11 +129,18 @@ const ShadowRoot = ({
         iconStyle.id = 'icon-style';
         iconStyle.innerHTML = iconService.currentTheme?.styleSheetContent;
         newHead.appendChild(iconStyle);
-        disposables.push(
+
+        // 注册 producticon theme
+        const productIconStyle = document.createElement('style');
+        productIconStyle.id = PRODUCT_ICON_STYLE_ID;
+        productIconStyle.innerHTML = productIconService.currentTheme?.styleSheetContent || '';
+        newHead.appendChild(productIconStyle);
+
+        disposables.pushAll([
           iconService.onThemeChange((e) => {
             iconStyle.innerHTML = e.styleSheetContent;
           }),
-        );
+        ]);
         shadowRootElement.appendChild(newHead);
         const portalRoot = viewExtensionService.getPortalShadowRoot(extensionId);
         if (portalRoot) {
@@ -155,7 +168,7 @@ const ShadowRoot = ({
       {shadowRoot && (
         <ShadowContent root={shadowRoot}>
           <div
-            className={clx(getThemeTypeSelector(themeType!), 'shadow-context-wrapper', 'show-file-icons')}
+            className={cls(getThemeTypeSelector(themeType!), 'shadow-context-wrapper', 'show-file-icons')}
             style={{ width: '100%', height: '100%' }}
           >
             {children}
@@ -166,7 +179,15 @@ const ShadowRoot = ({
   );
 };
 
-export function getShadowRoot(panel, extension: IExtension, props, id, proxiedHead, type?: CDNType) {
+export function getShadowRoot(
+  panel,
+  extension: IExtension,
+  props,
+  id,
+  proxiedHead,
+  type?: TComponentCDNType,
+  extensionBrowserStyleSheet?: ExtensionBrowserStyleSheet,
+) {
   const Component = panel;
   const { getIcon } = React.useContext(IconContext);
   const labelService = useInjectable<LabelService>(LabelService);
@@ -177,7 +198,13 @@ export function getShadowRoot(panel, extension: IExtension, props, id, proxiedHe
 
   return (
     <ComponentContextProvider value={{ getIcon, localize, getResourceIcon }}>
-      <ShadowRoot id={`${extension.id}-${id}`} extensionId={extension.id} proxiedHead={proxiedHead} cdnType={type}>
+      <ShadowRoot
+        id={`${extension.id}-${id}`}
+        extensionId={extension.id}
+        proxiedHead={proxiedHead}
+        cdnType={type}
+        styleSheet={extensionBrowserStyleSheet}
+      >
         <Component {...props} />
       </ShadowRoot>
     </ComponentContextProvider>

@@ -1,11 +1,13 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { DisposableCollection, localize } from '@opensumi/ide-core-browser';
+import { LifeCyclePhase } from '@opensumi/ide-core-common';
 import { DEBUG_WELCOME_ID } from '@opensumi/ide-debug';
 import { FILE_EXPLORER_WELCOME_ID } from '@opensumi/ide-file-tree-next';
 import { IMainLayoutService, IViewContentDescriptor, IViewsRegistry } from '@opensumi/ide-main-layout';
+import { SCM_WELCOME_ID } from '@opensumi/ide-scm';
 import { ContextKeyExpr } from '@opensumi/monaco-editor-core/esm/vs/platform/contextkey/common/contextkey';
 
-import { VSCodeContributePoint, Contributes } from '../../../common';
+import { Contributes, LifeCycle, VSCodeContributePoint } from '../../../common';
 
 export enum ViewsWelcomeExtensionPointFields {
   view = 'view',
@@ -28,11 +30,12 @@ export type ViewsWelcomeSchema = ViewWelcome[];
 export const ViewIdentifierMap: { [key: string]: string } = {
   explorer: FILE_EXPLORER_WELCOME_ID,
   debug: DEBUG_WELCOME_ID,
-  scm: 'scm_view',
+  scm: SCM_WELCOME_ID,
 };
 
 @Injectable()
 @Contributes('viewsWelcome')
+@LifeCycle(LifeCyclePhase.Starting)
 export class ViewsWelcomeContributionPoint extends VSCodeContributePoint<ViewsWelcomeSchema> {
   @Autowired(IMainLayoutService)
   mainlayoutService: IMainLayoutService;
@@ -40,7 +43,7 @@ export class ViewsWelcomeContributionPoint extends VSCodeContributePoint<ViewsWe
   @Autowired(IViewsRegistry)
   viewsRegistry: IViewsRegistry;
 
-  schema = {
+  static schema = {
     type: 'array',
     description: localize(
       'contributes.viewsWelcome',
@@ -103,24 +106,27 @@ export class ViewsWelcomeContributionPoint extends VSCodeContributePoint<ViewsWe
 
   contribute() {
     const welcomesByViewId = new Map<string, Map<ViewWelcome, IViewContentDescriptor>>();
-    for (const welcome of this.json) {
-      const { group, order } = parseGroupAndOrder(welcome);
-      const precondition = ContextKeyExpr.deserialize(welcome.enablement);
+    for (const contrib of this.contributesMap) {
+      const { extensionId, contributes } = contrib;
+      for (const welcome of contributes) {
+        const { group, order } = parseGroupAndOrder(welcome);
+        const precondition = ContextKeyExpr.deserialize(welcome.enablement);
 
-      const id = ViewIdentifierMap[welcome.view] ?? welcome.view;
-      let viewContentMap = welcomesByViewId.get(id);
-      if (!viewContentMap) {
-        viewContentMap = new Map();
-        welcomesByViewId.set(id, viewContentMap);
+        const id = ViewIdentifierMap[welcome.view] ?? welcome.view;
+        let viewContentMap = welcomesByViewId.get(id);
+        if (!viewContentMap) {
+          viewContentMap = new Map();
+          welcomesByViewId.set(id, viewContentMap);
+        }
+
+        viewContentMap.set(welcome, {
+          content: this.getLocalizeFromNlsJSON(welcome.contents, extensionId),
+          when: ContextKeyExpr.deserialize(welcome.when),
+          precondition,
+          group,
+          order,
+        });
       }
-
-      viewContentMap.set(welcome, {
-        content: this.getLocalizeFromNlsJSON(welcome.contents),
-        when: ContextKeyExpr.deserialize(welcome.when),
-        precondition,
-        group,
-        order,
-      });
     }
     for (const [id, viewContentMap] of welcomesByViewId) {
       const disposables = this.viewsRegistry.registerViewWelcomeContent2(id, viewContentMap);

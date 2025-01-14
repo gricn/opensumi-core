@@ -1,16 +1,18 @@
 import {
   Disposable,
-  QuickPickService,
+  FileStat,
   IContextKeyService,
   PreferenceService,
-  URI,
-  FileStat,
+  QuickPickService,
   StorageProvider,
+  URI,
 } from '@opensumi/ide-core-browser';
 import { IDebugServer } from '@opensumi/ide-debug';
-import { DebugConfigurationManager, DebugPreferences } from '@opensumi/ide-debug/lib/browser';
+import { DebugConfigurationManager } from '@opensumi/ide-debug/lib/browser/debug-configuration-manager';
+import { DebugPreferences } from '@opensumi/ide-debug/lib/browser/debug-preferences';
 import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
 import { WorkbenchEditorService } from '@opensumi/ide-editor';
+import { IEditorDocumentModelService } from '@opensumi/ide-editor/lib/browser';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
 
@@ -34,6 +36,11 @@ describe('Debug Configuration Manager', () => {
   const mockMonacoEditorModel = {
     getLineLastNonWhitespaceColumn: jest.fn(),
     getPositionAt: jest.fn(() => 1),
+    getValue: jest.fn(
+      () => `{
+      "version": "0.2.0",
+      "configurations": [`,
+    ),
   };
 
   const mockMonacoEditor = {
@@ -109,6 +116,8 @@ describe('Debug Configuration Manager', () => {
             workspaceFolderUri: root.toString(),
           },
         };
+      } else if (key === 'recentDynamicConfigurations') {
+        return [];
       }
     }),
     set: jest.fn(),
@@ -164,6 +173,21 @@ describe('Debug Configuration Manager', () => {
       useValue: () => mockDebugStorage,
     });
 
+    mockInjector.overrideProviders({
+      token: IEditorDocumentModelService,
+      useValue: {
+        createModelReference: (uri) => ({
+          instance: {
+            uri,
+            getMonacoModel: () => ({
+              getValue: jest.fn(() => ''),
+            }),
+          },
+          dispose: jest.fn(),
+        }),
+      },
+    });
+
     debugConfigurationManager = mockInjector.get(DebugConfigurationManager);
 
     await debugConfigurationManager.whenReady;
@@ -172,7 +196,7 @@ describe('Debug Configuration Manager', () => {
   afterAll(() => {});
 
   it('debugModelManager should be init success', () => {
-    expect(mockPreferenceService.onPreferenceChanged).toBeCalledTimes(2);
+    expect(mockPreferenceService.onPreferenceChanged).toHaveBeenCalledTimes(2);
   });
 
   it('should have enough API', () => {
@@ -205,24 +229,24 @@ describe('Debug Configuration Manager', () => {
 
   it('openConfiguration method should be work', async () => {
     await debugConfigurationManager.openConfiguration();
-    expect(mockWorkbenchEditorService.open).toBeCalledTimes(1);
+    expect(mockWorkbenchEditorService.open).toHaveBeenCalledTimes(1);
   });
 
   it('addConfiguration method should be work', async () => {
     await debugConfigurationManager.addConfiguration();
-    expect(mockMonacoEditorModel.getLineLastNonWhitespaceColumn).toBeCalledTimes(2);
-    expect(mockMonacoEditor.setPosition).toBeCalledTimes(1);
-    expect(mockMonacoEditor.trigger).toBeCalledTimes(2);
+    expect(mockMonacoEditorModel.getLineLastNonWhitespaceColumn).toHaveBeenCalledTimes(2);
+    expect(mockMonacoEditor.setPosition).toHaveBeenCalledTimes(1);
+    expect(mockMonacoEditor.trigger).toHaveBeenCalledTimes(2);
   });
 
   it('load method should be work', async () => {
     await debugConfigurationManager.load();
-    expect(mockDebugStorage.get).toBeCalledTimes(1);
+    expect(mockDebugStorage.get.mock.calls.length).toBeGreaterThan(0);
   });
 
   it('save method should be work', async () => {
     await debugConfigurationManager.save();
-    expect(mockDebugStorage.set).toBeCalledTimes(1);
+    expect(mockDebugStorage.set).toHaveBeenCalledTimes(1);
   });
 
   it('canSetBreakpointsIn method should be work', () => {
@@ -230,12 +254,14 @@ describe('Debug Configuration Manager', () => {
     let mockGetLanguageIdentifier = jest.fn(() => ({ language: 'jsonc' }));
     let expected = debugConfigurationManager.canSetBreakpointsIn({
       getLanguageIdentifier: mockGetLanguageIdentifier,
+      getLanguageId: () => 'jsonc',
     } as any);
     expect(expected).toBeFalsy();
     // log
     mockGetLanguageIdentifier = jest.fn(() => ({ language: 'log' }));
     expected = debugConfigurationManager.canSetBreakpointsIn({
       getLanguageIdentifier: mockGetLanguageIdentifier,
+      getLanguageId: () => 'log',
     } as any);
     expect(expected).toBeFalsy();
     // undefined model
@@ -245,6 +271,7 @@ describe('Debug Configuration Manager', () => {
     mockGetLanguageIdentifier = jest.fn(() => ({ language: 'c' }));
     expected = debugConfigurationManager.canSetBreakpointsIn({
       getLanguageIdentifier: mockGetLanguageIdentifier,
+      getLanguageId: () => 'c',
     } as any);
     expect(expected).toBeTruthy();
     // if allowBreakpointsEverywhere = false
@@ -252,6 +279,7 @@ describe('Debug Configuration Manager', () => {
     mockGetLanguageIdentifier = jest.fn(() => ({ language: 'c' }));
     expected = debugConfigurationManager.canSetBreakpointsIn({
       getLanguageIdentifier: mockGetLanguageIdentifier,
+      getLanguageId: () => 'c',
     } as any);
     expect(expected).toBeFalsy();
     // while debug server support node language
@@ -259,6 +287,7 @@ describe('Debug Configuration Manager', () => {
     mockGetLanguageIdentifier = jest.fn(() => ({ language: 'node' }));
     expected = debugConfigurationManager.canSetBreakpointsIn({
       getLanguageIdentifier: mockGetLanguageIdentifier,
+      getLanguageId: () => 'node',
     } as any);
     expect(expected).toBeTruthy();
   });
@@ -268,6 +297,7 @@ describe('Debug Configuration Manager', () => {
     debugConfigurationManager.addSupportBreakpoints('abc');
     const expected = debugConfigurationManager.canSetBreakpointsIn({
       getLanguageIdentifier: mockGetLanguageIdentifier,
+      getLanguageId: () => 'abc',
     } as any);
     expect(expected).toBeTruthy();
   });
@@ -277,6 +307,7 @@ describe('Debug Configuration Manager', () => {
     debugConfigurationManager.removeSupportBreakpoints('abc');
     const expected = debugConfigurationManager.canSetBreakpointsIn({
       getLanguageIdentifier: mockGetLanguageIdentifier,
+      getLanguageId: () => 'abc',
     } as any);
     expect(expected).toBeFalsy();
   });

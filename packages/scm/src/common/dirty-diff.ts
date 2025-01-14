@@ -1,9 +1,10 @@
-import { IChange, Command } from '@opensumi/ide-core-common';
+import { Command, ILineChange } from '@opensumi/ide-core-common';
+
 // eslint-disable-next-line import/no-restricted-paths
 import type { ICodeEditor as IMonacoCodeEditor, IPosition } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
 
 export interface IDirtyDiffModel {
-  changes: IChange[];
+  changes: ILineChange[];
   findNextClosestChangeLineNumber(lineNumber: number, inclusive?: boolean): number;
   findPreviousClosestChangeLineNumber(lineNumber: number, inclusive?: boolean): number;
 }
@@ -15,6 +16,10 @@ export interface IDirtyDiffWorkbenchController {
 
 export const OPEN_DIRTY_DIFF_WIDGET: Command = {
   id: 'OPEN_DIRTY_DIFF_WIDGET',
+};
+
+export const CLOSE_DIRTY_DIFF_WIDGET: Command = {
+  id: 'CLOSE_DIRTY_DIFF_WIDGET',
 };
 
 export const GOTO_NEXT_CHANGE: Command = {

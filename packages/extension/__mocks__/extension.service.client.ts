@@ -1,27 +1,26 @@
 import { Injectable } from '@opensumi/di';
 
-import { IExtensionNodeClientService, IExtraMetaData, IExtensionMetaData, IExtension } from '../src/common';
+import { MOCK_EXTENSIONS } from '../__tests__/browser/extension-service/extension-service-mock-helper';
+import { IExtensionNodeClientService, IExtraMetaData, IExtensionMetaData } from '../src/common';
 
 import { mockExtensionProps } from './extensions';
 
-const mockExtensions: IExtension[] = [
-  {
-    ...mockExtensionProps,
-    contributes: mockExtensionProps.packageJSON.contributes,
-    activate: () => true,
-    reset() {},
-    enable() {},
-    toJSON: () => mockExtensionProps,
-  },
-];
-
 @Injectable()
 export class MockExtNodeClientService implements IExtensionNodeClientService {
+  async pid(): Promise<number | null> {
+    return 1;
+  }
+  async setupNLSConfig(languageId: string, storagePath: string): Promise<void> {
+    // void
+  }
+  getOpenVSXRegistry(): Promise<string> {
+    return Promise.resolve('');
+  }
   getElectronMainThreadListenPath(clientId: string): Promise<string> {
     throw new Error('Method not implemented.');
   }
   getAllExtensions(scan: string[], extensionCandidate: string[], localization: string): Promise<IExtensionMetaData[]> {
-    return Promise.resolve(mockExtensions);
+    return Promise.resolve(MOCK_EXTENSIONS);
   }
   createProcess(clientId: string): Promise<void> {
     return Promise.resolve();
@@ -48,5 +47,8 @@ export class MockExtNodeClientService implements IExtensionNodeClientService {
   updateLanguagePack(languageId: string, languagePackPath: string): Promise<void> {
     process.env['TEST_KAITIAN_LANGUAGE_ID'] = languageId;
     return Promise.resolve();
+  }
+  getLanguagePack(languageId: string) {
+    return Promise.resolve(undefined);
   }
 }

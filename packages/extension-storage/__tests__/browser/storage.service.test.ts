@@ -5,21 +5,22 @@ import { MockWorkspaceService } from '@opensumi/ide-workspace/lib/common/mocks';
 
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
-import { IExtensionStorageService, IExtensionStorageServer } from '../../src/common';
-
+import { IExtensionStorageServer, IExtensionStorageService } from '../../src/common';
 
 describe('ExtensionStorage service should be work', () => {
   let injector: MockInjector;
   let extensionStorageService: IExtensionStorageService;
   let mockInit;
-  beforeEach(async () => {
+  beforeAll(async () => {
     injector = createBrowserInjector([]);
 
     // mock used instance
     injector.overrideProviders(
       {
         token: IExtensionStorageServer,
-        useValue: {},
+        useValue: {
+          get: jest.fn(() => undefined),
+        },
       },
       {
         token: AppConfig,
@@ -40,12 +41,12 @@ describe('ExtensionStorage service should be work', () => {
     await extensionStorageService.whenReady;
   });
 
-  afterEach(async () => {
-    injector.disposeAll();
+  afterAll(async () => {
+    await injector.disposeAll();
   });
 
   it('01 #Init', async () => {
-    expect(mockInit).toBeCalledTimes(1);
+    expect(mockInit).toHaveBeenCalledTimes(1);
   });
 
   it('02 #Set', async () => {
@@ -55,7 +56,7 @@ describe('ExtensionStorage service should be work', () => {
     const isGlobal = false;
     injector.mock(IExtensionStorageServer, 'set', mockSet);
     extensionStorageService.set(key, value, isGlobal);
-    expect(mockSet).toBeCalledWith(key, value, isGlobal);
+    expect(mockSet).toHaveBeenCalledWith(key, value, isGlobal);
   });
 
   it('03 #Get', async () => {
@@ -64,7 +65,7 @@ describe('ExtensionStorage service should be work', () => {
     const isGlobal = false;
     injector.mock(IExtensionStorageServer, 'get', mockGet);
     await extensionStorageService.get(key, isGlobal);
-    expect(mockGet).toBeCalledWith(key, isGlobal);
+    expect(mockGet).toHaveBeenCalledWith(key, isGlobal);
   });
 
   it('04 #GetAll', async () => {
@@ -72,11 +73,11 @@ describe('ExtensionStorage service should be work', () => {
     const isGlobal = false;
     injector.mock(IExtensionStorageServer, 'getAll', mockGetAll);
     await extensionStorageService.getAll(isGlobal);
-    expect(mockGetAll).toBeCalledWith(isGlobal);
+    expect(mockGetAll).toHaveBeenCalledWith(isGlobal);
   });
 
   it('05 #ReConnectInit', async () => {
     await extensionStorageService.reConnectInit();
-    expect(mockInit).toBeCalledTimes(2);
+    expect(mockInit).toHaveBeenCalledTimes(2);
   });
 });

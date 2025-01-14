@@ -1,16 +1,12 @@
 import { Injector } from '@opensumi/di';
-import { IWebSocket } from '@opensumi/ide-connection';
 import { LabelService } from '@opensumi/ide-core-browser/lib/services';
-import { IDebugSessionManager } from '@opensumi/ide-debug';
-import { DebugSessionOptions } from '@opensumi/ide-debug';
-import {
-  DebugSession,
-  DebugSessionConnection,
-  BreakpointManager,
-  DebugSessionFactory,
-  DebugPreferences,
-  DebugModelManager,
-} from '@opensumi/ide-debug/lib/browser';
+import { localize } from '@opensumi/ide-core-common';
+import { DebugSessionOptions, IDebugModelManager, IDebugSessionManager } from '@opensumi/ide-debug';
+import { BreakpointManager } from '@opensumi/ide-debug/lib/browser/breakpoint';
+import { DebugPreferences } from '@opensumi/ide-debug/lib/browser/debug-preferences';
+import { DebugSession } from '@opensumi/ide-debug/lib/browser/debug-session';
+import { DebugSessionConnection } from '@opensumi/ide-debug/lib/browser/debug-session-connection';
+import { DebugSessionFactory } from '@opensumi/ide-debug/lib/browser/debug-session-contribution';
 import { WorkbenchEditorService } from '@opensumi/ide-editor';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
 import { OutputChannel } from '@opensumi/ide-output/lib/browser/output.channel';
@@ -18,6 +14,9 @@ import { OutputService } from '@opensumi/ide-output/lib/browser/output.service';
 import { IMessageService } from '@opensumi/ide-overlay';
 import { ITerminalApiService, TerminalOptions } from '@opensumi/ide-terminal-next';
 import { DebugProtocol } from '@opensumi/vscode-debugprotocol';
+
+import { ExtensionConnection } from '../../../../common/vscode';
+import { ThemeIcon } from '../../../../common/vscode/ext-types';
 
 export class ExtensionDebugSession extends DebugSession {
   constructor(
@@ -27,7 +26,7 @@ export class ExtensionDebugSession extends DebugSession {
     protected readonly terminalService: ITerminalApiService,
     protected readonly editorService: WorkbenchEditorService,
     protected readonly breakpointManager: BreakpointManager,
-    protected readonly modelManager: DebugModelManager,
+    protected readonly modelManager: IDebugModelManager,
     protected readonly labelService: LabelService,
     protected readonly messageService: IMessageService,
     protected readonly fileSystem: IFileServiceClient,
@@ -51,10 +50,19 @@ export class ExtensionDebugSession extends DebugSession {
 
   protected async doRunInTerminal(
     terminalOptions: TerminalOptions,
-    command?: string,
   ): Promise<DebugProtocol.RunInTerminalResponse['body']> {
-    const terminalWidgetOptions = Object.assign({}, terminalOptions, this.terminalOptionsExt);
-    return super.doRunInTerminal(terminalWidgetOptions, command);
+    if (!terminalOptions.name) {
+      terminalOptions.name = localize('debug.terminal.title', 'Debug Process');
+    }
+    if (!terminalOptions.iconPath) {
+      terminalOptions.iconPath = new ThemeIcon('debug');
+    }
+    const terminalWidgetOptions = {
+      ...terminalOptions,
+      ...this.terminalOptionsExt,
+    };
+
+    return super.doRunInTerminal(terminalWidgetOptions);
   }
 }
 
@@ -62,12 +70,12 @@ export class ExtensionDebugSessionFactory implements DebugSessionFactory {
   constructor(
     protected readonly editorManager: WorkbenchEditorService,
     protected readonly breakpoints: BreakpointManager,
-    protected readonly modelManager: DebugModelManager,
+    protected readonly modelManager: IDebugModelManager,
     protected readonly terminalService: ITerminalApiService,
     protected readonly labelService: LabelService,
     protected readonly messageService: IMessageService,
     protected readonly debugPreferences: DebugPreferences,
-    protected readonly connectionFactory: (sessionId: string) => Promise<IWebSocket>,
+    protected readonly connectionFactory: (sessionId: string) => Promise<ExtensionConnection>,
     protected readonly fileSystem: IFileServiceClient,
     protected readonly terminalOptionsExt: any,
     protected readonly debugPreference: DebugPreferences,

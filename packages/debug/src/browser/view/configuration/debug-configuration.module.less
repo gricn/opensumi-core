@@ -1,16 +1,19 @@
-@import '~@opensumi/ide-components/lib/style/mixins.less';
+@import '@opensumi/ide-components/lib/style/mixins.less';
 
-.kt_debug_action_bar {
+.debug_action_bar_internal {
+  padding: 0px 8px;
+  margin-bottom: 8px;
+}
+
+.debug_action_bar {
   height: 28px;
   display: flex;
   align-items: center;
-  padding: 0px 8px;
-  margin-bottom: 8px;
   justify-content: flex-start;
   pointer-events: all;
   overflow: hidden;
 
-  .kt_debug_actions {
+  .debug_actions {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -25,7 +28,9 @@
     min-width: 50px;
     margin-right: 10px;
     max-width: 200px;
-
+    &:focus-visible {
+      outline: 0;
+    }
     :global(.kt-select-value) {
       & > option {
         min-width: 22px;
@@ -34,14 +39,29 @@
   }
 }
 
+// 在 Select 上实现一个 Divider
+:global(.kt-select-options-default) > div > span.select_divider_container {
+  display: block;
+  height: 1px;
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+
+.config_popover_insert > span {
+  padding: 0;
+}
+
+.debug_configuration_container {
+  padding-right: 8px;
+  margin-bottom: 8px;
+}
+
 .debug_configuration_toolbar {
   display: flex;
   height: 28px;
-  padding-right: 8px;
-  margin-bottom: 8px;
   align-items: center;
 
-  .kt_debug_actions {
+  .debug_actions {
     display: flex;
     flex: 1;
     justify-content: space-between;
@@ -56,6 +76,9 @@
     margin-left: 8px;
     margin-right: 6px;
 
+    &:focus-visible {
+      outline: 0;
+    }
     :global(.kt-select-value) {
       & > option {
         min-width: 22px;
@@ -71,10 +94,12 @@
   display: flex;
   align-content: center;
   justify-content: center;
-  z-index: 999;
+  z-index: 10;
   user-select: none;
+  top: 0;
+  left: 0;
 
-  .kt_debug_action_bar {
+  .debug_action_bar {
     height: 100%;
     padding: 0px 12px;
   }
@@ -87,6 +112,10 @@
   background-color: var(--debugToolBar-background);
   border: 1px solid var(--debugToolBar-border);
   .modal-shadow();
+}
+
+.debug_toolbar_wrapper_electron {
+  -webkit-app-region: none;
 }
 
 .debug_toolbar_drag {

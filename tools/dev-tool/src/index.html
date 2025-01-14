@@ -2,6 +2,9 @@
 <html>
   <head>
     <meta charset="UTF-8" />
+    <link rel="preconnect" href="https://g.alicdn.com" />
+    <link rel="preconnect" href="//gw.alipayobjects.com" />
+    <link rel="preconnect" href="//at.alicdn.com" />
     <title>OpenSumi IDE</title>
     <style>
       html,
@@ -17,7 +20,9 @@
         savedLayout = JSON.parse(localStorage.getItem('layout') || '{}');
         savedColors = JSON.parse(localStorage.getItem('theme') || '{}');
       } catch (err) {}
-      document.getElementsByTagName('html')[0].style.backgroundColor = savedColors.editorBackground || '#2a2a2a';
+      if (savedColors.editorBackground) {
+        document.getElementsByTagName('html')[0].style.backgroundColor = savedColors.editorBackground;
+      }
     </script>
   </head>
   <body>

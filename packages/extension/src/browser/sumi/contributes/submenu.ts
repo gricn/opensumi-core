@@ -1,11 +1,13 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
+import { menus } from '@opensumi/ide-core-browser/lib/extensions/schema/menu';
 import { IMenuRegistry, ISubmenuItem } from '@opensumi/ide-core-browser/lib/menu/next';
-import { localize, formatLocalize, isUndefined } from '@opensumi/ide-core-common';
+import { LifeCyclePhase, formatLocalize, isUndefined } from '@opensumi/ide-core-common';
 import { IIconService, IconType } from '@opensumi/ide-theme';
 
-import { VSCodeContributePoint, Contributes } from '../../../common';
+import { Contributes, LifeCycle, VSCodeContributePoint } from '../../../common';
 import { IContributedSubmenu } from '../../../common/sumi/extension';
-import { parseMenuId, parseMenuGroup } from '../../vscode/contributes/menu';
+import { AbstractExtInstanceManagementService } from '../../types';
+import { parseMenuGroup, parseMenuId } from '../../vscode/contributes/menu';
 
 export interface KtSubmenusSchema {
   [MenuPosition: string]: IContributedSubmenu[];
@@ -41,6 +43,7 @@ export function isValidSubmenu(submenu: IContributedSubmenu[], collector: Consol
 
 @Injectable()
 @Contributes('submenus')
+@LifeCycle(LifeCyclePhase.Starting)
 export class SubmenusContributionPoint extends VSCodeContributePoint<KtSubmenusSchema> {
   @Autowired(IMenuRegistry)
   private readonly menuRegistry: IMenuRegistry;
@@ -48,63 +51,51 @@ export class SubmenusContributionPoint extends VSCodeContributePoint<KtSubmenusS
   @Autowired(IIconService)
   protected readonly iconService: IIconService;
 
-  schema = {
-    description: localize('kaitianContributes.submenu', 'Contributes extension defined submenu'),
-    type: 'array',
-    items: {
-      type: 'object',
-      properties: {
-        id: {
-          type: 'string',
-          description: localize('kaitianContributes.submenu.id', 'The identifier of submenu item, used as menu-id'),
-        },
-        title: {
-          type: 'string',
-          description: localize('kaitianContributes.submenu.title', 'The title of submenu item'),
-        },
-        group: {
-          type: 'string',
-          description: localize('kaitianContributes.submenu.group', 'The order of submenu item'),
-        },
-        when: {
-          type: 'string',
-          description: localize('kaitianContributes.submenu.when', 'The when expression string of submenu item'),
-        },
-      },
-    },
-  };
+  @Autowired(AbstractExtInstanceManagementService)
+  protected readonly extensionManageService: AbstractExtInstanceManagementService;
+
+  static schema = menus.subMenusSchema;
 
   contribute() {
     const collector = console;
 
-    // menu registration
-    for (const menuPosition of Object.keys(this.json)) {
-      const menuActions = this.json[menuPosition];
-      if (!isValidSubmenu(menuActions, console)) {
-        return;
+    for (const contrib of this.contributesMap) {
+      const { extensionId, contributes } = contrib;
+      const extension = this.extensionManageService.getExtensionInstanceByExtId(extensionId);
+      if (!extension) {
+        continue;
       }
 
-      const menuId = parseMenuId(menuPosition);
-      if (isUndefined(menuId)) {
-        collector.warn(formatLocalize('menuId.invalid', '`{0}` is not a valid submenu identifier', menuPosition));
-        return;
-      }
+      for (const menuPosition of Object.keys(contributes)) {
+        const menuActions = contributes[menuPosition];
+        if (!isValidSubmenu(menuActions, console)) {
+          return;
+        }
 
-      for (const item of menuActions) {
-        const [group, order] = parseMenuGroup(item.group);
+        const menuId = parseMenuId(menuPosition);
+        if (isUndefined(menuId)) {
+          collector.warn(formatLocalize('menuId.invalid', '`{0}` is not a valid submenu identifier', menuPosition));
+          return;
+        }
 
-        this.addDispose(
-          this.menuRegistry.registerMenuItem(menuId, {
-            submenu: item.id,
-            label: item.title && this.getLocalizeFromNlsJSON(item.title),
-            iconClass: this.iconService.fromIcon(this.extension.path, item.icon, IconType.Background),
-            when: item.when,
-            group,
-            order,
-            nativeRole: item.nativeRole,
-          } as ISubmenuItem),
-        );
+        for (const item of menuActions) {
+          const [group, order] = parseMenuGroup(item.group);
+
+          this.addDispose(
+            this.menuRegistry.registerMenuItem(menuId, {
+              submenu: item.id,
+              label: item.title && this.getLocalizeFromNlsJSON(item.title, extensionId),
+              iconClass: this.iconService.fromIcon(extension.path, item.icon, IconType.Background),
+              when: item.when,
+              group,
+              order,
+              nativeRole: item.nativeRole,
+            } as ISubmenuItem),
+          );
+        }
       }
     }
+
+    // menu registration
   }
 }

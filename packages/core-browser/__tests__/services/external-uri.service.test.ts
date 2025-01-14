@@ -1,6 +1,6 @@
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
-import { URI, AppConfig } from '../../src';
+import { AppConfig, URI } from '../../src';
 import { IExternalUriService } from '../../src/services';
 
 describe('external-uri service test', () => {
@@ -22,14 +22,14 @@ describe('external-uri service test', () => {
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     Object.defineProperty(window, 'location', {
       value: {
         href: oldWindowLocationHref,
         hostname: oldWindowLocationHostname,
       },
     });
-    injector.disposeAll();
+    await injector.disposeAll();
   });
 
   it('localhost uri to remote uri', async () => {

@@ -1,27 +1,31 @@
+import { Terminal } from '@xterm/xterm';
 import WebSocket from 'ws';
-import { Terminal } from 'xterm';
 
-import { Disposable, PreferenceProvider, PreferenceResolveResult } from '@opensumi/ide-core-browser';
-import { PreferenceService } from '@opensumi/ide-core-browser';
-import { uuid, URI, Emitter, IDisposable, PreferenceScope, Deferred, OperatingSystem } from '@opensumi/ide-core-common';
+import { Injectable } from '@opensumi/di';
+import { WSChannel } from '@opensumi/ide-connection';
+import { createWSChannelForClient } from '@opensumi/ide-connection/__test__/common/ws-channel';
+import { WSWebSocketConnection } from '@opensumi/ide-connection/lib/common/connection';
+import { Disposable, PreferenceProvider, PreferenceResolveResult, PreferenceService } from '@opensumi/ide-core-browser';
+import { Deferred, Emitter, IDisposable, OperatingSystem, PreferenceScope, URI, uuid } from '@opensumi/ide-core-common';
+import { Color, RGBA } from '@opensumi/ide-theme/lib/common/color';
 
 import {
-  ITerminalService,
-  ITerminalConnection,
-  ITerminalError,
-  IShellLaunchConfig,
-  ITerminalProfile,
-  ITerminalProfileService,
-  IResolveDefaultProfileOptions,
-  ITerminalProfileProvider,
-  IExtensionTerminalProfile,
-  ITerminalProfileInternalService,
-  IPtyProcessChangeEvent,
-  ITerminalContributions,
   ICreateContributedTerminalProfileOptions,
+  IExtensionTerminalProfile,
+  IPtyProcessChangeEvent,
+  IResolveDefaultProfileOptions,
+  IShellLaunchConfig,
+  ITerminalConnection,
+  ITerminalContributions,
+  ITerminalError,
+  ITerminalProfile,
+  ITerminalProfileInternalService,
+  ITerminalProfileProvider,
+  ITerminalProfileService,
+  ITerminalService,
 } from '../../src/common';
 
-import { getPort, localhost, MessageMethod } from './proxy';
+import { MessageMethod, getPort, localhost } from './proxy';
 import { delay } from './utils';
 
 // Ref: https://jestjs.io/docs/manual-mocks#mocking-methods-which-are-not-implemented-in-jsdom
@@ -41,14 +45,17 @@ Object.defineProperty(window, 'matchMedia', {
 
 export const defaultName = 'bash';
 
-export class MockSocketService implements ITerminalService {
+@Injectable()
+export class MockTerminalService implements ITerminalService {
   static resId = 1;
 
-  private _socks: Map<string, WebSocket>;
+  private channels: Map<string, WSChannel>;
+  private socks: Map<string, WebSocket>;
   private _response: Map<number, { resolve: (value: any) => void }>;
 
   constructor() {
-    this._socks = new Map();
+    this.channels = new Map();
+    this.socks = new Map();
     this._response = new Map();
   }
 
@@ -63,10 +70,14 @@ export class MockSocketService implements ITerminalService {
     launchConfig: IShellLaunchConfig,
   ): Promise<ITerminalConnection | undefined> {
     const sock = new WebSocket(localhost(getPort()));
-    this._socks.set(sessionId, sock);
+    const channel = createWSChannelForClient(new WSWebSocketConnection(sock), {
+      id: sessionId,
+    });
 
-    await delay(1000);
+    this.channels.set(sessionId, channel);
+    this.socks.set(sessionId, sock);
 
+    await delay(2000);
     this._handleMethod(sessionId);
 
     await this._doMethod(sessionId, MessageMethod.create, { sessionId, cols, rows });
@@ -112,12 +123,17 @@ export class MockSocketService implements ITerminalService {
     return OperatingSystem.Linux;
   }
 
+  async getCwd() {
+    return undefined;
+  }
+
   private _handleStdoutMessage(sessionId: string, handler: (json: any) => void) {
-    const socket = this._socks.get(sessionId);
-    if (!socket) {
+    const channel = this.channels.get(sessionId);
+    if (!channel) {
       return;
     }
-    socket.addEventListener('message', ({ data }) => {
+
+    channel.onMessage((data) => {
       const json = JSON.parse(data) as any;
       if (!json.method) {
         handler(json.data);
@@ -148,7 +164,7 @@ export class MockSocketService implements ITerminalService {
   }
 
   private _sendMessage(sessionId: string, json: any) {
-    const sock = this._socks.get(sessionId);
+    const sock = this.channels.get(sessionId);
     if (!sock) {
       return;
     }
@@ -157,7 +173,7 @@ export class MockSocketService implements ITerminalService {
 
   private async _doMethod(sessionId: string, method: string, params: any) {
     return new Promise((resolve) => {
-      const id = MockSocketService.resId++;
+      const id = MockTerminalService.resId++;
       this._sendMessage(sessionId, { id, method, params });
       if (id !== -1) {
         this._response.set(id, { resolve });
@@ -166,22 +182,20 @@ export class MockSocketService implements ITerminalService {
   }
 
   private _handleMethod(sessionId: string) {
-    const socket = this._socks.get(sessionId);
+    const socket = this.channels.get(sessionId);
 
     if (!socket) {
       return;
     }
 
-    const handleSocketMessage = (msg: MessageEvent) => {
-      const json = JSON.parse(msg.data);
+    socket.onMessage((data) => {
+      const json = JSON.parse(data);
       if (json.method) {
         const handler = this._response.get(json.id);
         handler && handler.resolve(json);
         this._response.delete(json.id);
       }
-    };
-
-    socket.addEventListener('message', handleSocketMessage as any);
+    });
   }
 
   async attach(sessionId: string, term: Terminal) {
@@ -198,14 +212,14 @@ export class MockSocketService implements ITerminalService {
   }
 
   disposeById(sessionId: string) {
-    const socket = this._socks.get(sessionId);
+    const socket = this.socks.get(sessionId);
 
     this._doMethod(sessionId, MessageMethod.resize, { id: sessionId });
 
     if (socket) {
       try {
         socket.close();
-      } catch {
+      } catch (_e) {
         /** nothing */
       }
     }
@@ -260,7 +274,7 @@ export const MainTerminalThemeOnThemeChange = new Emitter<any>();
 export class MockThemeService {
   onThemeChange = MainTerminalThemeOnThemeChange.event;
   getCurrentThemeSync = () => ({
-    getColor: () => '#ff004f',
+    getColor: () => new Color(new RGBA(128, 128, 0, 1)),
   });
 }
 /** End */
@@ -278,9 +292,15 @@ export class MockTerminalThemeService {
 /** Mock Preference Service */
 export class MockPreferenceService implements PreferenceService {
   ready: Promise<void> = Promise.resolve();
+
+  has(preferenceName: string, resourceUri?: string | undefined, language?: string | undefined): boolean {
+    return true;
+  }
+
   hasLanguageSpecific(preferenceName: any, overrideIdentifier: string, resourceUri: string): boolean {
     return false;
   }
+
   async set(
     preferenceName: string,
     value: any,
@@ -288,12 +308,17 @@ export class MockPreferenceService implements PreferenceService {
     resourceUri?: string,
     overrideIdentifier?: string,
   ): Promise<void> {}
+
+  async update(preferenceName: string, value: any, defaultScope?: PreferenceScope): Promise<void> {}
+
   onPreferencesChanged() {
     return Disposable.NULL;
   }
+
   onLanguagePreferencesChanged() {
     return Disposable.NULL;
   }
+
   inspect<T>(
     preferenceName: string,
     resourceUri?: string,
@@ -309,9 +334,11 @@ export class MockPreferenceService implements PreferenceService {
     | undefined {
     return;
   }
+
   getProvider(scope: PreferenceScope): PreferenceProvider | undefined {
     return;
   }
+
   resolve<T>(
     preferenceName: string,
     defaultValue?: T,
@@ -321,13 +348,21 @@ export class MockPreferenceService implements PreferenceService {
   ): PreferenceResolveResult<T> {
     throw new Error('Method not implemented.');
   }
+
   onSpecificPreferenceChange() {
     return Disposable.NULL;
   }
+
   dispose(): void {}
+
   get(key: string, defaultValue?: any) {
     return defaultValue;
   }
+
+  getValid(key: string, defaultValue?: any) {
+    return defaultValue;
+  }
+
   onPreferenceChanged() {
     return new Disposable();
   }
@@ -380,6 +415,9 @@ export class MockProfileService implements ITerminalProfileService {
     return;
   }
   onDidChangeAvailableProfiles() {
+    return new Disposable();
+  }
+  onDidChangeDefaultShell() {
     return new Disposable();
   }
   getContributedProfileProvider(extensionIdentifier: string, id: string): ITerminalProfileProvider | undefined {

@@ -1,41 +1,38 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  URI,
-  PreferenceService,
-  PreferenceSchemaProvider,
-  IPreferenceSettingsService,
+  CODICON_OWNER,
+  Deferred,
   Emitter,
   Event,
-  ILogger,
-  CODICON_OWNER,
-  path,
-  Deferred,
-  OnEvent,
-  WithEventBus,
   ExtensionDidContributes,
-  Schemes,
+  GeneralSettingsId,
+  ILogger,
+  IPreferenceSettingsService,
+  OnEvent,
+  PreferenceSchemaProvider,
+  PreferenceService,
+  URI,
+  WithEventBus,
+  randomString,
 } from '@opensumi/ide-core-browser';
-import { StaticResourceService } from '@opensumi/ide-static-resource/lib/browser';
+import { StaticResourceService } from '@opensumi/ide-core-browser/lib/static-resource';
 
 import {
-  ThemeType,
   IIconService,
-  ThemeContribution,
-  getThemeId,
   IIconTheme,
-  getThemeTypeSelector,
-  IconType,
+  IThemeContribution,
   IconShape,
   IconThemeInfo,
+  IconThemeType,
+  IconType,
+  ThemeType,
+  getThemeId,
+  getThemeTypeSelector,
 } from '../common';
 
 import { IconThemeStore } from './icon-theme-store';
 
 import './icon.less';
-
-const { Path } = path;
-
-export const ICON_THEME_SETTING = 'general.icon';
 
 @Injectable()
 export class IconService extends WithEventBus implements IIconService {
@@ -65,7 +62,7 @@ export class IconService extends WithEventBus implements IIconService {
 
   private iconThemes: Map<string, IIconTheme> = new Map();
 
-  private iconContributionRegistry: Map<string, { contribution: ThemeContribution; basePath: URI }> = new Map();
+  private iconContributionRegistry: Map<string, { contribution: IThemeContribution; basePath: URI }> = new Map();
 
   public currentThemeId: string;
   public currentTheme: IIconTheme;
@@ -78,11 +75,13 @@ export class IconService extends WithEventBus implements IIconService {
 
   private getPath(basePath: string, relativePath: string): URI {
     if (relativePath.startsWith('./')) {
-      return URI.file(new Path(basePath).join(relativePath.replace(/^\.\//, '')).toString());
+      const uri = new URI(basePath).resolve(relativePath.replace(/^\.\//, ''));
+      return uri.scheme ? uri : URI.file(uri.toString());
     } else if (/^http(s)?/.test(relativePath)) {
       return new URI(relativePath);
     } else if (basePath) {
-      return URI.file(new Path(basePath).join(relativePath).toString());
+      const uri = new URI(basePath).resolve(relativePath);
+      return uri.scheme ? uri : URI.file(uri.toString());
     } else if (/^file:\/\//.test(relativePath)) {
       return new URI(relativePath);
     } else {
@@ -96,11 +95,13 @@ export class IconService extends WithEventBus implements IIconService {
   }
 
   private listen() {
-    this.preferenceService.onPreferenceChanged(async (e) => {
-      if (e.preferenceName === ICON_THEME_SETTING && this.iconContributionRegistry.has(e.newValue)) {
-        await this.applyTheme(this.preferenceService.get<string>(ICON_THEME_SETTING)!);
-      }
-    });
+    this.addDispose(
+      this.preferenceService.onSpecificPreferenceChange(GeneralSettingsId.Icon, async (e) => {
+        if (this.iconContributionRegistry.has(e.newValue)) {
+          await this.applyTheme(e.newValue);
+        }
+      }),
+    );
   }
 
   private styleSheetCollection = '';
@@ -109,7 +110,11 @@ export class IconService extends WithEventBus implements IIconService {
   private appendStyleCounter = 0;
 
   private doAppend(targetElement: HTMLElement | null) {
-    targetElement?.append(this.styleSheetCollection);
+    if (targetElement) {
+      const textContent = targetElement?.textContent + this.styleSheetCollection;
+      targetElement.textContent = textContent;
+    }
+
     this.styleSheetCollection = '';
     this.appendStylesTimer = undefined;
     this.appendStyleCounter = 0;
@@ -139,46 +144,52 @@ export class IconService extends WithEventBus implements IIconService {
     // 超过 100 个样式
     if (this.appendStyleCounter >= 150 && this.appendStylesTimer) {
       clearTimeout(this.appendStylesTimer);
-      this.doAppend(iconStyleNode);
+      this.appendExtensionIconStyle();
     }
 
     if (!this.appendStylesTimer) {
       // 超过 100 毫秒
       this.appendStylesTimer = window.setTimeout(() => {
-        this.doAppend(iconStyleNode);
+        this.appendExtensionIconStyle();
       }, 100);
     }
   }
 
-  protected getRandomIconClass() {
-    return `icon-${Math.random().toString(36).slice(-8)}`;
+  private appendExtensionIconStyle(styleNode?: HTMLElement | null) {
+    if (styleNode) {
+      this.doAppend(styleNode);
+    } else {
+      const randomClass = this.getRandomIconClass('extension-');
+      const styleNode = document.createElement('style');
+      styleNode!.className = randomClass;
+      this.doAppend(styleNode);
+      document.getElementsByTagName('head')[0].appendChild(styleNode);
+    }
+  }
+
+  protected getRandomIconClass(prefix = '') {
+    return `${prefix}icon-${randomString(6)}`;
   }
 
   protected getMaskStyleSheet(iconUrl: string, className: string, baseTheme?: string): string {
-    const cssRule = `${baseTheme || ''} .${className} {-webkit-mask: url("${iconUrl}") no-repeat 50% 50% / 24px;}`;
+    const cssRule = `${baseTheme || ''} .${className} {-webkit-mask: url("${iconUrl}") no-repeat 50% 50%;}`;
     return cssRule;
   }
 
   protected getMaskStyleSheetWithStaticService(path: URI, className: string, baseTheme?: string): string {
-    const iconUrl =
-      path.scheme === Schemes.file
-        ? this.staticResourceService.resolveStaticResource(path).toString()
-        : path.toString();
+    const iconUrl = this.staticResourceService.resolveStaticResource(path).toString();
     return this.getMaskStyleSheet(iconUrl, className, baseTheme);
   }
 
   protected getBackgroundStyleSheet(iconUrl: string, className: string, baseTheme?: string): string {
     const cssRule = `${
       baseTheme || ''
-    } .${className} {background: url("${iconUrl}") no-repeat 50% 50%;background-size:contain;}`;
+    } .${className} {background: url("${iconUrl}") no-repeat 0 0;background-size: contain;}`;
     return cssRule;
   }
 
   protected getBackgroundStyleSheetWithStaticService(path: URI, className: string, baseTheme?: string): string {
-    const iconUrl =
-      path.scheme === Schemes.file
-        ? this.staticResourceService.resolveStaticResource(path).toString()
-        : path.toString();
+    const iconUrl = this.staticResourceService.resolveStaticResource(path).toString();
     return this.getBackgroundStyleSheet(iconUrl, className, baseTheme);
   }
 
@@ -199,9 +210,15 @@ export class IconService extends WithEventBus implements IIconService {
     return className;
   }
 
+  encodeBase64Path(iconPath: string) {
+    // 由于进行 Background 样式拼接时采用的 `url("${iconPath}")` 结构
+    // 故这里需要对 iconPath 中的 `"` 及常见字符进行转义处理
+    return iconPath.replace(/"/g, '\\"').replace(/\?|#/g, (m) => encodeURIComponent(m));
+  }
+
   fromIcon(
     basePath = '',
-    icon?: { [index in ThemeType]: string } | string,
+    icon?: { [index in IconThemeType]: string } | string,
     type: IconType = IconType.Mask,
     shape: IconShape = IconShape.Square,
     fromExtension = false,
@@ -222,7 +239,7 @@ export class IconService extends WithEventBus implements IIconService {
        * 此时无需 static service
        */
       if (type === IconType.Base64) {
-        this.appendStyleSheet(this.getBackgroundStyleSheet(icon, randomClass), fromExtension);
+        this.appendStyleSheet(this.getBackgroundStyleSheet(this.encodeBase64Path(icon), randomClass), fromExtension);
       } else {
         const targetPath = this.getPath(basePath, icon);
         if (type === IconType.Mask) {
@@ -235,8 +252,19 @@ export class IconService extends WithEventBus implements IIconService {
       // eslint-disable-next-line guard-for-in
       for (const themeType in icon) {
         const themeSelector = getThemeTypeSelector(themeType as ThemeType);
-        const targetPath = this.getPath(basePath, icon[themeType]);
-        if (type === IconType.Mask) {
+        const iconPath = icon[themeType];
+        const targetPath = this.getPath(basePath, iconPath);
+        if (type === IconType.Base64) {
+          /**
+           * 处理 data:image 格式，/^data:image\//
+           * 如 data:image/svg+xml or data:image/gif;base64,
+           * 此时无需 static service
+           */
+          this.appendStyleSheet(
+            this.getBackgroundStyleSheet(this.encodeBase64Path(iconPath), randomClass, `.${themeSelector}`),
+            fromExtension,
+          );
+        } else if (type === IconType.Mask) {
           this.appendStyleSheet(
             this.getMaskStyleSheetWithStaticService(targetPath, randomClass, `.${themeSelector}`),
             fromExtension,
@@ -270,7 +298,7 @@ export class IconService extends WithEventBus implements IIconService {
   }
 
   get preferenceThemeId(): string | undefined {
-    return this.preferenceService.get<string>(ICON_THEME_SETTING);
+    return this.preferenceService.get<string>(GeneralSettingsId.Icon);
   }
 
   private async updateIconThemes() {
@@ -281,7 +309,7 @@ export class IconService extends WithEventBus implements IIconService {
       return pre;
     }, new Map());
 
-    this.preferenceSettings.setEnumLabels(ICON_THEME_SETTING, Object.fromEntries(themeMap.entries()));
+    this.preferenceSettings.setEnumLabels(GeneralSettingsId.Icon, Object.fromEntries(themeMap.entries()));
     // 当前没有主题，或没有缓存的主题时，将第一个注册主题设置为当前主题
     if (!this.currentTheme) {
       if (!this.preferenceThemeId || !themeMap.has(this.preferenceThemeId)) {
@@ -293,7 +321,7 @@ export class IconService extends WithEventBus implements IIconService {
     }
   }
 
-  registerIconThemes(iconContributions: ThemeContribution[], basePath: URI) {
+  registerIconThemes(iconContributions: IThemeContribution[], basePath: URI) {
     for (const contribution of iconContributions) {
       const themeId = getThemeId(contribution);
       this.iconContributionRegistry.set(themeId, { contribution, basePath });
@@ -302,12 +330,15 @@ export class IconService extends WithEventBus implements IIconService {
       }
     }
 
+    const currentSchemas = this.preferenceSchemaProvider.getPreferenceProperty(GeneralSettingsId.Icon);
+    if (currentSchemas) {
+      delete currentSchemas.scope;
+    }
     this.preferenceSchemaProvider.setSchema(
       {
         properties: {
-          [ICON_THEME_SETTING]: {
-            type: 'string',
-            default: 'vscode-icons',
+          [GeneralSettingsId.Icon]: {
+            ...currentSchemas,
             enum: this.getAvailableThemeInfos().map((info) => info.themeId),
           },
         },
@@ -321,10 +352,11 @@ export class IconService extends WithEventBus implements IIconService {
   getAvailableThemeInfos(): IconThemeInfo[] {
     const themeInfos: IconThemeInfo[] = [];
     for (const { contribution } of this.iconContributionRegistry.values()) {
-      const { label, id } = contribution;
+      const { label, id, extensionId } = contribution;
       themeInfos.push({
         themeId: id || getThemeId(contribution),
         name: label,
+        extensionId,
       });
     }
     return themeInfos;

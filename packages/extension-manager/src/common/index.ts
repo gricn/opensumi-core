@@ -1,3 +1,5 @@
+import { IObservable } from '@opensumi/ide-monaco/lib/common/observable';
+
 import { QueryParam, QueryResult, VSXExtensionRaw, VSXSearchParam, VSXSearchResult } from './vsx-registry-types';
 
 export enum EnableScope {
@@ -27,10 +29,10 @@ export interface VSXUser {
 }
 
 export class VSXExtension {
+  readonly name: string;
   readonly version?: string;
   readonly iconUrl?: string;
   readonly publisher?: string;
-  readonly name?: string;
   readonly displayName?: string;
   readonly description?: string;
   readonly namespace?: string;
@@ -46,6 +48,10 @@ export class VSXExtension {
   readonly preview?: boolean;
   readonly namespaceAccess?: VSXExtensionNamespaceAccess;
   readonly publishedBy?: VSXUser;
+  readonly path?: string;
+  readonly realpath?: string;
+  readonly extensionId?: string;
+  readonly originId?: string;
   static KEYS: Set<keyof VSXExtension> = new Set([
     'version',
     'iconUrl',
@@ -71,18 +77,24 @@ export const VSXExtensionServiceToken = Symbol('VSXExtensionSerivceToken');
 
 export interface IVSXExtensionService {
   search(keyword: string): Promise<void>;
+  searchInstalledExtensions(keyword: string): Promise<void>;
   install(extension: VSXExtension): Promise<void>;
-  getLocalExtension(extensionId: string): Promise<VSXExtension | undefined>;
-  getRemoteRawExtension(extensionId: string): Promise<VSXExtensionRaw | undefined>;
+  uninstall(extension: VSXExtension): Promise<void>;
+  getLocalExtension(extensionId?: string): Promise<VSXExtension | undefined>;
+  getRemoteRawExtension(extensionId?: string): Promise<VSXExtensionRaw | undefined>;
   getOpenVSXRegistry(): Promise<void>;
+  getExtensionId(extension: VSXExtension): string;
   openExtensionEditor(extensionId: string, state: InstallState): Promise<void>;
 
   extensions: VSXExtension[];
-  installedExtensions: VSXExtension[];
-  openVSXRegistry: string;
-}
+  extensionsObservable: IObservable<VSXExtension[]>;
 
-export const VSXExtensionBackSerivceToken = Symbol('VSXExtensionBackSerivceToken');
+  installedExtensions: VSXExtension[];
+  installedExtensionsObservable: IObservable<VSXExtension[]>;
+
+  openVSXRegistry: string;
+  openVSXRegistryObservable: IObservable<string>;
+}
 
 export const VSXExtensionServicePath = 'VSXExtensionServicePath';
 
@@ -97,4 +109,12 @@ export interface IVSXExtensionBackService {
   install(param: IExtensionInstallParam): Promise<string>;
   getExtension(param: QueryParam): Promise<QueryResult | undefined>;
   getOpenVSXRegistry(): Promise<string>;
+}
+
+export const IOpenvsxMarketplaceService = Symbol('IOpenvsxMarketplaceService');
+
+export interface IMarketplaceService {
+  downloadHeaders?: { [key: string]: string };
+  getExtensionDetail(param: QueryParam): Promise<QueryResult | undefined>;
+  search(param?: VSXSearchParam): Promise<VSXSearchResult>;
 }

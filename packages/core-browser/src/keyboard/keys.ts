@@ -15,9 +15,7 @@
  ********************************************************************************/
 // Some code copied and modified from https://github.com/eclipse-theia/theia/tree/v1.14.0/packages/core/src/browser/keyboard/keys.ts
 
-import { isOSX } from '@opensumi/ide-core-common';
-import { isWindows } from '@opensumi/ide-core-common';
-import { KeyCode as KeyCodeEnum } from '@opensumi/monaco-editor-core/esm/vs/base/common/keyCodes';
+import { isOSX, isWindows } from '@opensumi/ide-core-common';
 
 export type KeySequence = KeyCode[];
 
@@ -160,7 +158,7 @@ export class KeyCode {
   public toString(): string {
     const result: string[] = [];
     if (this.meta) {
-      result.push(isOSX ? '⌘' : 'Win');
+      result.push(isOSX ? 'Cmd' : 'Win');
     }
     if (this.shift) {
       result.push(toNormalCase(Key.SHIFT_LEFT.easyString));
@@ -483,7 +481,7 @@ export namespace KeyModifier {
 
 export interface Key {
   readonly code: string;
-  readonly keyCode: KeyCodeEnum;
+  readonly keyCode: number;
   readonly easyString: string;
 }
 

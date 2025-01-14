@@ -1,14 +1,13 @@
-import { IContextKeyService, CommandService, WORKSPACE_COMMANDS } from '@opensumi/ide-core-browser';
+import { CommandService, IContextKeyService, WORKSPACE_COMMANDS } from '@opensumi/ide-core-browser';
 import { MockContextKeyService } from '@opensumi/ide-core-browser/__mocks__/context-key';
 import { URI } from '@opensumi/ide-core-common';
 import { IWindowDialogService } from '@opensumi/ide-overlay';
-import { IWorkspaceService } from '@opensumi/ide-workspace';
-import { WorkspaceContribution } from '@opensumi/ide-workspace/lib/browser/workspace-contribution';
 
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
 import { WorkspaceModule } from '../../src/browser';
-
+import { WorkspaceContribution } from '../../src/browser/workspace-contribution';
+import { IWorkspaceService } from '../../src/common';
 
 describe('WorkspaceContribution should be work', () => {
   let workspaceContribution: WorkspaceContribution;
@@ -54,14 +53,14 @@ describe('WorkspaceContribution should be work', () => {
     workspaceContribution = injector.get(WorkspaceContribution);
   });
 
-  afterEach(() => {
-    injector.disposeAll();
+  afterEach(async () => {
+    await injector.disposeAll();
     mockWorkspaceService.getWorkspaceRootUri.mockReset();
   });
 
   it('ClientAppContribution should be work', async () => {
     await workspaceContribution.onStart();
-    expect(mockWorkspaceService.onWorkspaceLocationChanged).toBeCalledTimes(1);
+    expect(mockWorkspaceService.onWorkspaceLocationChanged).toHaveBeenCalledTimes(1);
   });
 
   it('CommandContribution should be work', (done) => {
@@ -69,20 +68,20 @@ describe('WorkspaceContribution should be work', () => {
       registerCommand: jest.fn(async (command, { execute }) => {
         if (command.id === WORKSPACE_COMMANDS.ADD_WORKSPACE_FOLDER.id) {
           await execute();
-          expect(mockWorkspaceService.addRoot).toBeCalledTimes(1);
+          expect(mockWorkspaceService.addRoot).toHaveBeenCalledTimes(1);
         } else if (command.id === WORKSPACE_COMMANDS.SAVE_WORKSPACE_AS_FILE.id) {
           await execute();
-          expect(mockWorkspaceService.save).toBeCalledTimes(1);
+          expect(mockWorkspaceService.save).toHaveBeenCalledTimes(1);
           done();
         }
       }),
     };
     workspaceContribution.registerCommands(mockRegistry as any);
-    expect(mockRegistry.registerCommand).toBeCalledTimes(3);
+    expect(mockRegistry.registerCommand).toHaveBeenCalledTimes(3);
   });
 
   it('FsProviderContribution should be work', () => {
     workspaceContribution.onFileServiceReady();
-    expect(mockWorkspaceService.init).toBeCalledTimes(1);
+    expect(mockWorkspaceService.init).toHaveBeenCalledTimes(1);
   });
 });

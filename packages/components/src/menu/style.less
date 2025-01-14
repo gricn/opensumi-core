@@ -1,7 +1,7 @@
 @import '../style/variable.less';
 @import '../style/mixins.less';
 
-@menu-prefix-cls: ~'@{kt-prefix}-inner-menu';
+@menu-prefix-cls: ~'@{prefix}-inner-menu';
 
 // default theme
 .@{menu-prefix-cls} {
@@ -42,11 +42,6 @@
     color: @menu-highlight-color;
   }
 
-  &-item:active,
-  &-submenu-title:active {
-    background: @menu-item-active-bg;
-  }
-
   &-submenu &-sub {
     cursor: initial;
     transition: background 0.3s @ease-in-out, padding 0.3s @ease-in-out;
@@ -70,7 +65,7 @@
   }
 
   // https://github.com/ant-design/ant-design/issues/19809
-  &-item > .@{kt-prefix}-badge > a {
+  &-item > .@{prefix}-badge > a {
     color: @menu-item-color;
     &:hover {
       color: @menu-highlight-color;

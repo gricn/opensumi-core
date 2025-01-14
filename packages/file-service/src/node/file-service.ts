@@ -1,47 +1,51 @@
 import os from 'os';
 import paths from 'path';
 
-import drivelist from 'drivelist';
-import fileType from 'file-type';
-import * as fs from 'fs-extra';
 import { TextDocument } from 'vscode-languageserver-types';
 
-import { Injectable, Inject, Autowired, Injector, INJECTOR_TOKEN } from '@opensumi/di';
-import { INodeLogger, AppConfig, Schemes } from '@opensumi/ide-core-node';
+import { Autowired, INJECTOR_TOKEN, Inject, Injectable, Injector } from '@opensumi/di';
 import {
-  URI,
+  AppConfig,
+  DisposableCollection,
   Emitter,
-  Uri,
   Event,
   FileUri,
   IDisposable,
-  DisposableCollection,
+  INodeLogger,
+  ParsedPattern,
+  Schemes,
+  URI,
+  UTF8,
+  Uri,
+  getEncodingInfo,
+  iconvDecode,
+  iconvEncode,
   isArray,
   isEmptyObject,
-  parseGlob,
-  ParsedPattern,
   match,
+  parseGlob,
 } from '@opensumi/ide-core-node';
 
-import { FileChangeEvent, TextDocumentContentChangeEvent } from '../common';
 import {
-  FileSystemError,
-  FileStat,
-  IFileService,
-  FileMoveOptions,
-  FileDeleteOptions,
-  FileAccess,
-  FileSystemProvider,
   DidFilesChangedParams,
-  FileSetContentOptions,
-  FileCreateOptions,
+  FileAccess,
+  FileChangeEvent,
   FileCopyOptions,
-  containsExtraFileMethod,
+  FileCreateOptions,
+  FileDeleteOptions,
+  FileMoveOptions,
+  FileSetContentOptions,
+  FileStat,
+  FileSystemError,
+  FileSystemProvider,
   IDiskFileProvider,
+  IFileService,
+  TextDocumentContentChangeEvent,
+  containsExtraFileMethod,
 } from '../common';
 
-import { getEncodingInfo, decode, encode, UTF8 } from './encoding';
 import { FileSystemManage } from './file-system-manage';
+import { getFileType } from './hosted/shared/file-type';
 
 export abstract class FileSystemNodeOptions {
   public static DEFAULT: FileSystemNodeOptions = {
@@ -91,16 +95,16 @@ export class FileService implements IFileService {
     return this.toDisposable;
   }
 
-  async watchFileChanges(uri: string, options?: { excludes: string[] }): Promise<number> {
+  async watchFileChanges(uri: string, options?: { excludes: string[]; recursive?: boolean }): Promise<number> {
     const id = this.watcherId++;
     const _uri = this.getUri(uri);
     const provider = await this.getProvider(_uri.scheme);
     const schemaWatchIdList = this.watcherWithSchemaMap.get(_uri.scheme) || [];
 
-    const watcherId = provider.watch(_uri.codeUri, {
-      recursive: true,
+    const watcherId = await provider.watch(_uri.codeUri, {
       excludes: (options && options.excludes) || [],
-    }) as number;
+      recursive: options && options.recursive !== undefined ? options.recursive : this.options.recursive,
+    });
     this.watcherDisposerMap.set(id, {
       dispose: () => provider.unwatch!(watcherId),
     });
@@ -175,11 +179,11 @@ export class FileService implements IFileService {
       throw FileSystemError.FileNotFound(uri, 'File not found.');
     }
     if (stat.isDirectory) {
-      throw FileSystemError.FileIsDirectory(uri, 'Cannot resolve the content.');
+      throw FileSystemError.FileIsADirectory(uri, 'Cannot resolve the content.');
     }
     const encoding = await this.doGetEncoding(options);
     const buffer = await provider.readFile(_uri.codeUri);
-    return { stat, content: decode(this.getNodeBuffer(buffer), encoding) };
+    return { stat, content: iconvDecode(this.getNodeBuffer(buffer), encoding) };
   }
 
   async setContent(file: FileStat, content: string, options?: FileSetContentOptions): Promise<FileStat> {
@@ -190,13 +194,13 @@ export class FileService implements IFileService {
       throw FileSystemError.FileNotFound(file.uri, 'File not found.');
     }
     if (stat.isDirectory) {
-      throw FileSystemError.FileIsDirectory(file.uri, 'Cannot set the content.');
+      throw FileSystemError.FileIsADirectory(file.uri, 'Cannot set the content.');
     }
     if (!(await this.isInSync(file, stat))) {
       throw this.createOutOfSyncError(file, stat);
     }
     const encoding = await this.doGetEncoding(options);
-    const buffer = encode(content, encoding);
+    const buffer = iconvEncode(content, encoding);
     await provider.writeFile(_uri.codeUri, buffer, { create: false, overwrite: true, encoding });
     const newStat = await provider.stat(_uri.codeUri);
     if (!newStat) {
@@ -217,7 +221,7 @@ export class FileService implements IFileService {
       throw FileSystemError.FileNotFound(file.uri, 'File not found.');
     }
     if (stat.isDirectory) {
-      throw FileSystemError.FileIsDirectory(file.uri, 'Cannot set the content.');
+      throw FileSystemError.FileIsADirectory(file.uri, 'Cannot set the content.');
     }
     if (!this.checkInSync(file, stat)) {
       throw this.createOutOfSyncError(file, stat);
@@ -228,9 +232,9 @@ export class FileService implements IFileService {
     const encoding = await this.doGetEncoding(options);
     // const content = await fs.readFile(FileUri.fsPath(_uri), { encoding });
     const buffer = await this.getNodeBuffer(await provider.readFile(_uri.codeUri));
-    const content = decode(buffer, encoding);
+    const content = iconvDecode(buffer, encoding);
     const newContent = this.applyContentChanges(content, contentChanges);
-    const newBuffer = encode(newContent, encoding);
+    const newBuffer = iconvEncode(newContent, encoding);
     await provider.writeFile(_uri.codeUri, newBuffer, { create: false, overwrite: true, encoding });
     const newStat = await provider.stat(_uri.codeUri);
     if (!newStat) {
@@ -282,7 +286,7 @@ export class FileService implements IFileService {
 
     const content = await this.doGetContent(options);
     const encoding = await this.doGetEncoding(options);
-    const buffer = encode(content, encoding);
+    const buffer = iconvEncode(content, encoding);
     let newStat: any = await provider.writeFile(_uri.codeUri, buffer, {
       create: true,
       overwrite: (options && options.overwrite) || false,
@@ -355,7 +359,7 @@ export class FileService implements IFileService {
     //   throw FileSystemError.FileNotFound(uri);
     // }
     // if (stat.isDirectory) {
-    //   throw FileSystemError.FileIsDirectory(uri, 'Cannot get the encoding.');
+    //   throw FileSystemError.FileIsADirectory(uri, 'Cannot get the encoding.');
     // }
     // const encoding = detectEncodingByURI(_uri);
     // return encoding || this.options.encoding || UTF8;
@@ -366,28 +370,6 @@ export class FileService implements IFileService {
   async getCurrentUserHome(): Promise<FileStat | undefined> {
     return this.getFileStat(FileUri.create(os.homedir()).toString());
   }
-
-  getDrives(): Promise<string[]> {
-    return new Promise<string[]>((resolve, reject) => {
-      drivelist.list((error: Error, drives: Array<{ readonly mountpoints: Array<{ readonly path: string }> }>) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-
-        const uris = drives
-          .map((drive) => drive.mountpoints)
-          .reduce((prev, curr) => prev.concat(curr), [])
-          .map((mountpoint) => mountpoint.path)
-          .filter(this.filterMountpointPath.bind(this))
-          .map((path) => FileUri.create(path))
-          .map((uri) => uri.toString());
-
-        resolve(uris);
-      });
-    });
-  }
-
   /**
    *
    * Only support scheme `file`
@@ -401,44 +383,14 @@ export class FileService implements IFileService {
   }
 
   async getFileType(uri: string): Promise<string | undefined> {
-    try {
-      if (!uri.startsWith('file:/')) {
-        return this._getFileType('');
-      }
-      // const lstat = await fs.lstat(FileUri.fsPath(uri));
-      const stat = await fs.stat(FileUri.fsPath(uri));
-
-      let ext = '';
-      if (!stat.isDirectory()) {
-        // if(lstat.isSymbolicLink){
-
-        // }else {
-        if (stat.size) {
-          const type = await fileType.stream(fs.createReadStream(FileUri.fsPath(uri)));
-          // 可以拿到 type.fileType 说明为二进制文件
-          if (type.fileType) {
-            ext = type.fileType.ext;
-          }
-        }
-        return this._getFileType(ext);
-        // }
-      } else {
-        return 'directory';
-      }
-    } catch (error) {
-      if (isErrnoException(error)) {
-        if (error.code === 'ENOENT' || error.code === 'EACCES' || error.code === 'EBUSY' || error.code === 'EPERM') {
-          return undefined;
-        }
-      }
-    }
+    return getFileType(uri);
   }
 
   getUri(uri: string | Uri): URI {
     const _uri = new URI(uri);
 
     if (!_uri.scheme) {
-      throw new Error(`没有设置 scheme: ${uri}`);
+      throw new Error(`Unsupported to get Uri from non-scheme Uri: ${uri}`);
     }
 
     return _uri;
@@ -590,18 +542,6 @@ export class FileService implements IFileService {
     return true;
   }
 
-  private _getFileType(ext) {
-    let type = 'text';
-
-    if (['png', 'gif', 'jpg', 'jpeg', 'svg'].indexOf(ext) !== -1) {
-      type = 'image';
-    } else if (ext && ['xml'].indexOf(ext) === -1) {
-      type = 'binary';
-    }
-
-    return type;
-  }
-
   protected async doGetEncoding(option?: { encoding?: string }): Promise<string> {
     return option && typeof option.encoding !== 'undefined' ? option.encoding : this.options.encoding;
   }
@@ -651,11 +591,6 @@ export function getSafeFileservice(injector: Injector) {
   );
   safeFsInstanceMap.set(injector, fileService);
   return fileService;
-}
-
-// tslint:disable-next-line:no-any
-function isErrnoException(error: any | NodeJS.ErrnoException): error is NodeJS.ErrnoException {
-  return (error as NodeJS.ErrnoException).code !== undefined && (error as NodeJS.ErrnoException).errno !== undefined;
 }
 
 // 对于首个参数为uri的方法进行安全拦截

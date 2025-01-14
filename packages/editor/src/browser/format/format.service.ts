@@ -1,21 +1,18 @@
-import { Injector, Injectable, Autowired, INJECTOR_TOKEN } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import { CancellationToken, ILogger } from '@opensumi/ide-core-common';
+import { languageFeaturesService } from '@opensumi/ide-monaco/lib/browser/monaco-api/languages';
 import { Range } from '@opensumi/monaco-editor-core/esm/vs/editor/common/core/range';
 import {
   DocumentFormattingEditProvider,
   DocumentRangeFormattingEditProvider,
-  DocumentRangeFormattingEditProviderRegistry,
-} from '@opensumi/monaco-editor-core/esm/vs/editor/common/modes';
-import {
-  getRealAndSyntheticDocumentFormattersOrdered,
-  FormattingMode,
-} from '@opensumi/monaco-editor-core/esm/vs/editor/contrib/format/format';
-import { FormattingEdit } from '@opensumi/monaco-editor-core/esm/vs/editor/contrib/format/formattingEdit';
+} from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
+import { getRealAndSyntheticDocumentFormattersOrdered } from '@opensumi/monaco-editor-core/esm/vs/editor/contrib/format/browser/format';
+import { FormattingEdit } from '@opensumi/monaco-editor-core/esm/vs/editor/contrib/format/browser/formattingEdit';
 
 import { WorkbenchEditorService } from '../types';
 import { WorkbenchEditorServiceImpl } from '../workbench-editor.service';
 
-import { FormattingSelector } from './formatterSelect';
+import { FormattingSelector } from './formatter-selector';
 
 @Injectable()
 export class DocumentFormatService {
@@ -29,21 +26,28 @@ export class DocumentFormatService {
   injector: Injector;
 
   async formatDocumentWith() {
-    const model = this.workbenchEditorService.currentEditor?.monacoEditor.getModel();
+    const monacoEditor = this.workbenchEditorService.currentEditor?.monacoEditor;
+    if (!monacoEditor) {
+      return;
+    }
+    const model = monacoEditor.getModel();
     if (model) {
-      const formatterProviders = getRealAndSyntheticDocumentFormattersOrdered(model);
+      const formatterProviders = getRealAndSyntheticDocumentFormattersOrdered(
+        languageFeaturesService.documentFormattingEditProvider,
+        languageFeaturesService.documentRangeFormattingEditProvider,
+        model,
+      );
       const selector = this.injector.get(FormattingSelector);
-      const formatter = await selector.select(formatterProviders, model, FormattingMode.Explicit, true);
+      const formatter = await selector.pickFormatter<DocumentFormattingEditProvider>(formatterProviders, model);
       if (formatter) {
         try {
-          const edits = await (formatter as DocumentFormattingEditProvider).provideDocumentFormattingEdits(
+          const edits = await formatter.provideDocumentFormattingEdits(
             model,
             model.getFormattingOptions(),
             CancellationToken.None,
           );
           if (edits) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            FormattingEdit.execute(this.workbenchEditorService.currentEditor?.monacoEditor!, edits, true);
+            FormattingEdit.execute(monacoEditor, edits, true);
           }
         } catch (err) {
           this.logger.error('execute format document with error', err);
@@ -56,9 +60,12 @@ export class DocumentFormatService {
     if (!this.workbenchEditorService.currentEditor?.monacoEditor.hasModel()) {
       return;
     }
-    const model = this.workbenchEditorService.currentEditor?.monacoEditor.getModel();
+
+    const monacoEditor = this.workbenchEditorService.currentEditor.monacoEditor;
+
+    const model = monacoEditor.getModel();
     if (model) {
-      let range: Range | null | undefined = this.workbenchEditorService.currentEditor?.monacoEditor.getSelection();
+      let range: Range | null | undefined = monacoEditor.getSelection();
       if (range?.isEmpty()) {
         range = new Range(
           range.startLineNumber,
@@ -67,20 +74,19 @@ export class DocumentFormatService {
           model.getLineMaxColumn(range.startLineNumber),
         );
       }
-      const formatterProviders = DocumentRangeFormattingEditProviderRegistry.ordered(model);
+      const formatterProviders = languageFeaturesService.documentRangeFormattingEditProvider.ordered(model);
       const selector = this.injector.get(FormattingSelector);
-      const formatter = await selector.select(formatterProviders, model, FormattingMode.Explicit, true);
+      const formatter = await selector.pickFormatter<DocumentRangeFormattingEditProvider>(formatterProviders, model);
       if (formatter) {
         try {
-          const edits = await (formatter as DocumentRangeFormattingEditProvider).provideDocumentRangeFormattingEdits(
+          const edits = await formatter.provideDocumentRangeFormattingEdits(
             model,
             range!,
             model.getFormattingOptions(),
             CancellationToken.None,
           );
           if (edits) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            FormattingEdit.execute(this.workbenchEditorService.currentEditor?.monacoEditor!, edits, true);
+            FormattingEdit.execute(monacoEditor, edits, true);
           }
         } catch (err) {
           this.logger.error('execute format document with error', err);

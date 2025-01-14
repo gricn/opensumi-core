@@ -1,15 +1,14 @@
 import path from 'path';
 
 import { Provider } from '@opensumi/di';
-import { INodeLogger, MaybePromise, getDebugLogger, Deferred } from '@opensumi/ide-core-node';
+import { Deferred, INodeLogger, MaybePromise, getDebugLogger, sleep } from '@opensumi/ide-core-node';
+import { createNodeInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
 
-import { createNodeInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
 import { IExtensionHostManager } from '../../src';
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 interface IExtensionHostManagerTesterOptions {
+  name: string;
   providers: Provider[];
   // 在 beforeEach 头部执行
   init: () => MaybePromise<void>;
@@ -18,7 +17,7 @@ interface IExtensionHostManagerTesterOptions {
 }
 
 export const extensionHostManagerTester = (options: IExtensionHostManagerTesterOptions) =>
-  describe('extension host manager test', () => {
+  describe(`extension host manager test for ${options.name}`, () => {
     jest.setTimeout(10 * 1000);
     let extensionHostManager: IExtensionHostManager;
     let injector: MockInjector;
@@ -41,7 +40,7 @@ export const extensionHostManagerTester = (options: IExtensionHostManagerTesterO
     afterEach(async () => {
       await extensionHostManager.dispose();
       await options.dispose();
-      injector.disposeAll();
+      await injector.disposeAll();
     });
 
     it('fork extension host', async () => {
@@ -83,17 +82,17 @@ export const extensionHostManagerTester = (options: IExtensionHostManagerTesterO
     });
     it('tree kill', async () => {
       expect.assertions(2);
-      const defered = new Deferred();
+      const deferred = new Deferred();
 
       const pid = await extensionHostManager.fork(extHostPath);
       extensionHostManager.onExit(pid, async (code, signal) => {
         expect(signal).toBe('SIGTERM');
         // tree-kill 使用 process.kill 不能使用 killed 判断
         expect(await extensionHostManager.isRunning(pid)).toBeFalsy();
-        defered.resolve();
+        deferred.resolve();
       });
       await extensionHostManager.treeKill(pid);
-      await defered.promise;
+      await deferred.promise;
     });
 
     it('findDebugPort', async () => {
@@ -104,14 +103,14 @@ export const extensionHostManagerTester = (options: IExtensionHostManagerTesterO
 
     it('on output', async () => {
       expect.assertions(1);
-      const defered = new Deferred();
+      const deferred = new Deferred();
 
       const pid = await extensionHostManager.fork(extHostPath, [], { silent: true });
       extensionHostManager.onOutput(pid, (output) => {
         expect(output.data).toContain('send ready');
-        defered.resolve();
+        deferred.resolve();
       });
-      await defered.promise;
+      await deferred.promise;
     });
     it('dispose process', async () => {
       const pid = await extensionHostManager.fork(extHostPath);

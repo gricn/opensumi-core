@@ -4,8 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 // Some code copied and modified from https://github.com/microsoft/vscode/tree/main/src/vs/workbench/contrib/testing/common
 
-import type vscode from 'vscode';
-
 import { CancellationToken } from '@opensumi/ide-core-common';
 import {
   CoverageDetails,
@@ -23,8 +21,14 @@ import {
   TestsDiff,
 } from '@opensumi/ide-testing/lib/common/testCollection';
 
+import type vscode from 'vscode';
+
 export interface IExtHostTests {
-  createTestController(controllerId: string, label: string): vscode.TestController;
+  createTestController(
+    controllerId: string,
+    label: string,
+    refreshHandler?: ((token: CancellationToken) => Thenable<void> | void) | undefined,
+  ): vscode.TestController;
 
   // #region API for main thread
   $runControllerTests(req: RunTestForControllerRequest, token: CancellationToken): Promise<void>;
@@ -35,30 +39,25 @@ export interface IExtHostTests {
   $publishTestResults(results: ISerializedTestResults[]): void;
   /** Expands a test item's children, by the given number of levels. */
   $expandTest(testId: string, levels: number): Promise<void>;
-  /** Requests file coverage for a test run. Errors if not available. */
-  $provideFileCoverage(runId: string, taskId: string, token: CancellationToken): Promise<IFileCoverage[]>;
-  /**
-   * Requests coverage details for the file index in coverage data for the run.
-   * Requires file coverage to have been previously requested via $provideFileCoverage.
-   */
-  $resolveFileCoverage(
-    runId: string,
-    taskId: string,
-    fileIndex: number,
-    token: CancellationToken,
-  ): Promise<CoverageDetails[]>;
   /** Configures a test run config. */
   $configureRunProfile(controllerId: string, configId: number): void;
+  /** Asks the controller to refresh its tests */
+  $refreshTests(controllerId: string, token: CancellationToken): Promise<void>;
   // #endregion
+}
+
+export interface ITestControllerPatch {
+  label?: string;
+  canRefresh?: boolean;
 }
 
 export interface IMainThreadTesting {
   // --- test lifecycle:
 
   /** Registers that there's a test controller with the given ID */
-  $registerTestController(controllerId: string, label: string): void;
+  $registerTestController(controllerId: string, label: string, canRefresh: boolean): void;
   /** Updates the label of an existing test controller. */
-  $updateControllerLabel(controllerId: string, label: string): void;
+  $updateController(controllerId: string, patch: ITestControllerPatch): void;
   /** Disposes of the test controller with the given ID */
   $unregisterTestController(controllerId: string): void;
   /** Requests tests published to VS Code. */
@@ -92,8 +91,6 @@ export interface IMainThreadTesting {
   $appendTestMessagesInRun(runId: string, taskId: string, testId: string, messages: SerializedTestMessage[]): void;
   /** Appends raw output to the test run.. */
   $appendOutputToRun(runId: string, taskId: string, output: string, location?: ILocationDto, testId?: string): void;
-  /** Triggered when coverage is added to test results. */
-  $signalCoverageAvailable(runId: string, taskId: string): void;
   /** Signals a task in a test run started. */
   $startedTestRunTask(runId: string, task: ITestRunTask): void;
   /** Signals a task in a test run ended. */
@@ -102,4 +99,6 @@ export interface IMainThreadTesting {
   $startedExtensionTestRun(req: ExtensionRunTestsRequest): void;
   /** Signals that an extension-provided test run finished. */
   $finishedExtensionTestRun(runId: string): void;
+  /** Marks a test (or controller) as retired in all results. */
+  $markTestRetired(testIds: string[] | undefined): void;
 }

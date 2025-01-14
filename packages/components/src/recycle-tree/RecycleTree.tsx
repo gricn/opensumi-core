@@ -1,25 +1,25 @@
 import fuzzy from 'fuzzy';
-import React from 'react';
-import { FixedSizeList, VariableSizeList, shouldComponentUpdate, ListProps } from 'react-window';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { FixedSizeList, ListProps, VariableSizeList } from 'react-window';
 
 import {
+  CancellationToken,
+  CancellationTokenSource,
+  Disposable,
   DisposableCollection,
   Emitter,
   Event,
-  Disposable,
-  CancellationTokenSource,
-  CancellationToken,
   Throttler,
 } from '@opensumi/ide-utils';
 
 import { ScrollbarsVirtualList } from '../scrollbars';
 
-import { RenamePromptHandle, PromptHandle } from './prompt';
+import { PromptHandle, RenamePromptHandle } from './prompt';
 import { NewPromptHandle } from './prompt/NewPromptHandle';
-import { TreeNode, CompositeTreeNode, spliceArray } from './tree';
+import { CompositeTreeNode, TreeNode, spliceArray } from './tree';
 import { TreeModel } from './tree/model/TreeModel';
-import { INodeRendererProps, NodeRendererWrap, INodeRenderer } from './TreeNodeRendererWrap';
-import { TreeNodeType, TreeNodeEvent } from './types';
+import { INodeRenderer, INodeRendererProps, NodeRendererWrap } from './TreeNodeRendererWrap';
+import { ICompositeTreeNode, TreeNodeEvent, TreeNodeType } from './types';
 
 export type IRecycleTreeAlign = 'smart' | 'start' | 'center' | 'end' | 'auto';
 
@@ -36,6 +36,7 @@ export interface IRecycleTreeSize {
 }
 
 export interface IRecycleTreeProps<T = TreeModel> {
+  children(props: any): React.ReactNode;
   model: T;
   /**
    * 容器高度
@@ -479,7 +480,6 @@ export class RecycleTree extends React.Component<IRecycleTreeProps> {
     } else {
       this.tryScrollIntoViewWhileStable(this.promptHandle as any);
     }
-
     return this.promptHandle as NewPromptHandle;
   }
 
@@ -584,7 +584,7 @@ export class RecycleTree extends React.Component<IRecycleTreeProps> {
 
   private tryScrollIntoViewWhileStable(
     node: TreeNode | CompositeTreeNode | PromptHandle,
-    align: IRecycleTreeAlign = 'auto',
+    align: IRecycleTreeAlign = 'smart',
   ) {
     const { root } = this.props.model;
     if (this.tryEnsureVisibleTimes > RecycleTree.TRY_ENSURE_VISIBLE_MAX_TIMES) {
@@ -659,7 +659,7 @@ export class RecycleTree extends React.Component<IRecycleTreeProps> {
   private getItemAtIndex = (index: number): INodeRendererProps => {
     const { filter } = this.props;
     if (!!filter && this.filterFlattenBranch.length > 0) {
-      return this.idToFilterRendererPropsCache.get(this.filterFlattenBranch[index])! as INodeRendererProps;
+      return this.idToFilterRendererPropsCache.get(this.filterFlattenBranch[index]) as INodeRendererProps;
     }
     let cached = this.idxToRendererPropsCache.get(index);
     if (!cached) {
@@ -711,8 +711,20 @@ export class RecycleTree extends React.Component<IRecycleTreeProps> {
   };
 
   private handleListScroll = ({ scrollOffset }) => {
-    const { model } = this.props;
+    const { model, height, itemHeight } = this.props;
     model.state.saveScrollOffset(scrollOffset);
+    if (!this.promptHandle || !itemHeight) {
+      return;
+    }
+    let promptIndex;
+    if (this.promptHandle instanceof NewPromptHandle && this.newPromptInsertionIndex > -1) {
+      promptIndex = this.newPromptInsertionIndex;
+    } else {
+      promptIndex = model.root.getIndexAtTreeNodeId(this.promptHandle.id);
+    }
+    if (scrollOffset + height < promptIndex * itemHeight || promptIndex * itemHeight < scrollOffset) {
+      this.promptHandle.destroy();
+    }
   };
 
   // 根据是否携带新建输入框计算行数
@@ -752,7 +764,7 @@ export class RecycleTree extends React.Component<IRecycleTreeProps> {
     const idSets: Set<number> = new Set();
     const idToRenderTemplate: Map<number, any> = new Map();
     const nodes: TreeNode[] = [];
-    for (let idx = 0; idx < root.branchSize; idx++) {
+    for (let idx = 0, len = root.branchSize; idx < len; idx++) {
       const node = root.getTreeNodeAtIndex(idx)!;
       nodes.push(node as TreeNode);
     }
@@ -776,6 +788,18 @@ export class RecycleTree extends React.Component<IRecycleTreeProps> {
         fuzzyLists = fuzzy.filter(filter, nodes, RecycleTree.FILTER_FUZZY_OPTIONS);
       }
 
+      const showAllExpandedChild = (node: ICompositeTreeNode) => {
+        const children = node.children || [];
+        if (children.length > 0) {
+          for (const child of children) {
+            idSets.add(child.id);
+            if (CompositeTreeNode.is(child) && child.expanded) {
+              showAllExpandedChild(child);
+            }
+          }
+        }
+      };
+
       fuzzyLists.forEach((item) => {
         const node = (item as any).original as TreeNode;
         idSets.add(node.id);
@@ -791,7 +815,11 @@ export class RecycleTree extends React.Component<IRecycleTreeProps> {
             dangerouslySetInnerHTML={{ __html: item.string || '' }}
           ></div>
         ));
-        // 不应包含根节点
+        if (CompositeTreeNode.is(node)) {
+          // 让筛选到的节点目录也展示其子节点
+          showAllExpandedChild(node);
+        }
+        // 当子节点被筛选时，向上的所有父节点均应该被展示
         while (parent && !CompositeTreeNode.isRoot(parent)) {
           idSets.add(parent.id);
           parent = parent.parent;
@@ -800,7 +828,7 @@ export class RecycleTree extends React.Component<IRecycleTreeProps> {
     }
 
     this.filterFlattenBranch = new Array(idSets.size);
-    for (let flatTreeIdx = 0, idx = 0; idx < root.branchSize; idx++) {
+    for (let flatTreeIdx = 0, idx = 0, len = root.branchSize; idx < len; idx++) {
       const node = root.getTreeNodeAtIndex(idx);
       if (node && idSets.has(node.id)) {
         this.filterFlattenBranch[flatTreeIdx] = node.id;
@@ -853,10 +881,39 @@ export class RecycleTree extends React.Component<IRecycleTreeProps> {
   };
 
   private renderItem = ({ index, style }): JSX.Element => {
-    this.shouldComponentUpdate = shouldComponentUpdate.bind(this);
     const { children, overflow = 'ellipsis', supportDynamicHeights } = this.props;
     const node = this.getItemAtIndex(index) as IFilterNodeRendererProps;
-    const wrapRef = React.useRef(null);
+    const wrapRef = useRef<HTMLDivElement | null>(null);
+
+    const setSize = useMemo(
+      () =>
+        supportDynamicHeights
+          ? () => {
+              let size = 0;
+              if (wrapRef.current) {
+                const ref = wrapRef.current;
+                size = Array.from(ref.children).reduce(
+                  (pre, cur: HTMLElement) => pre + cur.getBoundingClientRect().height,
+                  0,
+                );
+              }
+              if (size) {
+                this.dynamicSizeMap.set(index, size);
+                this.layoutItem();
+              }
+
+              return Math.max(size, RecycleTree.DEFAULT_ITEM_HEIGHT);
+            }
+          : () => {},
+      [supportDynamicHeights],
+    );
+
+    useEffect(() => {
+      if (wrapRef.current) {
+        setSize();
+      }
+    }, []);
+
     if (!node) {
       return <></>;
     }
@@ -884,27 +941,7 @@ export class RecycleTree extends React.Component<IRecycleTreeProps> {
       };
     }
 
-    const calcDynamicHeight = () => {
-      if (!supportDynamicHeights) {
-        return RecycleTree.DEFAULT_ITEM_HEIGHT;
-      }
-
-      let size = 0;
-      if (wrapRef.current) {
-        const ref = wrapRef.current as unknown as HTMLDivElement;
-        size = Array.from(ref.children).reduce((pre, cur: HTMLElement) => pre + cur.getBoundingClientRect().height, 0);
-      }
-      if (size) {
-        this.dynamicSizeMap.set(index, size);
-      }
-
-      return Math.max(size, RecycleTree.DEFAULT_ITEM_HEIGHT);
-    };
-
-    const itemStyle =
-      overflow === 'ellipsis'
-        ? style
-        : { ...style, width: 'auto', minWidth: '100%', height: `${calcDynamicHeight()}px` };
+    const itemStyle = overflow === 'ellipsis' ? style : { ...style, width: 'auto', minWidth: '100%' };
 
     return (
       <div ref={wrapRef} style={itemStyle} role={item.accessibilityInformation?.role || 'treeiem'} {...ariaInfo}>
@@ -926,7 +963,6 @@ export class RecycleTree extends React.Component<IRecycleTreeProps> {
     if (!this.props.supportDynamicHeights) {
       return;
     }
-
     // eslint-disable-next-line no-unsafe-optional-chaining
     if (this.listRef && this.listRef?.current && '_getRangeToRender' in this.listRef?.current) {
       // _getRangeToRender 是 react-window 的内部方法，用于获取可视区域的下标范围
@@ -934,10 +970,7 @@ export class RecycleTree extends React.Component<IRecycleTreeProps> {
       const range = this.listRef?.current._getRangeToRender();
       if (range) {
         const start = range[0];
-        const end = range[1];
-        Array.from({ length: end - start }).forEach((_, i) => {
-          (this.listRef?.current as VariableSizeList<any>).resetAfterIndex(start + i);
-        });
+        (this.listRef?.current as VariableSizeList<any>).resetAfterIndex(start);
       }
     }
   };

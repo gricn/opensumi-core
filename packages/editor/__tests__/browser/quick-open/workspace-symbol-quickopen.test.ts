@@ -1,16 +1,16 @@
-import { SymbolInformation, Location } from 'vscode-languageserver-types';
+import { Location, SymbolInformation } from 'vscode-languageserver-types';
 
 import { IWorkspaceService } from '@opensumi/ide-workspace';
-import { SymbolKind as SymbolKindEnum } from '@opensumi/monaco-editor-core/esm/vs/editor/common/modes';
+import { SymbolKind as SymbolKindEnum } from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
 
 import { createBrowserInjector } from '../../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector, mockService } from '../../../../../tools/dev-tool/src/mock-injector';
 import { WorkspaceSymbolQuickOpenHandler } from '../../../src/browser/quick-open/workspace-symbol-quickopen';
 import {
   ILanguageService,
-  WorkspaceSymbolProvider,
-  WorkspaceSymbolParams,
   WorkbenchEditorService,
+  WorkspaceSymbolParams,
+  WorkspaceSymbolProvider,
 } from '../../../src/common';
 
 class MockWorkspaceSymbolProvider implements WorkspaceSymbolProvider {
@@ -85,8 +85,8 @@ describe('workspace-symbol-quickopen', () => {
     workspaceSymbolQuickOpenHandler = injector.get(WorkspaceSymbolQuickOpenHandler);
   });
 
-  afterEach(() => {
-    injector.disposeAll();
+  afterEach(async () => {
+    await injector.disposeAll();
   });
 
   it('onType', (done) => {

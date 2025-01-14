@@ -1,45 +1,26 @@
-import { Injector, Injectable } from '@opensumi/di';
-import { RPCProtocol } from '@opensumi/ide-connection/lib/common/rpcProtocol';
+import { Injectable } from '@opensumi/di';
 import { AppConfig } from '@opensumi/ide-core-browser';
-import {
-  Emitter,
-  ILoggerManagerClient,
-  LogServiceForClientPath,
-  LogLevel,
-  getLanguageId,
-} from '@opensumi/ide-core-common';
-import { IExtensionStorageService } from '@opensumi/ide-extension-storage';
+import { LogLevel, LogServiceForClientPath, getLanguageId } from '@opensumi/ide-core-common';
 import { MainThreadEnv } from '@opensumi/ide-extension/lib/browser/vscode/api/main.thread.env';
 import { MainThreadStorage } from '@opensumi/ide-extension/lib/browser/vscode/api/main.thread.storage';
 import {
-  IMainThreadEnv,
-  MainThreadAPIIdentifier,
   ExtHostAPIIdentifier,
+  IMainThreadEnv,
   IMainThreadStorage,
+  MainThreadAPIIdentifier,
 } from '@opensumi/ide-extension/lib/common/vscode';
-import { createEnvApiFactory, ExtHostEnv, envValue } from '@opensumi/ide-extension/lib/hosted/api/vscode/ext.host.env';
+import { createEnvApiFactory, envValue } from '@opensumi/ide-extension/lib/hosted/api/vscode/env/envApiFactory';
+import { ExtHostEnv } from '@opensumi/ide-extension/lib/hosted/api/vscode/env/ext.host.env';
 import { ExtHostStorage } from '@opensumi/ide-extension/lib/hosted/api/vscode/ext.host.storage';
 import { ExtHostTerminal } from '@opensumi/ide-extension/lib/hosted/api/vscode/ext.host.terminal';
 import ExtensionHostServiceImpl from '@opensumi/ide-extension/lib/hosted/ext.host';
-import { LoggerManagerClient } from '@opensumi/ide-logs/lib/browser/log-manage';
+import { IExtensionStorageService } from '@opensumi/ide-extension-storage';
 
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
+import { createMockPairRPCProtocol } from '../../__mocks__/initRPCProtocol';
 import { MockExtensionStorageService } from '../hosted/__mocks__/extensionStorageService';
 
-const emitterA = new Emitter<any>();
-const emitterB = new Emitter<any>();
-
-const mockClientA = {
-  send: (msg) => emitterB.fire(msg),
-  onMessage: emitterA.event,
-};
-const mockClientB = {
-  send: (msg) => emitterA.fire(msg),
-  onMessage: emitterB.event,
-};
-
-const rpcProtocolExt = new RPCProtocol(mockClientA);
-const rpcProtocolMain = new RPCProtocol(mockClientB);
+const { rpcProtocolExt, rpcProtocolMain } = createMockPairRPCProtocol();
 
 @Injectable()
 class MockLogServiceForClient {
@@ -60,8 +41,8 @@ class MockLogServiceForClient {
   }
 }
 
-describe('MainThreadEnvAPI Test Suites ', () => {
-  const injector = createBrowserInjector([], new Injector([]));
+describe('MainThreadEnvAPI Test Suites', () => {
+  const injector = createBrowserInjector([]);
   let extHostEnvAPI: ReturnType<typeof createEnvApiFactory>;
   const appConfig = {
     appName: 'sumi',
@@ -79,10 +60,6 @@ describe('MainThreadEnvAPI Test Suites ', () => {
         {
           token: LogServiceForClientPath,
           useClass: MockLogServiceForClient,
-        },
-        {
-          token: ILoggerManagerClient,
-          useClass: LoggerManagerClient,
         },
         {
           token: AppConfig,
@@ -132,7 +109,6 @@ describe('MainThreadEnvAPI Test Suites ', () => {
     expect(typeof extHostEnvAPI.clipboard.readText).toBe('function');
     expect(typeof extHostEnvAPI.clipboard.writeText).toBe('function');
     expect(typeof extHostEnvAPI.openExternal).toBe('function');
-    expect(typeof extHostEnvAPI.logLevel).toBe('number');
     expect(typeof extHostEnvAPI.isNewAppInstall).toBe('boolean');
     expect(typeof extHostEnvAPI.isTelemetryEnabled).toBe('boolean');
     expect(typeof extHostEnvAPI.onDidChangeTelemetryEnabled).toBe('function');
@@ -154,11 +130,5 @@ describe('MainThreadEnvAPI Test Suites ', () => {
     expect(navigator.clipboard.readText()).toBe(text);
     const target = await extHostEnvAPI.clipboard.readText();
     expect(target).toBe(text);
-  });
-
-  it.skip('can get loglevel', async () => {
-    const logManager = injector.get(ILoggerManagerClient);
-    logManager.onDidLogLevelChanged(LogLevel.Error);
-    expect(extHostEnvAPI.logLevel).toBe(await logManager.getGlobalLogLevel());
   });
 });

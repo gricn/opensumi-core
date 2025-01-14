@@ -1,29 +1,33 @@
-import { Injectable, Autowired } from '@opensumi/di';
-import { URI, ILogger, revive } from '@opensumi/ide-core-common';
+import { Autowired, Injectable } from '@opensumi/di';
+import { IDisposable, ILogger, URI, revive } from '@opensumi/ide-core-common';
 import { UriComponents } from '@opensumi/ide-editor';
 import {
   ResourceEdit,
   ResourceFileEdit,
   ResourceTextEdit,
 } from '@opensumi/monaco-editor-core/esm/vs/editor/browser/services/bulkEditService';
-import type {
-  IBulkEditPreviewHandler,
-  IBulkEditResult,
-  IBulkEditService,
-  IBulkEditOptions,
-} from '@opensumi/monaco-editor-core/esm/vs/editor/browser/services/bulkEditService';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import { WorkspaceEdit } from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
 
-import { IWorkspaceEdit, IWorkspaceEditService, IResourceTextEdit, IResourceFileEdit } from '../common';
+import { IResourceFileEdit, IResourceTextEdit, IWorkspaceEdit, IWorkspaceEditService } from '../common';
 
 import { isResourceFileEdit, isResourceTextEdit } from './utils';
 
-function reviveWorkspaceEditDto2(data: ResourceEdit[] | undefined): ResourceEdit[] {
-  if (!data || data.length === 0) {
+import type {
+  IBulkEditOptions,
+  IBulkEditPreviewHandler,
+  IBulkEditResult,
+  IBulkEditService,
+} from '@opensumi/monaco-editor-core/esm/vs/editor/browser/services/bulkEditService';
+
+function reviveWorkspaceEditDto2(data: ResourceEdit[] | WorkspaceEdit | undefined): ResourceEdit[] {
+  if (!data) {
     return [];
   }
+
+  const edits = Array.isArray(data) ? data : data.edits;
   const result: ResourceEdit[] = [];
-  for (const edit of revive(data)) {
+
+  for (const edit of revive(edits)) {
     if (isResourceFileEdit(edit)) {
       result.push(new ResourceFileEdit(edit.oldResource, edit.newResource, edit.options, edit.metadata));
     } else if (isResourceTextEdit(edit)) {
@@ -56,17 +60,17 @@ export class MonacoBulkEditService implements IBulkEditService {
   }
 
   async apply(
-    resourceEdits: ResourceEdit[],
+    resourceEdits: ResourceEdit[] | WorkspaceEdit,
     options?: IBulkEditOptions,
   ): Promise<IBulkEditResult & { success: boolean }> {
     let edits = reviveWorkspaceEditDto2(resourceEdits);
 
-    if (options?.showPreview && this._previewHandler) {
+    if ((options?.showPreview || edits.some((edit) => edit.metadata?.needsConfirmation)) && this._previewHandler) {
       try {
         edits = await this._previewHandler(edits, options);
       } catch (err) {
         this.logger.error(`Handle refactor preview error: \n ${err.message || err}`);
-        return { ariaSummary: err.message, success: false };
+        return { ariaSummary: err.message, isApplied: false, success: false };
       }
     }
 
@@ -75,12 +79,13 @@ export class MonacoBulkEditService implements IBulkEditService {
       await this.workspaceEditService.apply(workspaceEdit);
       return {
         ariaSummary: this.getAriaSummary(totalEdits, totalFiles),
+        isApplied: true,
         success: true,
       };
     } catch (err) {
       const errMsg = `Error applying workspace edits: ${err.toString()}`;
       this.logger.error(errMsg);
-      return { ariaSummary: errMsg, success: false };
+      return { ariaSummary: errMsg, isApplied: false, success: false };
     }
   }
 
@@ -88,7 +93,7 @@ export class MonacoBulkEditService implements IBulkEditService {
     return Boolean(this._previewHandler);
   }
 
-  setPreviewHandler(handler: IBulkEditPreviewHandler): monaco.IDisposable {
+  setPreviewHandler(handler: IBulkEditPreviewHandler): IDisposable {
     this._previewHandler = handler;
 
     const disposePreviewHandler = () => {

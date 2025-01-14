@@ -1,15 +1,13 @@
-import type vscode from 'vscode';
-
 import { IRPCProtocol } from '@opensumi/ide-connection';
 import {
   CancellationToken,
-  hookCancellationToken,
-  Event,
-  Emitter,
-  DisposableCollection,
-  MaybePromise,
-  isUndefined,
   Disposable,
+  DisposableCollection,
+  Emitter,
+  Event,
+  MaybePromise,
+  hookCancellationToken,
+  isUndefined,
 } from '@opensumi/ide-core-common';
 import {
   QuickInputButton,
@@ -20,22 +18,100 @@ import {
 } from '@opensumi/ide-quick-open';
 
 import {
-  MainThreadAPIIdentifier,
   IExtHostQuickOpen,
-  IMainThreadQuickOpen,
   IExtHostWorkspace,
+  IMainThreadQuickOpen,
+  MainThreadAPIIdentifier,
+  Severity,
 } from '../../../common/vscode';
+import { QuickPickItemKind } from '../../../common/vscode/ext-types';
+
+import type vscode from 'vscode';
 
 type Item = string | vscode.QuickPickItem;
+
+abstract class BaseQuickInput {
+  constructor(readonly _id: number, readonly proxy: IMainThreadQuickOpen) {
+    this._busy = false;
+    this._ignoreFocusOut = false;
+  }
+
+  abstract type: QuickInputType;
+
+  protected _enabled: boolean;
+  protected _busy: boolean;
+  protected _ignoreFocusOut: boolean;
+  protected _updateTimeout: any;
+  protected _disposed = false;
+  protected _pendingUpdate: Partial<QuickInputOptions> = {};
+
+  get busy(): boolean {
+    return this._busy;
+  }
+
+  set busy(busy: boolean) {
+    this._busy = busy;
+    this.update({ busy });
+  }
+
+  get ignoreFocusOut(): boolean {
+    return this._ignoreFocusOut;
+  }
+
+  set ignoreFocusOut(ignoreFocusOut: boolean) {
+    this._ignoreFocusOut = ignoreFocusOut;
+    this.update({ ignoreFocusOut });
+  }
+
+  get enabled(): boolean {
+    return this._enabled;
+  }
+
+  set enabled(enabled: boolean) {
+    this._enabled = enabled;
+    this.update({ enabled });
+  }
+
+  protected update(data: Partial<QuickInputOptions> & { severity?: Severity }) {
+    if (this._disposed) {
+      return;
+    }
+
+    for (const k of Object.keys(data)) {
+      data[k] = data[k] === undefined ? null : data[k];
+    }
+
+    this._pendingUpdate = { ...this._pendingUpdate, ...data };
+
+    if (!this._updateTimeout) {
+      // Defer the update so that multiple changes to setters dont cause a redraw each
+      this._updateTimeout = setTimeout(() => {
+        this._updateTimeout = undefined;
+        this.doUpdate();
+      }, 0);
+    }
+  }
+
+  protected doUpdate() {
+    if (this.type === 'quickPick') {
+      this.proxy.$updateQuickPick(this._pendingUpdate);
+    } else {
+      this.proxy.$createOrUpdateInputBox(this._id, this._pendingUpdate);
+    }
+    this._pendingUpdate = {};
+  }
+}
 
 export class ExtHostQuickOpen implements IExtHostQuickOpen {
   private _onDidSelectItem?: (handle: number) => void;
 
   private proxy: IMainThreadQuickOpen;
-  private validateInputHandler: undefined | ((input: string) => MaybePromise<string | null | undefined>);
+  private validateInputHandler:
+    | undefined
+    | ((input: string) => MaybePromise<string | vscode.InputBoxValidationMessage | null | undefined>);
 
   private createdQuicks = new Map<number, ExtQuickPick<vscode.QuickPickItem>>(); // Each quick will have a number so that we know where to fire events
-  private createdInputBoxs = new Map<number, ExtQuickInput>();
+  private createdInputBoxes = new Map<number, ExtQuickInput>();
   private currentQuick = 0;
 
   constructor(rpc: IRPCProtocol, private readonly workspace: IExtHostWorkspace) {
@@ -74,24 +150,33 @@ export class ExtHostQuickOpen implements IExtHostQuickOpen {
       };
     }
 
-    const pickItems = items.map((item, index) => {
+    const pickItems: QuickPickItem<number>[] = [];
+    const pendingGroupItem: vscode.QuickPickItem[] = [];
+    for (const [index, item] of items.entries()) {
       if (typeof item === 'string') {
-        return {
+        pickItems.push({
           label: item,
           value: index,
-        };
+        });
       } else {
-        const quickPickItem: QuickPickItem<number> = {
-          label: item.label,
-          description: item.description,
-          detail: item.detail,
-          value: index, // handle
-          buttons: item.buttons as QuickInputButton[],
-        };
-
-        return quickPickItem;
+        if (item.kind === QuickPickItemKind.Separator) {
+          pendingGroupItem.push(item);
+        } else {
+          // group label 取上一个 kind 为 Separator 的 item label
+          const groupLabel = pendingGroupItem.pop()?.label;
+          pickItems.push({
+            label: item.label,
+            groupLabel,
+            iconPath: item.iconPath as QuickPickItem<number>['iconPath'],
+            description: item.description,
+            detail: item.detail,
+            value: index, // handle
+            buttons: item.buttons as QuickInputButton[],
+            showBorder: typeof groupLabel !== 'undefined',
+          });
+        }
       }
-    });
+    }
 
     const quickPickPromise = this.proxy.$showQuickPick(
       sessionId,
@@ -107,6 +192,10 @@ export class ExtHostQuickOpen implements IExtHostQuickOpen {
         buttons: (options as QuickPickOptions).buttons,
         step: (options as QuickPickOptions).step,
         totalSteps: (options as QuickPickOptions).totalSteps,
+        value: (options as QuickPickOptions).value,
+        busy: (options as QuickPickOptions).busy,
+        enabled: (options as QuickPickOptions).enabled,
+        alwaysOpen: true, // 插件调用的 quick pick 不自动关闭，和 vscode 交互保持一致
       },
     );
 
@@ -159,7 +248,7 @@ export class ExtHostQuickOpen implements IExtHostQuickOpen {
 
   createQuickPick<T extends vscode.QuickPickItem>(): vscode.QuickPick<T> {
     const session = ++this.currentQuick;
-    const newQuickPick = new ExtQuickPick(this, session);
+    const newQuickPick = new ExtQuickPick(session, this.proxy, this);
     this.createdQuicks.set(session, newQuickPick);
     return newQuickPick as ExtQuickPick<T>;
   }
@@ -167,9 +256,9 @@ export class ExtHostQuickOpen implements IExtHostQuickOpen {
   createInputBox(): vscode.InputBox {
     const session = ++this.currentQuick;
     const newInputBox = new ExtInputBox(session, this.proxy, this, () => {
-      this.createdInputBoxs.delete(session);
+      this.createdInputBoxes.delete(session);
     });
-    this.createdInputBoxs.set(session, newInputBox);
+    this.createdInputBoxes.set(session, newInputBox);
     return newInputBox;
   }
 
@@ -181,25 +270,25 @@ export class ExtHostQuickOpen implements IExtHostQuickOpen {
   }
 
   $onCreatedInputBoxDidChangeValue(sessionId: number, value: string): void {
-    const session = this.createdInputBoxs.get(sessionId);
+    const session = this.createdInputBoxes.get(sessionId);
     if (session) {
       session._fireDidChangeValue(value);
     }
   }
   $onCreatedInputBoxDidAccept(sessionId: number): void {
-    const session = this.createdInputBoxs.get(sessionId);
+    const session = this.createdInputBoxes.get(sessionId);
     if (session) {
       session._fireDidAccept();
     }
   }
   $onCreatedInputBoxDidHide(sessionId: number): void {
-    const session = this.createdInputBoxs.get(sessionId);
+    const session = this.createdInputBoxes.get(sessionId);
     if (session) {
       session._fireDidHide();
     }
   }
   $onCreatedInputBoxDidTriggerButton(sessionId: number, btnHandler: number) {
-    const session = this.createdInputBoxs.get(sessionId);
+    const session = this.createdInputBoxes.get(sessionId);
     if (session) {
       session._fireDidTriggerButton(btnHandler);
     }
@@ -228,9 +317,11 @@ export class ExtHostQuickOpen implements IExtHostQuickOpen {
     return hookCancellationToken(token, promise);
   }
 
-  $validateInput(input: string): MaybePromise<string | null | undefined> {
+  $validateInput(input: string): MaybePromise<string | { message: string; severity: Severity } | null | undefined> {
     if (this.validateInputHandler) {
-      return this.validateInputHandler(input);
+      return this.validateInputHandler(input) as MaybePromise<
+        string | { message: string; severity: Severity } | null | undefined
+      >;
     }
     return undefined;
   }
@@ -240,11 +331,10 @@ export class ExtHostQuickOpen implements IExtHostQuickOpen {
   }
 }
 
-class ExtQuickPick<T extends vscode.QuickPickItem> implements vscode.QuickPick<T> {
-  busy: boolean;
+class ExtQuickPick<T extends vscode.QuickPickItem> extends BaseQuickInput implements vscode.QuickPick<T> {
+  type: QuickInputType = 'quickPick';
+
   canSelectMany: boolean;
-  enabled: boolean;
-  ignoreFocusOut: boolean;
   matchOnDescription: boolean;
   matchOnDetail: boolean;
   keepScrollPosition?: boolean | undefined;
@@ -272,7 +362,8 @@ class ExtQuickPick<T extends vscode.QuickPickItem> implements vscode.QuickPick<T
 
   readonly quickPickIndex: number;
 
-  constructor(readonly quickOpen: IExtHostQuickOpen, quickPickIndex: number) {
+  constructor(quickPickIndex: number, readonly proxy: IMainThreadQuickOpen, readonly quickOpen: IExtHostQuickOpen) {
+    super(quickPickIndex, proxy);
     this.quickPickIndex = quickPickIndex;
     this.disposableCollection = new DisposableCollection();
     this.disposableCollection.push((this._onDidHideEmitter = new Emitter()));
@@ -361,6 +452,7 @@ class ExtQuickPick<T extends vscode.QuickPickItem> implements vscode.QuickPick<T
 
   dispose(): void {
     this.disposableCollection.dispose();
+    this.proxy.$hideQuickPick();
   }
 
   attachBtn(btnHandler: number): void {
@@ -395,8 +487,8 @@ class ExtQuickPick<T extends vscode.QuickPickItem> implements vscode.QuickPick<T
     const selectItem = (item: T | T[]) => {
       const selectedItems = Array.isArray(item) ? item : [item];
       this.selectedItems = this.activeItems = selectedItems;
-      this._onDidAcceptEmitter.fire(undefined);
       this._onDidChangeSelectionEmitter.fire(selectedItems);
+      this._onDidAcceptEmitter.fire(undefined);
     };
 
     this.quickOpen
@@ -412,6 +504,9 @@ class ExtQuickPick<T extends vscode.QuickPickItem> implements vscode.QuickPick<T
           ignoreFocusOut: this.ignoreFocusOut,
           _sessionId: this.quickPickIndex,
           keepScrollPosition: this.keepScrollPosition,
+          value: this.value,
+          busy: this.busy,
+          enabled: this.enabled,
         } as QuickPickOptions,
       )
       .then((item) => {
@@ -425,21 +520,18 @@ class ExtQuickPick<T extends vscode.QuickPickItem> implements vscode.QuickPick<T
 
 type QuickInputType = 'quickPick' | 'inputBox';
 
-abstract class ExtQuickInput implements vscode.InputBox {
-  abstract type: QuickInputType;
-
+abstract class ExtQuickInput extends BaseQuickInput implements vscode.InputBox {
   private _value: string;
+  private _valueSelection: [number, number] | undefined;
   private _placeholder: string | undefined;
   private _password: boolean;
   private _buttons: vscode.QuickInputButton[];
   private _prompt: string | undefined;
-  private _validationMessage: string | undefined;
+  private _validationMessage: string | vscode.InputBoxValidationMessage | undefined;
   private _title: string | undefined;
   private _step: number | undefined;
   private _totalSteps: number | undefined;
-  private _enabled: boolean;
-  private _busy: boolean;
-  private _ignoreFocusOut: boolean;
+  private _hideOnDidAccept: boolean;
 
   private disposableCollection: DisposableCollection;
 
@@ -448,17 +540,13 @@ abstract class ExtQuickInput implements vscode.InputBox {
   private _onDidAcceptEmitter: Emitter<void>;
   private _onDidHideEmitter: Emitter<void>;
 
-  private _updateTimeout: any;
-  private _disposed = false;
-
-  private _pendingUpdate: Partial<QuickInputOptions> = {};
-
   constructor(
     readonly _id: number,
     readonly proxy: IMainThreadQuickOpen,
     readonly quickOpen: IExtHostQuickOpen,
     onDispose: () => void,
   ) {
+    super(_id, proxy);
     this._buttons = [];
     this._step = 0;
     this._title = '';
@@ -467,7 +555,7 @@ abstract class ExtQuickInput implements vscode.InputBox {
     this._prompt = '';
     this._placeholder = '';
     this._password = false;
-    this._ignoreFocusOut = false;
+    this._hideOnDidAccept = true;
 
     this.disposableCollection = new DisposableCollection();
     this.disposableCollection.push((this._onDidAcceptEmitter = new Emitter()));
@@ -475,15 +563,6 @@ abstract class ExtQuickInput implements vscode.InputBox {
     this.disposableCollection.push((this._onDidTriggerButtonEmitter = new Emitter()));
     this.disposableCollection.push((this._onDidHideEmitter = new Emitter()));
     this.disposableCollection.push(Disposable.create(onDispose));
-  }
-
-  get ignoreFocusOut(): boolean {
-    return this._ignoreFocusOut;
-  }
-
-  set ignoreFocusOut(ignoreFocusOut: boolean) {
-    this._ignoreFocusOut = ignoreFocusOut;
-    this.update({ ignoreFocusOut });
   }
 
   get buttons(): vscode.QuickInputButton[] {
@@ -499,15 +578,6 @@ abstract class ExtQuickInput implements vscode.InputBox {
     this.update({ buttons: buttons as unknown as QuickTitleButton[] });
   }
 
-  get busy(): boolean {
-    return this._busy;
-  }
-
-  set busy(busy: boolean) {
-    this._busy = busy;
-    this.update({ busy });
-  }
-
   get title() {
     return this._title;
   }
@@ -515,15 +585,6 @@ abstract class ExtQuickInput implements vscode.InputBox {
   set title(title: string | undefined) {
     this._title = title;
     this.update({ title });
-  }
-
-  get enabled(): boolean {
-    return this._enabled;
-  }
-
-  set enabled(enabled: boolean) {
-    this._enabled = enabled;
-    this.update({ enabled });
   }
 
   get password(): boolean {
@@ -543,6 +604,15 @@ abstract class ExtQuickInput implements vscode.InputBox {
   set value(value: string) {
     this._value = value;
     this.update({ value });
+  }
+
+  get valueSelection(): [number, number] | undefined {
+    return this._valueSelection;
+  }
+
+  set valueSelection(valueSelection: [number, number] | undefined) {
+    this._valueSelection = valueSelection;
+    this.update({ valueSelection });
   }
 
   get totalSteps(): number | undefined {
@@ -581,13 +651,31 @@ abstract class ExtQuickInput implements vscode.InputBox {
     this.update({ placeHolder });
   }
 
-  get validationMessage(): string | undefined {
+  get validationMessage(): string | vscode.InputBoxValidationMessage | undefined {
     return this._validationMessage;
   }
 
-  set validationMessage(validationMessage: string | undefined) {
+  set validationMessage(validationMessage: string | vscode.InputBoxValidationMessage | undefined) {
     this._validationMessage = validationMessage;
-    this.update({ validationMessage });
+    if (!validationMessage) {
+      this.update({ validationMessage: undefined, severity: Severity.Ignore });
+    } else if (typeof validationMessage === 'string') {
+      this.update({ validationMessage, severity: Severity.Error });
+    } else {
+      this.update({
+        validationMessage: validationMessage.message,
+        severity: (validationMessage.severity as unknown as Severity) ?? Severity.Error,
+      });
+    }
+  }
+
+  get hideOnDidAccept(): boolean {
+    return this._hideOnDidAccept;
+  }
+
+  set hideOnDidAccept(hideOnDidAccept: boolean) {
+    this._hideOnDidAccept = hideOnDidAccept;
+    this.update({ hideOnDidAccept });
   }
 
   getOptions(): QuickInputOptions {
@@ -600,38 +688,13 @@ abstract class ExtQuickInput implements vscode.InputBox {
       title: this._title,
       totalSteps: this.totalSteps,
       step: this.step,
-      validationMessage: this.validationMessage,
+      validationMessage:
+        typeof this.validationMessage === 'string' ? this.validationMessage : this.validationMessage?.message,
       buttons: this.buttons as unknown as QuickTitleButton[],
       busy: this.busy,
       enabled: this.enabled,
+      hideOnDidAccept: this.hideOnDidAccept,
     };
-  }
-
-  private doUpdate() {
-    if (this.type === 'inputBox') {
-      this.proxy.$createOrUpdateInputBox(this._id, this._pendingUpdate);
-    }
-    this._pendingUpdate = {};
-  }
-
-  private update(data: Partial<QuickInputOptions>) {
-    if (this._disposed) {
-      return;
-    }
-
-    for (const k of Object.keys(data)) {
-      this._pendingUpdate[k] = data[k] === undefined ? null : data[k];
-    }
-
-    this._pendingUpdate = { ...this._pendingUpdate, ...data };
-
-    if (!this._updateTimeout) {
-      // Defer the update so that multiple changes to setters dont cause a redraw each
-      this._updateTimeout = setTimeout(() => {
-        this._updateTimeout = undefined;
-        this.doUpdate();
-      }, 0);
-    }
   }
 
   _fireDidChangeValue(value: string) {

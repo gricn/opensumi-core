@@ -1,21 +1,21 @@
-import classnames from 'classnames';
+import cls from 'classnames';
 
 import { Autowired, Injectable } from '@opensumi/di';
 import {
-  URI,
-  Emitter,
-  IDisposable,
-  arrays,
-  Event,
-  WithEventBus,
   BasicEvent,
   Disposable,
+  Emitter,
+  Event,
+  IDisposable,
   LRUMap,
+  URI,
+  WithEventBus,
+  arrays,
 } from '@opensumi/ide-core-common';
-import type { IModelService } from '@opensumi/monaco-editor-core/esm/vs/editor/common/services/modelService';
-import type { IModeService } from '@opensumi/monaco-editor-core/esm/vs/editor/common/services/modeService';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
-import { StaticServices } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneServices';
+import { URI as Uri } from '@opensumi/monaco-editor-core/esm/vs/base/common/uri';
+import { ILanguageService } from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages/language';
+import { IModelService } from '@opensumi/monaco-editor-core/esm/vs/editor/common/services/model';
+import { StandaloneServices } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneServices';
 
 import { getIcon } from '../style/icon/icon';
 
@@ -30,7 +30,7 @@ export namespace DataUri {
   export const META_DATA_SIZE = 'size';
   export const META_DATA_MIME = 'mime';
 
-  export function parseMetaData(dataUri: monaco.Uri): Map<string, string> {
+  export function parseMetaData(dataUri: Uri): Map<string, string> {
     const metadata = new Map<string, string>();
     const uriPath = dataUri.path;
     // Given a URI of:  data:image/png;size:2313;label:SomeLabel;description:SomeDescription;base64,77+9UE5...
@@ -258,7 +258,8 @@ export class LabelService extends WithEventBus {
 }
 
 let modeService: any;
-let modelService: any;
+let modelService: IModelService;
+let languageService: ILanguageService;
 const getIconClass = (
   resource: URI,
   options?: ILabelOptions,
@@ -270,7 +271,7 @@ const getIconClass = (
   let name: string | undefined;
   // 获取资源的路径和名称，data-uri单独处理
   if (resource.scheme === 'data') {
-    const metadata = DataUri.parseMetaData(monaco.Uri.file(resource.toString()));
+    const metadata = DataUri.parseMetaData(Uri.file(resource.toString()));
     name = metadata.get(DataUri.META_DATA_LABEL);
   } else {
     name = cssEscape(basenameOrAuthority(resource).toLowerCase());
@@ -293,18 +294,24 @@ const getIconClass = (
     }
     // Language Mode探测
     if (!modeService) {
-      modeService = StaticServices.modeService.get();
+      // modeService = StandaloneServices.modeService.get();
+    }
+    if (!languageService) {
+      languageService = StandaloneServices.get(ILanguageService);
     }
     if (!modelService) {
-      modelService = StaticServices.modelService.get();
+      modelService = StandaloneServices.get(IModelService);
     }
-    const detectedModeId = detectModeId(modelService, modeService, monaco.Uri.file(resource.withoutQuery().toString()));
+    const detectedModeId = detectModeId(modelService, languageService, Uri.file(resource.withoutQuery().toString()));
     if (detectedModeId) {
       classes.push(`${cssEscape(detectedModeId)}-lang-file-icon`);
     } else {
       _onDidChange = new Emitter<void>();
-      StaticServices.modeService.get().onDidEncounterLanguage(() => {
-        if (detectModeId(modelService, modeService, monaco.Uri.file(resource.withoutQuery().toString()))) {
+      Event.any(
+        languageService.onDidRequestBasicLanguageFeatures,
+        languageService.onDidRequestRichLanguageFeatures,
+      )(() => {
+        if (detectModeId(modelService, languageService, Uri.file(resource.withoutQuery().toString()))) {
           _onDidChange?.fire();
           _onDidChange?.dispose();
         }
@@ -314,14 +321,14 @@ const getIconClass = (
   // 统一的图标类
   classes.push('icon-label');
   return {
-    iconClass: classnames(classes),
+    iconClass: cls(classes),
     // 对于首次没找到的，添加一个检测新语言注册的 change 事件
     onDidChange: _onDidChange?.event,
   };
 };
 
 export function cssEscape(str: string): string {
-  return str.replace(/[\11\12\14\15\40]/g, '/'); // HTML class names can not contain certain whitespace characters, use / instead, which doesn't exist in file names.
+  return str.replace(/[\x09\x0a\x0c\x0d\x20]/g, '/'); // HTML class names can not contain certain whitespace characters, use / instead, which doesn't exist in file names.
 }
 
 export function basenameOrAuthority(resource: URI) {
@@ -330,8 +337,8 @@ export function basenameOrAuthority(resource: URI) {
 
 export function detectModeId(
   modelService: IModelService,
-  modeService: IModeService,
-  resource: monaco.Uri,
+  languageService: ILanguageService,
+  resource: Uri,
 ): string | null {
   if (!resource) {
     return null; // we need a resource at least
@@ -345,12 +352,12 @@ export function detectModeId(
     const mime = metadata.get(DataUri.META_DATA_MIME);
 
     if (mime) {
-      modeId = modeService.getModeId(mime);
+      modeId = languageService.getLanguageIdByMimeType(mime);
     }
   } else {
     const model = modelService.getModel(resource);
     if (model) {
-      modeId = model.getModeId();
+      modeId = model.getLanguageId();
     }
   }
 
@@ -360,13 +367,16 @@ export function detectModeId(
   }
 
   // otherwise fallback to path based detection
-  return modeService.getModeIdByFilepathOrFirstLine(resource);
+  // return modeService.getModeIdByFilepathOrFirstLine(resource);
+  const guessLanguageId = languageService.guessLanguageIdByFilepathOrFirstLine(resource);
+  // 相关 issue: https://github.com/microsoft/vscode/commit/2959fcde6aa9ff2058ad13cef8a5265ddb5f58a4#diff-7dd3b615572806b4d2210a9e7b32e1ae3714bc7b5fb201e437edaa8b372ce1aaR188
+  return guessLanguageId === 'unknown' ? null : guessLanguageId;
 }
 
 export function getLanguageIdFromMonaco(uri: URI) {
-  modeService = StaticServices.modeService.get();
-  modelService = StaticServices.modelService.get();
-  return detectModeId(modelService, modeService, monaco.Uri.parse(uri.toString()));
+  languageService = StandaloneServices.get(ILanguageService);
+  modelService = StandaloneServices.get(IModelService);
+  return detectModeId(modelService, languageService, Uri.parse(uri.toString()));
 }
 
 /**

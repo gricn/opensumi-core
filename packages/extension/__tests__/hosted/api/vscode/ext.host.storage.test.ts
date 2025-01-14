@@ -1,12 +1,12 @@
-import { IRPCProtocol } from '@opensumi/ide-connection/lib/common/rpcProtocol';
-import { URI, StoragePaths } from '@opensumi/ide-core-common';
+import { IRPCProtocol } from '@opensumi/ide-connection/lib/common/rpc/multiplexer';
+import { StoragePaths, URI } from '@opensumi/ide-core-common';
 
 import { createBrowserInjector } from '../../../../../../tools/dev-tool/src/injector-helper';
 import { MainThreadAPIIdentifier } from '../../../../src/common/vscode';
 import {
+  ExtHostStorage,
   ExtensionGlobalMemento,
   ExtensionMemento,
-  ExtHostStorage,
 } from '../../../../src/hosted/api/vscode/ext.host.storage';
 
 const cache = {
@@ -48,8 +48,8 @@ describe('extension/__tests__/hosted/api/vscode/ext.host.storage.test.ts', () =>
     extHostStorage = injector.get(ExtHostStorage, [rpcProtocol]);
   });
 
-  afterAll(() => {
-    injector.disposeAll();
+  afterAll(async () => {
+    await injector.disposeAll();
   });
 
   it('init storage path', async () => {
@@ -58,17 +58,17 @@ describe('extension/__tests__/hosted/api/vscode/ext.host.storage.test.ts', () =>
       storageUri: storagePath.resolve(StoragePaths.EXTENSIONS_WORKSPACE_STORAGE_DIR).codeUri,
       globalStorageUri: storagePath.resolve(StoragePaths.EXTENSIONS_GLOBAL_STORAGE_DIR).codeUri,
     });
-    expect(extHostStorage.storagePath).toBeTruthy();
+    expect(extHostStorage.getExtensionLogUri('test-id')).toBeTruthy();
   });
 
   it('getValue', async () => {
     await extHostStorage.getValue(false, 'test');
-    expect(mockMainThreadStorage.$getValue).toBeCalledTimes(1);
+    expect(mockMainThreadStorage.$getValue).toHaveBeenCalledTimes(1);
   });
 
   it('setValue', async () => {
     await extHostStorage.setValue(false, 'test', {});
-    expect(mockMainThreadStorage.$setValue).toBeCalledTimes(1);
+    expect(mockMainThreadStorage.$setValue).toHaveBeenCalledTimes(1);
   });
 
   it('ExtensionMemento', async () => {

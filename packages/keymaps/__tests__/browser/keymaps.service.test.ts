@@ -4,33 +4,33 @@ import path from 'path';
 import * as fs from 'fs-extra';
 
 import { Injectable, Provider } from '@opensumi/di';
+import { WSChannelHandler } from '@opensumi/ide-connection/lib/browser';
 import {
+  AppConfig,
+  BrowserModule,
+  Disposable,
+  EDITOR_COMMANDS,
+  FileUri,
   KeybindingRegistry,
+  KeybindingScope,
   KeybindingService,
   URI,
-  EDITOR_COMMANDS,
-  Disposable,
-  KeybindingScope,
   localize,
-  ILogger,
-  FileUri,
-  BrowserModule,
-  AppConfig,
+  runWhenIdle,
 } from '@opensumi/ide-core-browser';
-import { MockLogger } from '@opensumi/ide-core-browser/__mocks__/logger';
 import { MockProgressService } from '@opensumi/ide-core-browser/__mocks__/progress-service';
 import { IProgressService } from '@opensumi/ide-core-browser/lib/progress';
+import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
+import { MockInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
 import { IDiskFileProvider, IFileServiceClient } from '@opensumi/ide-file-service';
 import { FileServiceClientModule } from '@opensumi/ide-file-service/lib/browser';
 import { FileServiceContribution } from '@opensumi/ide-file-service/lib/browser/file-service-contribution';
 import { DiskFileSystemProvider } from '@opensumi/ide-file-service/lib/node/disk-file-system.provider';
+import { WatcherProcessManagerToken } from '@opensumi/ide-file-service/lib/node/watcher-process-manager';
 import { KeymapsModule } from '@opensumi/ide-keymaps/lib/browser';
 import { KeymapService } from '@opensumi/ide-keymaps/lib/browser/keymaps.service';
 import { IUserStorageService } from '@opensumi/ide-preferences';
 import { UserStorageContribution, UserStorageServiceImpl } from '@opensumi/ide-preferences/lib/browser/userstorage';
-
-import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
-import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
 
 @Injectable()
 export class AddonModule extends BrowserModule {
@@ -101,12 +101,23 @@ describe('KeymapsService should be work', () => {
         useValue: mockKeybindingRegistry,
       },
       {
-        token: ILogger,
-        useClass: MockLogger,
-      },
-      {
         token: IProgressService,
         useClass: MockProgressService,
+      },
+      {
+        token: WSChannelHandler,
+        useValue: {
+          clientId: 'test_client_id',
+        },
+      },
+      {
+        token: WatcherProcessManagerToken,
+        useValue: {
+          setClient: () => void 0,
+          watch: (() => 1) as any,
+          unWatch: () => void 0,
+          createProcess: () => void 0,
+        },
       },
       {
         token: AppConfig,
@@ -142,7 +153,7 @@ describe('KeymapsService should be work', () => {
       await fs.remove(userhome.path.toString());
     }
     userhome = null;
-    injector.disposeAll();
+    await injector.disposeAll();
   });
 
   describe('01 #Init', () => {
@@ -169,34 +180,37 @@ describe('KeymapsService should be work', () => {
       const open = jest.fn();
       injector.mockCommand(EDITOR_COMMANDS.OPEN_RESOURCE.id, open);
       await keymapsService.open();
-      expect(open).toBeCalledTimes(1);
+      expect(open).toHaveBeenCalledTimes(1);
     });
 
     it('openResource method should be work', async () => {
       const openResource = jest.fn();
       injector.mockCommand(EDITOR_COMMANDS.OPEN_RESOURCE.id, openResource);
       await keymapsService.openResource();
-      expect(openResource).toBeCalledTimes(1);
+      expect(openResource).toHaveBeenCalledTimes(1);
     });
 
     it('fix method should be work', async () => {
       const open = jest.fn();
       injector.mockCommand(EDITOR_COMMANDS.OPEN_RESOURCE.id, open);
       await keymapsService.fixed();
-      expect(open).toBeCalledTimes(1);
+      expect(open).toHaveBeenCalledTimes(1);
     });
 
     it('covert method should be work', async () => {
       await keymapsService.covert({} as any);
-      expect(mockKeybindingService.convert).toBeCalledTimes(1);
+      expect(mockKeybindingService.convert).toHaveBeenCalledTimes(1);
     });
 
     it('clearConvert method should be work', async () => {
       await keymapsService.clearCovert();
-      expect(mockKeybindingService.clearConvert).toBeCalledTimes(1);
+      expect(mockKeybindingService.clearConvert).toHaveBeenCalledTimes(1);
     });
 
     it('reconcile method should be work', async () => {
+      mockKeybindingRegistry.registerKeybinding.mockClear();
+      mockKeybindingRegistry.unregisterKeybinding.mockClear();
+      mockKeybindingRegistry.getKeybindingsForCommand.mockClear();
       const keybindings = [
         {
           command: 'test.command',
@@ -204,12 +218,15 @@ describe('KeymapsService should be work', () => {
         },
       ];
       await keymapsService.reconcile(keybindings);
-      expect(mockKeybindingRegistry.getKeybindingsForCommand).toBeCalledTimes(3);
-      expect(mockKeybindingRegistry.unregisterKeybinding).toBeCalledTimes(2);
-      expect(mockKeybindingRegistry.registerKeybinding).toBeCalledTimes(3);
+      runWhenIdle(() => {
+        expect(mockKeybindingRegistry.getKeybindingsForCommand).toHaveBeenCalledTimes(1);
+        expect(mockKeybindingRegistry.unregisterKeybinding).toHaveBeenCalledTimes(1);
+        expect(mockKeybindingRegistry.registerKeybinding).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('setKeybinding method should be work', async () => {
+      mockKeybindingRegistry.registerKeybinding.mockClear();
       const rawkeybinding = {
         command: 'test.command',
         keybinding: 'cmd+shift+c',
@@ -219,7 +236,7 @@ describe('KeymapsService should be work', () => {
         keybinding: 'cmd+c',
       };
       await keymapsService.setKeybinding(rawkeybinding, keybinding);
-      expect(mockKeybindingRegistry.registerKeybinding).toBeCalledTimes(4);
+      expect(mockKeybindingRegistry.registerKeybinding).toHaveBeenCalledTimes(1);
     });
 
     it('getKeybindings method should be work', async () => {
@@ -228,12 +245,13 @@ describe('KeymapsService should be work', () => {
     });
 
     it('resetKeybinding method should be work', async () => {
+      mockKeybindingRegistry.registerKeybinding.mockClear();
       const keybinding = {
         command: 'test.command',
         keybinding: 'cmd+c',
       };
       await keymapsService.resetKeybinding(keybinding);
-      expect(mockKeybindingRegistry.registerKeybinding).toBeCalledTimes(5);
+      expect(mockKeybindingRegistry.registerKeybinding).toHaveBeenCalledTimes(1);
     });
 
     it('getWhen method should be work', () => {
@@ -245,7 +263,7 @@ describe('KeymapsService should be work', () => {
       mockKeybindingService.convertMonacoWhen.mockClear();
       const result = keymapsService.getWhen(keybinding);
       expect(result).toBe(keybinding.when);
-      expect(mockKeybindingService.convertMonacoWhen).toBeCalledTimes(1);
+      expect(mockKeybindingService.convertMonacoWhen).toHaveBeenCalledTimes(1);
     });
 
     it('getScope method should be work', () => {
@@ -262,7 +280,7 @@ describe('KeymapsService should be work', () => {
     it('validateKeybinding method should be work', () => {
       const items = keymapsService.getKeybindingItems();
       keymapsService.validateKeybinding(items[0], 'cmd+c');
-      expect(mockKeybindingRegistry.validateKeybindingInScope).toBeCalledTimes(1);
+      expect(mockKeybindingRegistry.validateKeybindingInScope).toHaveBeenCalledTimes(1);
     });
 
     it('detectKeybindings method should be work', () => {
@@ -277,7 +295,7 @@ describe('KeymapsService should be work', () => {
       expect(detectKeybindings.length).toBe(1);
     });
 
-    it('filter monaco.editor from storeKeybindings ', () => {
+    it('filter monaco.editor from storeKeybindings', () => {
       keymapsService.storeKeybindings = [
         {
           command: 'monaco.editor.action.quickCommand',

@@ -1,22 +1,18 @@
 import { WSChannel } from '@opensumi/ide-connection';
 import { WSChannelHandler } from '@opensumi/ide-connection/lib/browser/ws-channel-handler';
-import { IContextKeyService } from '@opensumi/ide-core-browser/src';
+import { SimpleConnection } from '@opensumi/ide-connection/lib/common/connection/drivers/simple';
+import { IContextKeyService, IFileServiceClient } from '@opensumi/ide-core-browser';
 import { Disposable } from '@opensumi/ide-core-common';
-import { IFileServiceClient } from '@opensumi/ide-core-node';
 import {
   DebugModelFactory,
-  IDebugServer,
-  IDebugSessionManager,
-  IDebugSession,
   DebugSessionOptions,
+  IDebugServer,
+  IDebugSession,
+  IDebugSessionManager,
 } from '@opensumi/ide-debug';
-import {
-  DebugPreferences,
-  DebugSessionContributionRegistry,
-  DebugSessionFactory,
-  DefaultDebugSessionFactory,
-  DebugSession,
-} from '@opensumi/ide-debug/lib/browser';
+import { DebugPreferences } from '@opensumi/ide-debug/lib/browser/debug-preferences';
+import { DebugSession } from '@opensumi/ide-debug/lib/browser/debug-session';
+import { DebugSessionContributionRegistry } from '@opensumi/ide-debug/lib/browser/debug-session-contribution';
 import { DebugConsoleFilterService } from '@opensumi/ide-debug/lib/browser/view/console/debug-console-filter.service';
 import { DebugConsoleModelService } from '@opensumi/ide-debug/lib/browser/view/console/debug-console-tree.model.service';
 import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
@@ -32,15 +28,16 @@ import { ITerminalApiService } from '@opensumi/ide-terminal-next';
 import { IVariableResolverService } from '@opensumi/ide-variable';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
 
+import { MockDebugSession } from '../../../../__mocks__/debug-session';
+
 describe('Debug console component Test Suites', () => {
   const mockInjector = createBrowserInjector([]);
   let debugConsoleModelService: DebugConsoleModelService;
   let debugConsoleFilterService: DebugConsoleFilterService;
-  let debugSessionFactory: DebugSessionFactory;
   let container;
 
   const createMockSession = (sessionId: string, options: Partial<DebugSessionOptions>): IDebugSession =>
-    debugSessionFactory.get(sessionId, options as any);
+    new MockDebugSession(sessionId, options);
 
   const mockCtxMenuRenderer = {
     show: jest.fn(),
@@ -49,9 +46,9 @@ describe('Debug console component Test Suites', () => {
   const mockDebugSessionManager = {
     onDidDestroyDebugSession: jest.fn(() => Disposable.create(() => {})),
     onDidChangeActiveDebugSession: jest.fn(() => Disposable.create(() => {})),
-    currentSession: IDebugSession,
+    currentSession: undefined,
     updateCurrentSession: jest.fn((session: IDebugSession | undefined) => {}),
-  };
+  } as any;
 
   beforeEach(() => {
     mockInjector.overrideProviders({
@@ -105,10 +102,7 @@ describe('Debug console component Test Suites', () => {
       useValue: {
         clientId: 'mock_id' + Math.random(),
         openChannel(id: string) {
-          const channelSend = (content) => {
-            //
-          };
-          return new WSChannel(channelSend, 'mock_wschannel' + id);
+          return new WSChannel(new SimpleConnection(), { id: 'mock_wschannel' + id });
         },
       },
     });
@@ -136,12 +130,7 @@ describe('Debug console component Test Suites', () => {
       token: IMainLayoutService,
       useClass: LayoutService,
     });
-    mockInjector.overrideProviders({
-      token: DebugSessionFactory,
-      useClass: DefaultDebugSessionFactory,
-    });
 
-    debugSessionFactory = mockInjector.get(DefaultDebugSessionFactory);
     debugConsoleModelService = mockInjector.get(DebugConsoleModelService);
     debugConsoleFilterService = mockInjector.get(DebugConsoleFilterService);
     container = document.createElement('div');
@@ -156,7 +145,6 @@ describe('Debug console component Test Suites', () => {
 
   it('repl can be filter', async () => {
     const session = createMockSession('mock', {});
-    // @ts-ignore
     mockDebugSessionManager.currentSession = session;
     await debugConsoleModelService.initTreeModel(session as DebugSession);
     const tree = debugConsoleModelService;
@@ -170,7 +158,7 @@ describe('Debug console component Test Suites', () => {
     await tree.execute('KTTQL\n');
     await tree.execute('KATATAQAL\n');
     await tree.execute('🐜\n');
-    expect(ensureVisible).toBeCalledTimes(5);
+    expect(ensureVisible).toHaveBeenCalledTimes(5);
     const filterString = 'KTTQL';
     debugConsoleFilterService.onDidValueChange((event) => {
       expect(event).toBe(filterString);

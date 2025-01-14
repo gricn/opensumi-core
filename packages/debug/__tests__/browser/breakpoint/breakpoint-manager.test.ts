@@ -1,7 +1,7 @@
-import { URI, StorageProvider, IFileServiceClient } from '@opensumi/ide-core-browser';
-import { DebugBreakpoint, BreakpointManager, BREAKPOINT_KIND } from '@opensumi/ide-debug/lib/browser';
+import { IFileServiceClient, StorageProvider, URI } from '@opensumi/ide-core-browser';
+import { BREAKPOINT_KIND, BreakpointManager, DebugBreakpoint } from '@opensumi/ide-debug/lib/browser/breakpoint';
 import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
-import { MockFileServiceClient } from '@opensumi/ide-file-service/lib/common/mocks';
+import { MockFileServiceClient } from '@opensumi/ide-file-service/__mocks__/file-service-client';
 import { IWorkspaceStorageService } from '@opensumi/ide-workspace';
 
 describe('Breakpoints Manager', () => {
@@ -158,12 +158,12 @@ describe('Breakpoints Manager', () => {
 
   it('load should be work', async () => {
     await breakpointManager.load();
-    expect(getFn).toBeCalledTimes(1);
+    expect(getFn).toHaveBeenCalledTimes(1);
   });
 
   it('save should be work', async () => {
     await breakpointManager.save();
-    expect(setFn).toBeCalledTimes(1);
+    expect(setFn).toHaveBeenCalledTimes(1);
   });
 
   it('setExceptionBreakpoints should be work', (done) => {
